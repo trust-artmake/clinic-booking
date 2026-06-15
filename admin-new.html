@@ -3808,6 +3808,97 @@ function bindAiCandidateActions(){
         .catch(function(err){ btn.disabled = false; window.alert('候補生成に失敗しました（' + ((err && err.message) || err) + '）。'); });
       return;
     }
+    // 🧪 送信前テストモード（お客様LINEへは絶対送信されない）。
+    if (act === 'testopen'){
+      window.AI_TEST_OVERRIDE_FAQS = [];
+      var tgt = document.getElementById('aiTestTarget');
+      if (tgt) tgt.textContent = '対象：いま反映中の設定（active な FAQ・店舗情報）でAI応答を見ます。';
+      var panel = document.getElementById('aiTestPanel');
+      if (panel) panel.style.display = 'block';
+      var resEl = document.getElementById('aiTestResult');
+      if (resEl) resEl.innerHTML = '';
+      var msgEl = document.getElementById('aiTestMessage');
+      if (msgEl) msgEl.focus();
+      return;
+    }
+    if (act === 'testclose'){
+      var p2 = document.getElementById('aiTestPanel');
+      if (p2) p2.style.display = 'none';
+      window.AI_TEST_OVERRIDE_FAQS = [];
+      return;
+    }
+    if (act === 'testreply'){
+      var rcid = btn.getAttribute('data-cid');
+      var rkind = btn.getAttribute('data-kind') || '';
+      var ovTa = document.getElementById('aicand-text-' + rcid);
+      var ovText = ovTa ? String(ovTa.value || '').trim() : '';
+      // kind=faq の編集中提案文だけが本番のFAQプロンプトに混ざる対象。それ以外は全体テストとして開く。
+      window.AI_TEST_OVERRIDE_FAQS = (rkind === 'faq' && ovText) ? [ovText] : [];
+      var t3 = document.getElementById('aiTestTarget');
+      if (t3) {
+        t3.textContent = (rkind === 'faq' && ovText)
+          ? '対象：いま編集中の提案文（FAQ #' + rcid + '）をプロンプトに加えてテストします。'
+          : '対象：いま反映中の設定でAI応答を見ます（この種別は本番のFAQには加わりません）。';
+      }
+      var p3 = document.getElementById('aiTestPanel');
+      if (p3) p3.style.display = 'block';
+      var r3 = document.getElementById('aiTestResult');
+      if (r3) r3.innerHTML = '';
+      var m3 = document.getElementById('aiTestMessage');
+      if (m3) m3.focus();
+      // パネルまでスクロール
+      if (p3 && p3.scrollIntoView) p3.scrollIntoView({behavior:'smooth', block:'nearest'});
+      return;
+    }
+    if (act === 'testrun'){
+      var msg = (document.getElementById('aiTestMessage') || {}).value || '';
+      msg = String(msg).trim();
+      if (!msg){ window.alert('ダミー質問を入れてください。'); return; }
+      var resBox = document.getElementById('aiTestResult');
+      if (resBox) resBox.innerHTML = '<div style="color:#666">AIに問い合わせ中…（数秒）</div>';
+      btn.disabled = true;
+      var payload = { tenant_id: TENANT_ID, message: msg };
+      if (Array.isArray(window.AI_TEST_OVERRIDE_FAQS) && window.AI_TEST_OVERRIDE_FAQS.length){
+        payload.override_faqs = window.AI_TEST_OVERRIDE_FAQS;
+      }
+      fetch(SB_URL + '/functions/v1/ai-test-reply', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, hdr()),
+        body: JSON.stringify(payload)
+      })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false, reason:'bad_json' }; }); })
+      .then(function(j){
+        btn.disabled = false;
+        if (!j || !j.ok || !j.data){
+          if (resBox) resBox.innerHTML = '<div style="color:#a00">テスト失敗：' + esc(String(j && (j.reason || j.hint) || '不明')) + '</div>';
+          return;
+        }
+        var d = j.data;
+        var head = d.ok
+          ? '<div style="color:#0a6;font-weight:bold">✅ 本番でもこのまま送信される見込み</div>'
+          : '<div style="color:#a00;font-weight:bold">⚠️ このままでは本番では送信されません</div>';
+        var noteHtml = '<div style="margin-top:4px;color:#444">' + esc(d.note || '') + '</div>';
+        var replyHtml = d.reply
+          ? '<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;white-space:pre-wrap">' + esc(d.reply) + '</div>'
+          : '<div style="margin-top:8px;color:#666">（AI応答テキストなし）</div>';
+        var meta = '<div style="margin-top:6px;font-size:0.85em;color:#666">intent=' + esc(d.intent || '-')
+          + ' / モデル=' + esc(d.model_used || '-')
+          + ' / プロンプト長=' + esc(String(d.prompt_length || 0))
+          + (d.human_reason ? ' / 有人対応理由=' + esc(d.human_reason) : '')
+          + '</div>';
+        var compHtml = '';
+        if (d.compliance && !d.compliance.ok){
+          var reasons = (d.compliance.reasons || []).map(function(s){ return '<li>' + esc(s) + '</li>'; }).join('');
+          compHtml = '<div style="margin-top:6px;padding:6px;background:#fee;border:1px solid #faa;border-radius:4px"><b>送信直前ガードでブロック</b><ul style="margin:4px 0 0 18px;padding:0">' + reasons + '</ul></div>';
+        }
+        if (resBox) resBox.innerHTML = head + noteHtml + replyHtml + meta + compHtml;
+      })
+      .catch(function(err){
+        btn.disabled = false;
+        if (resBox) resBox.innerHTML = '<div style="color:#a00">テスト失敗：' + esc((err && err.message) || String(err)) + '</div>';
+      });
+      return;
+    }
     var cid = btn.getAttribute('data-cid');
     if (!cid) return;
     if (act === 'savetext'){
@@ -3924,7 +4015,22 @@ function aiCandidateTestText(t){
 
 function renderAiImprovementCandidates(items){
   var genBtn = '<button class="ai-cand-btn" data-act="generate">候補を生成</button>';
-  var hdr = '<div class="ai-faq-h">▼ AI改善候補 ' + genBtn + '</div>';
+  // 🧪 送信前テストモード入口：本番LINEへは絶対送信されない（ai-test-reply関数は送信モジュール非搭載）。
+  var testBtn = '<button class="ai-cand-btn" data-act="testopen">🧪 設定全体を試す</button>';
+  var hdr = '<div class="ai-faq-h">▼ AI改善候補 ' + genBtn + ' ' + testBtn + '</div>';
+  // 🧪 送信前テストパネル（折りたたみ表示）。提案文を編集中の状態でAI応答をプレビューできる。
+  var testPanel = ''
+    + '<div class="ai-test-panel" id="aiTestPanel" style="display:none;border:1px solid #d8c8a0;background:#fff8e7;border-radius:8px;padding:10px;margin:8px 0">'
+    +   '<div class="ai-test-h" style="font-weight:bold;margin-bottom:6px">🧪 送信前テストモード（お客様LINEには絶対送信されません）</div>'
+    +   '<div id="aiTestTarget" class="ai-test-target" style="font-size:0.9em;color:#666;margin-bottom:6px"></div>'
+    +   '<textarea id="aiTestMessage" rows="2" placeholder="お客様の質問例：眉のアートメイクは痛いですか？" style="width:100%;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px"></textarea>'
+    +   '<div class="ai-test-actions" style="margin-top:6px">'
+    +     '<button class="ai-cand-btn" data-act="testrun">▶ AI応答を見る</button>'
+    +     '<button class="ai-cand-btn ai-cand-btn-no" data-act="testclose">閉じる</button>'
+    +   '</div>'
+    +   '<div id="aiTestResult" class="ai-test-result" style="margin-top:8px"></div>'
+    + '</div>';
+  hdr += testPanel;
   var note = '<div class="ai-faq-note">承認・却下・反映はこの画面（店長権限）で行えます。反映後もテストと送信直前ガードで守ります。</div>';
   if (items && items._error){
     return hdr
@@ -3977,6 +4083,10 @@ function renderAiImprovementCandidates(items){
       html += '<button class="ai-cand-btn ai-cand-btn-no" data-act="reject" data-cid="' + esc(c.id) + '">却下</button>';
     } else if (st === 'active'){
       html += '<button class="ai-cand-btn ai-cand-btn-no" data-act="rollback" data-cid="' + esc(c.id) + '">戻す</button>';
+    }
+    // 🧪 各候補に試すボタン（却下・戻し済み以外）。kind=faq のときは override_faqs として注入してテストできる。
+    if (st !== 'rejected' && st !== 'rolled_back'){
+      html += '<button class="ai-cand-btn" data-act="testreply" data-cid="' + esc(c.id) + '" data-kind="' + esc(c.kind || '') + '">🧪 この提案を試す</button>';
     }
     html += '</div>';
     if (tests.length){
