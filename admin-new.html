@@ -1159,6 +1159,7 @@ var NAV_GROUPS = [
   { key:'settings', label:'⚙️ お店の設定', mgr:false, tabs:[
       { label:'🏪 お店の基本',           fn:'showStoreBasic' },
       { label:'💁 メニューとアーティスト', fn:'showMenuArtist' },
+      { label:'🤖 AI向け情報',           fn:'showAiContext', mgr:true },
       { label:'🔗 LINE接続',            fn:'showLineConnect', platformAdmin:true },
       { label:'👥 スタッフ',             fn:'showUsers', mgr:true },
       { label:'ℹ️ システム情報',         fn:'showSystemInfo' },
@@ -4446,6 +4447,7 @@ function openSettings(section, el){
 /* 「お店の設定」グループの各カード＝薄いラッパ（中身は既存ローダを流用・ロジック不変）。 */
 function showStoreBasic(el){ openSettings('store', el); }      // 🏪 お店の基本（受付時間ほか）
 function showMenuArtist(el){ openSettings('menuart', el); }    // 💁 メニューとアーティスト
+function showAiContext(el){ openSettings('aictx', el); }       // 🤖 AI向け情報（店舗情報＋リッチメニュー定義）
 function showSystemInfo(el){ openSettings('info', el); }       // ℹ️ システム情報（読取専用）
 /* 🔗 LINE接続（鍵の登録・全体管理者のみ）。当面は既存の初期設定画面のLINEパネルへ案内（破壊ゼロ）。 */
 function showLineConnect(el){
@@ -4476,6 +4478,7 @@ function setSettingsSection(s){
   else if (s==='menu')   setLoadMenus();     // 後方互換（旧キー）
   else if (s==='artist') setLoadArtists();   // 後方互換
   else if (s==='shift')  setLoadShiftIndex();// 後方互換
+  else if (s==='aictx')  setLoadAiContext(); // 🤖 AI向け情報（店舗情報＋リッチメニュー）
   else                   setLoadInfo();      // info・既定
 }
 /* 「メニューとアーティスト」内の第2段切替（💉メニュー/👩‍⚕️アーティスト/🗓シフト）。 */
@@ -5285,6 +5288,256 @@ function setSaveStore(id){
 }
 
 /* ============================================================================
+   4.5) 🤖 AI向け情報（店舗情報＋リッチメニュー）
+   - app_settings の3キー(store_address/store_access/store_facility_note)を編集
+   - rich_menu_buttons テーブルを CRUD（position 昇順）
+   背景：
+     LINEのリッチメニュー画像は LINE Developers で管理するが、AI(chat-webhook の
+     buildGeminiPrompt) は「ボタンに何が並んでいるか」「住所はどこか」を知らない。
+     ここで AI 向けラベル＋飛び先＋補足説明を入力すると、AIプロンプトに自動で
+     差し込まれ、「予約ボタン押した」「場所どこ？」のような会話が崩れない。
+   ※店舗フィルタは付けず RLS に委ねる（manager のみ書込可・platform_admin は越境可）。
+   ============================================================================ */
+var SET_AI_CTX_STORE = null; // 編集対象の store_id（最初の店）
+
+function setLoadAiContext(){
+  var body = document.getElementById('setBody');
+  body.innerHTML = '<div class="set-ph">読み込み中…</div>';
+  ensureStoreMap().then(function(){
+    return sbGet('stores?select=id,name&order=name');
+  }).then(function(stores){
+    stores = stores || [];
+    if (!stores.length){
+      body.innerHTML = '<div class="set-ph">店舗が登録されていません。先に「お店の基本」で店舗を作成してください。</div>';
+      return;
+    }
+    // 初期選択：これまで選んでいた store_id を維持。無ければ先頭店。
+    if (!SET_AI_CTX_STORE || !stores.some(function(s){ return s.id === SET_AI_CTX_STORE; })){
+      SET_AI_CTX_STORE = stores[0].id;
+    }
+    var sid = SET_AI_CTX_STORE;
+    // 店舗セレクタ（2店以上のときだけ表示）
+    var picker = '';
+    if (stores.length > 1){
+      picker = '<div class="set-card"><div class="set-name">店舗を選ぶ</div>'
+        + '<select id="set-aictx-storesel" style="font-size:15px;padding:6px 8px;min-width:60%">'
+        + stores.map(function(s){
+            return '<option value="'+esc(s.id)+'"'+(s.id===sid?' selected':'')+'>'+esc(s.name||'—')+'</option>';
+          }).join('')
+        + '</select></div>';
+    }
+    // 店舗情報3フィールド＋リッチメニュー編集枠
+    var h = picker
+      + '<div class="set-card">'
+      +   '<div class="set-name">📍 店舗情報（AIがお客様に伝える内容）</div>'
+      +   '<div class="set-hint" style="margin:2px 0 8px">「場所どこ？」「アクセスは？」「ここ間借り？」のような質問に AI が正しく答えるために使います。</div>'
+      +   '<label>住所</label><input type="text" id="set-aictx-addr" placeholder="例）〒802-0002 福岡県北九州市小倉北区京町1-2-24 201号室">'
+      +   '<label>アクセス（最寄駅・徒歩時間）</label><input type="text" id="set-aictx-access" placeholder="例）JR小倉駅から徒歩約8分">'
+      +   '<label>施設の補足（間借り・別院名表示などの注意）</label><textarea id="set-aictx-facility" rows="2" style="width:100%" placeholder="例）銀座美容クリニック小倉院に間借り。地図表示は別院名になります"></textarea>'
+      +   '<div class="set-acts" style="margin-top:8px">'
+      +     '<button type="button" class="set-btn set-primary" data-act="aictx_save_info">💾 店舗情報を保存</button>'
+      +   '</div>'
+      +   '<div class="set-msg" id="set-aictxInfoMsg"></div>'
+      + '</div>'
+      + '<div class="set-card">'
+      +   '<div class="set-name">📱 リッチメニュー（AIに教えるボタンの並び）</div>'
+      +   '<div class="set-hint" style="margin:2px 0 8px">LINE公式アカウントの下部メニューにあるボタンを、AIにわかる言葉で並べます。画像の差し替えは LINE Developers 側で行います。</div>'
+      +   '<div id="set-aictxRmList">読み込み中…</div>'
+      +   '<div class="set-acts" style="margin-top:8px">'
+      +     '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_add">＋ ボタンを追加</button>'
+      +     '<button type="button" class="set-btn set-primary" data-act="aictx_rm_save">💾 すべて保存</button>'
+      +   '</div>'
+      +   '<div class="set-msg" id="set-aictxRmMsg"></div>'
+      + '</div>';
+    body.innerHTML = h;
+    // 店舗セレクタの切替
+    var sel = document.getElementById('set-aictx-storesel');
+    if (sel){
+      sel.addEventListener('change', function(){
+        SET_AI_CTX_STORE = sel.value;
+        setLoadAiContext();
+      });
+    }
+    // 店舗情報3キーを読み込み
+    setLoadAiContextInfo(sid);
+    // リッチメニュー行を読み込み
+    setLoadAiContextRichMenu(sid);
+  }).catch(function(err){
+    if (setHandleAuth(err)) return;
+    body.innerHTML = '<div class="set-ph set-err">取得に失敗しました<br>'+esc(setReason(err))+'</div>';
+  });
+}
+
+/* 店舗情報3キーを app_settings から読む（is_set 関係なく、value だけ拾う） */
+function setLoadAiContextInfo(){
+  return sbGet('app_settings?select=key,value&key=in.(store_address,store_access,store_facility_note)')
+    .then(function(rows){
+      rows = rows || [];
+      var map = {};
+      rows.forEach(function(r){ map[r.key] = String(r.value||''); });
+      var a = document.getElementById('set-aictx-addr');     if (a) a.value = map.store_address || '';
+      var b = document.getElementById('set-aictx-access');   if (b) b.value = map.store_access || '';
+      var c = document.getElementById('set-aictx-facility'); if (c) c.value = map.store_facility_note || '';
+    })
+    .catch(function(){ /* 初回は空で良い */ });
+}
+
+/* 店舗情報3キーを app_settings に upsert（tenant_id,key で衝突マージ） */
+function setSaveAiContextInfo(){
+  if (!TENANT_ID){ setMsg('set-aictxInfoMsg','テナントが選ばれていません。', false); return; }
+  var a = String(((document.getElementById('set-aictx-addr')||{}).value || '')).trim();
+  var b = String(((document.getElementById('set-aictx-access')||{}).value || '')).trim();
+  var c = String(((document.getElementById('set-aictx-facility')||{}).value || '')).trim();
+  if (a.length > 240 || b.length > 240 || c.length > 240){
+    setMsg('set-aictxInfoMsg','各欄は240文字以内にしてください。', false); return;
+  }
+  var rows = [
+    { tenant_id: TENANT_ID, key:'store_address',       value:a, is_set: !!a },
+    { tenant_id: TENANT_ID, key:'store_access',        value:b, is_set: !!b },
+    { tenant_id: TENANT_ID, key:'store_facility_note', value:c, is_set: !!c },
+  ];
+  // app_settings は主キー (tenant_id, key) → on_conflict 指定で merge upsert
+  fetch(SB_URL+"/rest/v1/app_settings?on_conflict=tenant_id,key", {
+    method:"POST",
+    headers: Object.assign({"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=representation"}, hdr()),
+    body: JSON.stringify(rows)
+  })
+    .then(function(res){ if(!res.ok) return res.text().then(function(t){ throw new Error(t||("HTTP "+res.status)); }); })
+    .then(function(){ setMsg('set-aictxInfoMsg','✅ 店舗情報を保存しました。AIの返答に反映されます。', true); })
+    .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-aictxInfoMsg', setReason(err), false); });
+}
+
+/* rich_menu_buttons をテーブルで表示（編集はその場・保存ボタンで一括） */
+var SET_AICTX_RM_ROWS = []; // 編集中の行（id付きは既存・id無しは新規）
+function setLoadAiContextRichMenu(storeId){
+  var box = document.getElementById('set-aictxRmList');
+  if (!box) return;
+  sbGet('rich_menu_buttons?select=id,position,label,action_type,action_value,description&store_id=eq.'+encodeURIComponent(storeId)+'&order=position.asc')
+    .then(function(rows){
+      SET_AICTX_RM_ROWS = (rows||[]).map(function(r){ return {
+        id: r.id, position: r.position||0, label: r.label||'',
+        action_type: r.action_type||'none', action_value: r.action_value||'',
+        description: r.description||'', _deleted:false,
+      }; });
+      setRenderAiContextRichMenu();
+    })
+    .catch(function(err){
+      if (setHandleAuth(err)) return;
+      box.innerHTML = '<div class="set-ph set-err">読み込みに失敗しました<br>'+esc(setReason(err))+'</div>';
+    });
+}
+
+function setRenderAiContextRichMenu(){
+  var box = document.getElementById('set-aictxRmList');
+  if (!box) return;
+  var rows = SET_AICTX_RM_ROWS.filter(function(r){ return !r._deleted; });
+  if (!rows.length){
+    box.innerHTML = '<div class="set-ph">まだ登録されていません。下の「＋ボタンを追加」から1行ずつ作ってください。</div>';
+    return;
+  }
+  var h = '';
+  // index は SET_AICTX_RM_ROWS 内の位置（_deleted 含む）
+  for (var i=0;i<SET_AICTX_RM_ROWS.length;i++){
+    var r = SET_AICTX_RM_ROWS[i];
+    if (r._deleted) continue;
+    h += '<div class="set-card" data-rmidx="'+i+'" style="margin-bottom:8px">'
+      + '<label>並び順</label><input type="number" inputmode="numeric" data-rmf="position" value="'+esc(r.position)+'" style="width:80px">'
+      + '<label>ラベル（AIに教えるボタン名）</label><input type="text" data-rmf="label" value="'+esc(r.label)+'" placeholder="例）予約・症例写真・口コミ">'
+      + '<label>動作</label>'
+      + '<select data-rmf="action_type">'
+      +   '<option value="uri"'+(r.action_type==='uri'?' selected':'')+'>URLを開く</option>'
+      +   '<option value="message"'+(r.action_type==='message'?' selected':'')+'>メッセージを送信</option>'
+      +   '<option value="postback"'+(r.action_type==='postback'?' selected':'')+'>postback</option>'
+      +   '<option value="none"'+(r.action_type==='none'?' selected':'')+'>なし</option>'
+      + '</select>'
+      + '<label>飛び先（URL／送信テキスト／postback data）</label><input type="text" data-rmf="action_value" value="'+esc(r.action_value)+'" placeholder="例）https://liff.line.me/… ／ 口コミ">'
+      + '<label>AIへの補足説明（任意）</label><textarea data-rmf="description" rows="2" style="width:100%" placeholder="例）押すと予約ページが開く ／ 地図は別院名で表示される">'+esc(r.description)+'</textarea>'
+      + '<div class="set-acts" style="margin-top:6px"><button type="button" class="set-btn set-ghost" data-act="aictx_rm_del" data-rmidx="'+i+'">この行を削除</button></div>'
+      + '</div>';
+  }
+  box.innerHTML = h;
+}
+
+/* 行の編集値を SET_AICTX_RM_ROWS に取り込む（保存・追加・削除前に呼ぶ） */
+function setCollectAiContextRichMenu(){
+  var cards = document.querySelectorAll('#set-aictxRmList .set-card[data-rmidx]');
+  for (var i=0;i<cards.length;i++){
+    var idx = parseInt(cards[i].getAttribute('data-rmidx'),10);
+    if (isNaN(idx) || !SET_AICTX_RM_ROWS[idx]) continue;
+    var r = SET_AICTX_RM_ROWS[idx];
+    var ins = cards[i].querySelectorAll('[data-rmf]');
+    for (var j=0;j<ins.length;j++){
+      var f = ins[j].getAttribute('data-rmf');
+      var v = ins[j].value;
+      if (f === 'position') v = parseInt(v,10); if (f === 'position' && isNaN(v)) v = 0;
+      r[f] = v;
+    }
+  }
+}
+
+function setAddAiContextRichMenu(){
+  setCollectAiContextRichMenu();
+  var maxPos = 0;
+  SET_AICTX_RM_ROWS.forEach(function(r){ if(!r._deleted && r.position>maxPos) maxPos = r.position; });
+  SET_AICTX_RM_ROWS.push({ id:null, position: maxPos+1, label:'', action_type:'uri', action_value:'', description:'', _deleted:false });
+  setRenderAiContextRichMenu();
+}
+
+function setDeleteAiContextRichMenu(idx){
+  if (!SET_AICTX_RM_ROWS[idx]) return;
+  // id 無し（新規行）はその場で消す。id 有りは _deleted フラグだけ立て、保存時に DELETE。
+  if (SET_AICTX_RM_ROWS[idx].id) SET_AICTX_RM_ROWS[idx]._deleted = true;
+  else SET_AICTX_RM_ROWS.splice(idx,1);
+  setRenderAiContextRichMenu();
+}
+
+function setSaveAiContextRichMenu(){
+  if (!TENANT_ID || !SET_AI_CTX_STORE){ setMsg('set-aictxRmMsg','店舗が選ばれていません。', false); return; }
+  setCollectAiContextRichMenu();
+  // バリデーション：label 必須／action_type が uri のとき action_value は http(s) のみ／8件以内
+  var live = SET_AICTX_RM_ROWS.filter(function(r){ return !r._deleted; });
+  if (live.length > 8){ setMsg('set-aictxRmMsg','ボタンは8件までにしてください。', false); return; }
+  for (var i=0;i<live.length;i++){
+    var r = live[i];
+    if (!String(r.label||'').trim()){ setMsg('set-aictxRmMsg','ラベル未入力の行があります。', false); return; }
+    if (String(r.label).length > 60){ setMsg('set-aictxRmMsg','ラベルは60文字以内にしてください。', false); return; }
+    if (r.action_type === 'uri' && r.action_value && !/^https?:\/\//i.test(r.action_value)){
+      setMsg('set-aictxRmMsg','URLは http(s) で始めてください（行：'+esc(r.label)+'）。', false); return;
+    }
+  }
+  // 操作を3群に分ける
+  var inserts = [], updates = [], deletes = [];
+  var sid = SET_AI_CTX_STORE;
+  SET_AICTX_RM_ROWS.forEach(function(r){
+    if (r._deleted){
+      if (r.id) deletes.push(r.id);
+      return;
+    }
+    var payload = {
+      tenant_id: TENANT_ID, store_id: sid,
+      position: Number.isFinite(r.position)?r.position:0,
+      label: String(r.label||'').trim(),
+      action_type: String(r.action_type||'none'),
+      action_value: String(r.action_value||'').trim() || null,
+      description: String(r.description||'').trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (r.id){ updates.push({ id:r.id, patch: payload }); }
+    else { inserts.push(payload); }
+  });
+  var ops = [];
+  if (inserts.length) ops.push(sbInsert('rich_menu_buttons', inserts));
+  updates.forEach(function(u){ ops.push(sbUpdate('rich_menu_buttons','id=eq.'+encodeURIComponent(u.id), u.patch)); });
+  if (deletes.length) ops.push(sbDelete('rich_menu_buttons','id=in.('+deletes.map(encodeURIComponent).join(',')+')'));
+  Promise.all(ops)
+    .then(function(){
+      setMsg('set-aictxRmMsg','✅ リッチメニューを保存しました。AIの返答に反映されます。', true);
+      setLoadAiContextRichMenu(sid);
+    })
+    .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-aictxRmMsg', setReason(err), false); });
+}
+
+/* ============================================================================
    5) シフト
    一覧でアーティストを選び→sbGet artist_shifts→曜日表＋例外日を編集→
    sbRpc('save_artist_shifts',{p_artist, p_payload:[行...]}) で置き換え保存。
@@ -5765,6 +6018,11 @@ function setMsg(id, text, ok){
     if (act === 'shmodsave'){ setShiftSaveDate(); return; }
     if (act === 'shmodrestore'){ setShiftRestoreDate(); return; }
     if (act === 'shmonth'){ setShiftMonthShift(Number(b.getAttribute('data-delta'))); return; }
+    // 🤖 AI向け情報（店舗情報＋リッチメニュー）
+    if (act === 'aictx_save_info'){ setSaveAiContextInfo(); return; }
+    if (act === 'aictx_rm_add'){ setAddAiContextRichMenu(); return; }
+    if (act === 'aictx_rm_del'){ setDeleteAiContextRichMenu(parseInt(b.getAttribute('data-rmidx'),10)); return; }
+    if (act === 'aictx_rm_save'){ setSaveAiContextRichMenu(); return; }
   });
   // data-shft 入力 → draft 反映（time/checkbox は change で十分）
   root.addEventListener('change', function(e){
