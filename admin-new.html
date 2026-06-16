@@ -359,8 +359,11 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .set-now b{color:#0b5c55;font-size:17px}
 .set-edit{display:none;margin-top:8px;border-top:1px dashed #e0e8e6;padding-top:8px}
 .set-edit.set-open{display:block}
-.set-edit label,.set-add label{display:block;font-size:12px;color:#666;margin:8px 0 3px}
+.set-edit label,.set-add label,.set-aictx label{display:block;font-size:12px;color:#666;margin:8px 0 3px}
 .set-edit input,.set-add input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #cdd6d4;border-radius:9px;font-size:14px;background:#fff}
+/* 🤖 AI向け情報パネル：label を縦並びに、input/select/textarea を統一スタイルに */
+.set-aictx input,.set-aictx select,.set-aictx textarea{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #cdd6d4;border-radius:9px;font-size:14px;background:#fff;font-family:inherit}
+.set-aictx textarea{min-height:50px;resize:vertical}
 .set-chk{display:flex;align-items:center;gap:8px;font-size:13px;color:#1f2937;margin-top:10px}
 .set-chk input{width:auto}
 .set-acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
@@ -5328,18 +5331,18 @@ function setLoadAiContext(){
     }
     // 店舗情報3フィールド＋リッチメニュー編集枠
     var h = picker
-      + '<div class="set-card">'
+      + '<div class="set-card set-aictx">'
       +   '<div class="set-name">📍 店舗情報（AIがお客様に伝える内容）</div>'
       +   '<div class="set-hint" style="margin:2px 0 8px">「場所どこ？」「アクセスは？」「ここ間借り？」のような質問に AI が正しく答えるために使います。</div>'
       +   '<label>住所</label><input type="text" id="set-aictx-addr" placeholder="例）〒802-0002 福岡県北九州市小倉北区京町1-2-24 201号室">'
       +   '<label>アクセス（最寄駅・徒歩時間）</label><input type="text" id="set-aictx-access" placeholder="例）JR小倉駅から徒歩約8分">'
-      +   '<label>施設の補足（間借り・別院名表示などの注意）</label><textarea id="set-aictx-facility" rows="2" style="width:100%" placeholder="例）銀座美容クリニック小倉院に間借り。地図表示は別院名になります"></textarea>'
-      +   '<div class="set-acts" style="margin-top:8px">'
+      +   '<label>施設の補足（間借り・別院名表示などの注意）</label><textarea id="set-aictx-facility" rows="2" placeholder="例）銀座美容クリニック小倉院に間借り。地図表示は別院名になります"></textarea>'
+      +   '<div class="set-acts" style="margin-top:12px">'
       +     '<button type="button" class="set-btn set-primary" data-act="aictx_save_info">💾 店舗情報を保存</button>'
       +   '</div>'
       +   '<div class="set-msg" id="set-aictxInfoMsg"></div>'
       + '</div>'
-      + '<div class="set-card">'
+      + '<div class="set-card set-aictx">'
       +   '<div class="set-name">📱 リッチメニュー（AIに教えるボタンの並び）</div>'
       +   '<div class="set-hint" style="margin:2px 0 8px">LINE公式アカウントの下部メニューにあるボタンを、AIにわかる言葉で並べます。画像の差し替えは LINE Developers 側で行います。</div>'
       +   '<div id="set-aictxRmList">読み込み中…</div>'
@@ -5440,8 +5443,8 @@ function setRenderAiContextRichMenu(){
   for (var i=0;i<SET_AICTX_RM_ROWS.length;i++){
     var r = SET_AICTX_RM_ROWS[i];
     if (r._deleted) continue;
-    h += '<div class="set-card" data-rmidx="'+i+'" style="margin-bottom:8px">'
-      + '<label>並び順</label><input type="number" inputmode="numeric" data-rmf="position" value="'+esc(r.position)+'" style="width:80px">'
+    h += '<div class="set-card set-aictx" data-rmidx="'+i+'" style="margin-bottom:10px">'
+      + '<label>並び順（小さいほど上）</label><input type="number" inputmode="numeric" data-rmf="position" value="'+esc(r.position)+'" style="max-width:120px">'
       + '<label>ラベル（AIに教えるボタン名）</label><input type="text" data-rmf="label" value="'+esc(r.label)+'" placeholder="例）予約・症例写真・口コミ">'
       + '<label>動作</label>'
       + '<select data-rmf="action_type">'
@@ -5451,8 +5454,8 @@ function setRenderAiContextRichMenu(){
       +   '<option value="none"'+(r.action_type==='none'?' selected':'')+'>なし</option>'
       + '</select>'
       + '<label>飛び先（URL／送信テキスト／postback data）</label><input type="text" data-rmf="action_value" value="'+esc(r.action_value)+'" placeholder="例）https://liff.line.me/… ／ 口コミ">'
-      + '<label>AIへの補足説明（任意）</label><textarea data-rmf="description" rows="2" style="width:100%" placeholder="例）押すと予約ページが開く ／ 地図は別院名で表示される">'+esc(r.description)+'</textarea>'
-      + '<div class="set-acts" style="margin-top:6px"><button type="button" class="set-btn set-ghost" data-act="aictx_rm_del" data-rmidx="'+i+'">この行を削除</button></div>'
+      + '<label>AIへの補足説明（任意）</label><textarea data-rmf="description" rows="2" placeholder="例）押すと予約ページが開く ／ 地図は別院名で表示される">'+esc(r.description)+'</textarea>'
+      + '<div class="set-acts" style="margin-top:8px"><button type="button" class="set-btn set-ghost" data-act="aictx_rm_del" data-rmidx="'+i+'">この行を削除</button></div>'
       + '</div>';
   }
   box.innerHTML = h;
