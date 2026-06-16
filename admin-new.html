@@ -3874,13 +3874,29 @@ function bindAiCandidateActions(){
           return;
         }
         var d = j.data;
-        var head = d.ok
-          ? '<div style="color:#0a6;font-weight:bold">✅ 本番でもこのまま送信される見込み</div>'
-          : '<div style="color:#a00;font-weight:bold">⚠️ このままでは本番では送信されません</div>';
-        var noteHtml = '<div style="margin-top:4px;color:#444">' + esc(d.note || '') + '</div>';
-        var replyHtml = d.reply
-          ? '<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;white-space:pre-wrap">' + esc(d.reply) + '</div>'
-          : '<div style="margin-top:8px;color:#666">（AI応答テキストなし）</div>';
+        // intent別に表示を分岐：本番のchat-webhookはcancel_change/needs_humanの時に
+        // Geminiのreplyを使わず別ルート（キャンセル案内/有人対応）で送るため、テスト画面でも
+        // 「本番でAIテキストが送られるかどうか」を正しく案内する。
+        var intent = String(d.intent || '');
+        var head, noteText, replyHtml;
+        if (intent === 'cancel_change'){
+          head = '<div style="color:#0a6;font-weight:bold">✅ 本番ではキャンセル/変更案内が自動送信されます</div>';
+          noteText = 'AIは返信文を作らず、システム側がキャンセル/変更ガイドを送る判定になっています。';
+          replyHtml = '<div style="margin-top:8px;padding:8px;background:#f4f8f4;border:1px dashed #9c9;border-radius:4px;color:#555">（このケースではGeminiの応答テキストは使われません）</div>';
+        } else if (intent === 'needs_human'){
+          head = '<div style="color:#a60;font-weight:bold">⏸ 本番では有人対応に回ります</div>';
+          noteText = '医療リスクや断定回避の判定で、AIは返さずスタッフLINEへ通知される設計です。' + (d.human_reason ? '（理由: ' + d.human_reason + '）' : '');
+          replyHtml = '<div style="margin-top:8px;padding:8px;background:#fff7e8;border:1px dashed #d99;border-radius:4px;color:#555">（このケースでは Geminiの応答テキストはお客様へ送られず、スタッフへ通知）</div>';
+        } else {
+          head = d.ok
+            ? '<div style="color:#0a6;font-weight:bold">✅ 本番でもこのまま送信される見込み</div>'
+            : '<div style="color:#a00;font-weight:bold">⚠️ このままでは本番では送信されません</div>';
+          noteText = d.note || '';
+          replyHtml = d.reply
+            ? '<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;white-space:pre-wrap">' + esc(d.reply) + '</div>'
+            : '<div style="margin-top:8px;color:#666">（AI応答テキストなし）</div>';
+        }
+        var noteHtml = '<div style="margin-top:4px;color:#444">' + esc(noteText) + '</div>';
         var meta = '<div style="margin-top:6px;font-size:0.85em;color:#666">intent=' + esc(d.intent || '-')
           + ' / モデル=' + esc(d.model_used || '-')
           + ' / プロンプト長=' + esc(String(d.prompt_length || 0))
