@@ -971,10 +971,11 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <span class="help-label">📖 操作方法</span>
     <a href="https://trust-artmake.github.io/clinic-booking/admin-operation-pack.html" target="_blank" rel="noopener">ステップ配信の作り方</a>
   </div>
-  <div class="help-hint">💡 配信は<b>朝〜夜の時間帯のみ</b>。<b>予約が入ると自動で停止</b>します（追わない＝ブロック対策）。</div>
+  <div class="help-hint">💡 配信は<b>朝〜夜の時間帯のみ</b>（友だち追加直後の即時挨拶＝遅延0は時間帯問わず届きます）。<b>予約が入ると自動で停止</b>します（追わない＝ブロック対策）。</div>
   <div class="stp-note">
     友だち追加をきっかけに、決めた順番でメッセージを自動配信します。各メッセージに<b>画像も添付</b>でき、
-    <b>予約が入ったら自動で停止</b>します（追わない＝ブロック対策）。配信は朝〜夜の時間帯のみ。
+    <b>予約が入ったら自動で停止</b>します（追わない＝ブロック対策）。<br>
+    配信は朝〜夜の時間帯のみ。<b>ただし「即時（遅延0）」の挨拶だけは時間帯を問わず友だち追加した瞬間に届きます。</b>
   </div>
   <div class="stp-toolbar">
     <button type="button" class="stp-btn primary" onclick="stpNewScenario()">＋ 新しいシナリオ</button>
@@ -6738,7 +6739,7 @@ function stpFieldSelect(label, opts, val, on){
 }
 function stpFieldHours(d){
   var f=document.createElement('div'); f.className='stp-field';
-  var l=document.createElement('label'); l.textContent='配信してよい時間帯（夜間早朝は送らない）'; f.appendChild(l);
+  var l=document.createElement('label'); l.textContent='配信してよい時間帯（夜間早朝は送らない・ただし即時（遅延0）は時間帯問わず即送）'; f.appendChild(l);
   var row=document.createElement('div'); row.className='stp-row';
   function hourSel(cur, on){
     var s=document.createElement('select'); s.style.flex='1';
