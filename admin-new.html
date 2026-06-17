@@ -6717,6 +6717,18 @@ function stpStartEdit(sid){
   };
 }
 function stpNewScenario(){
+  // ★保存先テナントの最終確認ダイアログ（2026-06-18 真因対策）。
+  //   背景：ステップ配信は「画面の店名」と「保存される TENANT_ID」が別ロジックで管理されており、
+  //   ごく稀に表示の店と保存先テナントがズレるケースがあった（小倉店表示で久留米店に保存される事故）。
+  //   防御：作成前に「今 TENANT_ID が指す店名」を仁義さんに見せて、押す前に気づけるようにする。
+  //   既存シナリオの編集・削除は対象のシナリオ自身の tenant_id をサーバーが見るのでズレ得ない＝ガード不要。
+  var tname = (function(){
+    if (typeof MY_TENANTS !== 'undefined' && Array.isArray(MY_TENANTS)){
+      for(var i=0;i<MY_TENANTS.length;i++){ if(MY_TENANTS[i].tenant_id===TENANT_ID) return MY_TENANTS[i].tenant_name; }
+    }
+    return '不明な店';
+  })();
+  if (!confirm('「' + tname + '」に新しい友達追加シナリオを作成します。\n\nこの店で作成して合っていますか？\n（違う店ならキャンセルして、画面を一度閉じて開き直してから操作してください）')) return;
   return stpCall('scenario_save', { scenario:{ name:'新しいシナリオ', trigger_type:'friend_add', is_active:false, send_hour_from:9, send_hour_to:21 } })
     .then(function(d){
       if(!d.ok || !d.scenario){ stpTopMsg(stpReason(d.reason), false); return; }
