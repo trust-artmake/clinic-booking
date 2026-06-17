@@ -1952,30 +1952,17 @@ function lsecSave(){
       group_id: groupId
     })
   })
-    .then(function(res){
-      // ─── 一時 debug（2026-06-17 復旧調査）───
-      // 失敗時の reason を画面に出す。原因特定後にこのブロックは元に戻す。
-      return res.json().catch(function(){ return { __status: res.status }; }).then(function(j){
-        if (j && typeof j === "object") { j.__http_status = res.status; }
-        return j;
-      });
-    })
+    .then(function(res){ return res.json().catch(function(){ return {}; }); })
     .then(function(j){
       if (j && j.ok === true) {
         lsecClearInputs();          // 鍵を画面・ブラウザに残さない
         lsecMsg("保存しました。", true);
         lsecLoadInner();            // last4 を更新
       } else {
-        // ─── 一時 debug：reason と http status を画面表示 ───
-        var why = (j && j.reason) ? j.reason : "unknown";
-        var st  = (j && j.__http_status) ? j.__http_status : "?";
-        lsecMsg("保存できませんでした。(reason=" + why + " / status=" + st + ")");
+        lsecMsg("保存できませんでした。"); // 理由コードは出さない
       }
     })
-    .catch(function(e){
-      // ─── 一時 debug：通信エラーも詳細表示 ───
-      lsecMsg("保存できませんでした。(network=" + String(e).slice(0,80) + ")");
-    })
+    .catch(function(){ lsecMsg("保存できませんでした。"); })
     .then(function(){ if (btn) btn.disabled = false; });
 }
 
