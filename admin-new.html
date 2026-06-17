@@ -364,6 +364,38 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 /* 🤖 AI向け情報パネル：label を縦並びに、input/select/textarea を統一スタイルに */
 .set-aictx input,.set-aictx select,.set-aictx textarea{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #cdd6d4;border-radius:9px;font-size:14px;background:#fff;font-family:inherit}
 .set-aictx textarea{min-height:50px;resize:vertical}
+.rm-editor{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:12px;margin-top:10px}
+.rm-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.rm-tools .set-btn{flex:0 0 auto;min-width:96px;padding:8px 10px}
+.rm-tools select{width:auto;min-width:120px}
+.rm-check{display:flex;align-items:center;gap:6px;font-size:12px;color:#566}
+.rm-check input{width:auto}
+.rm-work{min-width:0}
+.rm-canvas{position:relative;width:100%;border:1px solid #d8e2df;border-radius:10px;overflow:hidden;background:#f7faf9;touch-action:none;user-select:none}
+.rm-canvas.rm-dragover{border-color:#0b5c55;box-shadow:0 0 0 3px rgba(11,92,85,.14)}
+.rm-canvas:before{content:"";display:block;padding-top:67.44%}
+.rm-canvas.rm-small:before{padding-top:33.72%}
+.rm-canvas img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.rm-canvas.rm-empty{background:linear-gradient(90deg,rgba(11,92,85,.08) 1px,transparent 1px),linear-gradient(rgba(11,92,85,.08) 1px,transparent 1px),#f7faf9;background-size:25px 25px}
+.rm-empty-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#889;font-size:13px;line-height:1.6;pointer-events:none}
+.rm-area{position:absolute;border:2px solid #0b5c55;background:rgba(11,92,85,.16);border-radius:4px;cursor:move;outline:none}
+.rm-area.rm-on{border-color:#c2410c;background:rgba(194,65,12,.18);box-shadow:0 0 0 2px rgba(194,65,12,.12)}
+.rm-area.rm-overlap{border-style:dashed}
+.rm-area-label{position:absolute;left:4px;top:4px;right:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:rgba(255,255,255,.9);border-radius:4px;padding:2px 5px;font-size:11px;font-weight:800;color:#1f2937}
+.rm-handle{position:absolute;width:10px;height:10px;border:2px solid #fff;background:#0b5c55;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.rm-handle.nw{left:-6px;top:-6px;cursor:nwse-resize}.rm-handle.ne{right:-6px;top:-6px;cursor:nesw-resize}
+.rm-handle.sw{left:-6px;bottom:-6px;cursor:nesw-resize}.rm-handle.se{right:-6px;bottom:-6px;cursor:nwse-resize}
+.rm-handle.n{left:50%;top:-6px;transform:translateX(-50%);cursor:ns-resize}.rm-handle.s{left:50%;bottom:-6px;transform:translateX(-50%);cursor:ns-resize}
+.rm-handle.w{left:-6px;top:50%;transform:translateY(-50%);cursor:ew-resize}.rm-handle.e{right:-6px;top:50%;transform:translateY(-50%);cursor:ew-resize}
+.rm-side{border:1px solid #e6eceb;border-radius:10px;padding:10px;background:#fbfdfc;align-self:start}
+.rm-side h4{margin:0 0 8px;font-size:13px;color:#0b5c55}
+.rm-side .set-btn{width:100%;margin-top:8px}
+.rm-side-empty{font-size:12.5px;color:#889;line-height:1.6;padding:10px 2px}
+.rm-warn{font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:7px 9px;margin-top:8px;display:none}
+.rm-warn.rm-show{display:block}
+.rm-table-fallback{margin-top:12px;border-top:1px dashed #e0e8e6;padding-top:8px}
+.rm-table-fallback summary{cursor:pointer;font-size:12.5px;font-weight:800;color:#557;margin-bottom:8px}
+@media(max-width:720px){.rm-editor{grid-template-columns:1fr}.rm-side{order:2}}
 .set-chk{display:flex;align-items:center;gap:8px;font-size:13px;color:#1f2937;margin-top:10px}
 .set-chk input{width:auto}
 .set-acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
@@ -5307,7 +5339,7 @@ function setLoadAiContext(){
   var body = document.getElementById('setBody');
   body.innerHTML = '<div class="set-ph">読み込み中…</div>';
   ensureStoreMap().then(function(){
-    return sbGet('stores?select=id,name&order=name');
+    return sbGet('stores?select=id,name,rich_menu_image_url,rich_menu_image_size&order=name');
   }).then(function(stores){
     stores = stores || [];
     if (!stores.length){
@@ -5319,6 +5351,9 @@ function setLoadAiContext(){
       SET_AI_CTX_STORE = stores[0].id;
     }
     var sid = SET_AI_CTX_STORE;
+    var selectedStore = stores.filter(function(s){ return s.id === sid; })[0] || {};
+    SET_AICTX_RM_IMAGE_URL = selectedStore.rich_menu_image_url || '';
+    SET_AICTX_RM_IMAGE_SIZE = selectedStore.rich_menu_image_size === 'small' ? 'small' : 'large';
     // 店舗セレクタ（2店以上のときだけ表示）
     var picker = '';
     if (stores.length > 1){
@@ -5344,7 +5379,7 @@ function setLoadAiContext(){
       + '</div>'
       + '<div class="set-card set-aictx">'
       +   '<div class="set-name">📱 リッチメニュー（AIに教えるボタンの並び）</div>'
-      +   '<div class="set-hint" style="margin:2px 0 8px">LINE公式アカウントの下部メニューにあるボタンを、AIにわかる言葉で並べます。画像の差し替えは LINE Developers 側で行います。</div>'
+      +   '<div class="set-hint" style="margin:2px 0 8px">画像の上でボタン範囲を作ると、AIに教えるボタン名と位置を一緒に管理できます。LINE公式側の実メニュー配信は今まで通り別設定です。</div>'
       +   '<div id="set-aictxRmList">読み込み中…</div>'
       +   '<div class="set-acts" style="margin-top:8px">'
       +     '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_add">＋ ボタンを追加</button>'
@@ -5410,18 +5445,138 @@ function setSaveAiContextInfo(){
     .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-aictxInfoMsg', setReason(err), false); });
 }
 
-/* rich_menu_buttons をテーブルで表示（編集はその場・保存ボタンで一括） */
+/* rich_menu_buttons をビジュアル＋テーブルで表示（編集はその場・保存ボタンで一括） */
 var SET_AICTX_RM_ROWS = []; // 編集中の行（id付きは既存・id無しは新規）
+var SET_AICTX_RM_IMAGE_URL = '';
+var SET_AICTX_RM_IMAGE_SIZE = 'large';
+var SET_AICTX_RM_SELECTED = -1;
+var SET_AICTX_RM_HISTORY = [];
+var SET_AICTX_RM_HISTORY_PTR = -1;
+var SET_AICTX_RM_DRAG = null;
+var SET_AICTX_RM_DOC_BOUND = false;
+
+function rmImageSize(){
+  return SET_AICTX_RM_IMAGE_SIZE === 'small' ? { width:2500, height:843 } : { width:2500, height:1686 };
+}
+function rmNum(v, fallback){
+  v = parseInt(v,10);
+  return isNaN(v) ? fallback : v;
+}
+function rmClamp(v, min, max){
+  return Math.max(min, Math.min(max, v));
+}
+function rmSnap(v){
+  var s = document.getElementById('set-rm-snap');
+  return s && s.checked ? Math.round(v / 25) * 25 : v;
+}
+function rmLiveRows(){
+  return SET_AICTX_RM_ROWS.filter(function(r){ return !r._deleted; });
+}
+function rmSnapshotRows(){
+  return JSON.stringify(SET_AICTX_RM_ROWS.map(function(r){
+    return Object.assign({}, r);
+  }));
+}
+function rmRestoreRows(s){
+  try { SET_AICTX_RM_ROWS = JSON.parse(s) || []; } catch(e) { SET_AICTX_RM_ROWS = []; }
+  SET_AICTX_RM_SELECTED = Math.min(SET_AICTX_RM_SELECTED, SET_AICTX_RM_ROWS.length - 1);
+}
+function rmPushHistory(){
+  var s = rmSnapshotRows();
+  if (SET_AICTX_RM_HISTORY[SET_AICTX_RM_HISTORY_PTR] === s) return;
+  SET_AICTX_RM_HISTORY = SET_AICTX_RM_HISTORY.slice(0, SET_AICTX_RM_HISTORY_PTR + 1);
+  SET_AICTX_RM_HISTORY.push(s);
+  if (SET_AICTX_RM_HISTORY.length > 10) SET_AICTX_RM_HISTORY.shift();
+  SET_AICTX_RM_HISTORY_PTR = SET_AICTX_RM_HISTORY.length - 1;
+  rmUpdateHistoryButtons();
+}
+function rmUndo(){
+  if (SET_AICTX_RM_HISTORY_PTR <= 0) return;
+  SET_AICTX_RM_HISTORY_PTR--;
+  rmRestoreRows(SET_AICTX_RM_HISTORY[SET_AICTX_RM_HISTORY_PTR]);
+  setRenderAiContextRichMenu();
+}
+function rmRedo(){
+  if (SET_AICTX_RM_HISTORY_PTR >= SET_AICTX_RM_HISTORY.length - 1) return;
+  SET_AICTX_RM_HISTORY_PTR++;
+  rmRestoreRows(SET_AICTX_RM_HISTORY[SET_AICTX_RM_HISTORY_PTR]);
+  setRenderAiContextRichMenu();
+}
+function rmUpdateHistoryButtons(){
+  var u = document.getElementById('set-rm-undo');
+  var r = document.getElementById('set-rm-redo');
+  if (u) u.disabled = SET_AICTX_RM_HISTORY_PTR <= 0;
+  if (r) r.disabled = SET_AICTX_RM_HISTORY_PTR >= SET_AICTX_RM_HISTORY.length - 1;
+}
+function rmScale(){
+  var c = document.getElementById('set-rm-canvas');
+  var sz = rmImageSize();
+  if (!c) return { x:1, y:1, w:sz.width, h:sz.height };
+  var rect = c.getBoundingClientRect();
+  return { x: rect.width / sz.width, y: rect.height / sz.height, w: sz.width, h: sz.height };
+}
+function rmPoint(e){
+  var c = document.getElementById('set-rm-canvas');
+  var rect = c.getBoundingClientRect();
+  var sc = rmScale();
+  return {
+    x: rmClamp(Math.round((e.clientX - rect.left) / sc.x), 0, sc.w),
+    y: rmClamp(Math.round((e.clientY - rect.top) / sc.y), 0, sc.h)
+  };
+}
+function rmOverlaps(idx){
+  var a = SET_AICTX_RM_ROWS[idx];
+  if (!a || a._deleted || !a.area_width || !a.area_height) return false;
+  return SET_AICTX_RM_ROWS.some(function(b, j){
+    if (j === idx || !b || b._deleted || !b.area_width || !b.area_height) return false;
+    return a.area_x < b.area_x + b.area_width &&
+           a.area_x + a.area_width > b.area_x &&
+           a.area_y < b.area_y + b.area_height &&
+           a.area_y + a.area_height > b.area_y;
+  });
+}
+function rmHasOverlap(){
+  for (var i=0;i<SET_AICTX_RM_ROWS.length;i++) if (rmOverlaps(i)) return true;
+  return false;
+}
+function rmNormalizeArea(r){
+  var sz = rmImageSize();
+  r.area_x = rmClamp(rmNum(r.area_x, 0), 0, sz.width);
+  r.area_y = rmClamp(rmNum(r.area_y, 0), 0, sz.height);
+  r.area_width = rmClamp(rmNum(r.area_width, 0), 0, sz.width - r.area_x);
+  r.area_height = rmClamp(rmNum(r.area_height, 0), 0, sz.height - r.area_y);
+}
+function rmDefaultArea(nextIndex){
+  var sz = rmImageSize();
+  var cols = 2;
+  var rows = SET_AICTX_RM_IMAGE_SIZE === 'small' ? 1 : 2;
+  var slotW = Math.floor(sz.width / cols);
+  var slotH = Math.floor(sz.height / rows);
+  var pos = Math.max(0, nextIndex || 0) % (cols * rows);
+  return {
+    area_x: (pos % cols) * slotW,
+    area_y: Math.floor(pos / cols) * slotH,
+    area_width: slotW,
+    area_height: slotH
+  };
+}
 function setLoadAiContextRichMenu(storeId){
   var box = document.getElementById('set-aictxRmList');
   if (!box) return;
-  sbGet('rich_menu_buttons?select=id,position,label,action_type,action_value,description&store_id=eq.'+encodeURIComponent(storeId)+'&order=position.asc')
+  sbGet('rich_menu_buttons?select=id,position,label,action_type,action_value,description,area_x,area_y,area_width,area_height&store_id=eq.'+encodeURIComponent(storeId)+'&order=position.asc')
     .then(function(rows){
       SET_AICTX_RM_ROWS = (rows||[]).map(function(r){ return {
         id: r.id, position: r.position||0, label: r.label||'',
         action_type: r.action_type||'none', action_value: r.action_value||'',
-        description: r.description||'', _deleted:false,
+        description: r.description||'',
+        area_x: rmNum(r.area_x, 0), area_y: rmNum(r.area_y, 0),
+        area_width: rmNum(r.area_width, 0), area_height: rmNum(r.area_height, 0),
+        _deleted:false,
       }; });
+      SET_AICTX_RM_SELECTED = SET_AICTX_RM_ROWS.length ? 0 : -1;
+      SET_AICTX_RM_HISTORY = [];
+      SET_AICTX_RM_HISTORY_PTR = -1;
+      rmPushHistory();
       setRenderAiContextRichMenu();
     })
     .catch(function(err){
@@ -5434,11 +5589,33 @@ function setRenderAiContextRichMenu(){
   var box = document.getElementById('set-aictxRmList');
   if (!box) return;
   var rows = SET_AICTX_RM_ROWS.filter(function(r){ return !r._deleted; });
-  if (!rows.length){
-    box.innerHTML = '<div class="set-ph">まだ登録されていません。下の「＋ボタンを追加」から1行ずつ作ってください。</div>';
-    return;
+  if (SET_AICTX_RM_SELECTED >= 0 && (!SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED] || SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED]._deleted)){
+    SET_AICTX_RM_SELECTED = -1;
   }
-  var h = '';
+  var img = SET_AICTX_RM_IMAGE_URL
+    ? '<img src="'+esc(SET_AICTX_RM_IMAGE_URL)+'" alt="リッチメニュー画像">'
+    : '<div class="rm-empty-note">画像未設定です。画像を選ぶ／ここにドラッグ／画像をコピーして貼り付けで登録できます。</div>';
+  var h = ''
+    + '<div class="rm-tools">'
+    +   '<input type="file" id="set-rm-file" accept="image/png,image/jpeg" style="display:none">'
+    +   '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_upload">画像を選ぶ</button>'
+    +   (SET_AICTX_RM_IMAGE_URL ? '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_delete_image" style="color:#c2410c">画像を外す</button>' : '')
+    +   '<select id="set-rm-size"'+(SET_AICTX_RM_IMAGE_URL?' disabled':'')+'><option value="large"'+(SET_AICTX_RM_IMAGE_SIZE==='large'?' selected':'')+'>大 2500×1686</option><option value="small"'+(SET_AICTX_RM_IMAGE_SIZE==='small'?' selected':'')+'>小 2500×843</option></select>'
+    +   '<label class="rm-check"><input type="checkbox" id="set-rm-snap" checked>25pxに吸着</label>'
+    +   '<button type="button" class="set-btn set-ghost" id="set-rm-undo" data-act="aictx_rm_undo">戻す</button>'
+    +   '<button type="button" class="set-btn set-ghost" id="set-rm-redo" data-act="aictx_rm_redo">やり直す</button>'
+    + '</div>'
+    + '<div class="rm-editor">'
+    +   '<div class="rm-work">'
+    +     '<div id="set-rm-canvas" class="rm-canvas '+(SET_AICTX_RM_IMAGE_SIZE==='small'?'rm-small ':'')+(!SET_AICTX_RM_IMAGE_URL?'rm-empty':'')+'" tabindex="0">'+img+'</div>'
+    +     '<div id="set-rm-warn" class="rm-warn'+(rmHasOverlap()?' rm-show':'')+'">重なっている領域があります。AI用の保存はできますが、LINE公式側のタップ範囲とズレないか確認してください。</div>'
+    +   '</div>'
+    +   '<div class="rm-side" id="set-rm-panel">'+rmPanelHtml()+'</div>'
+    + '</div>'
+    + '<details class="rm-table-fallback" open><summary>数値で直接編集</summary>';
+  if (!rows.length){
+    h += '<div class="set-ph">まだ登録されていません。画像上でドラッグするか、下の「＋ボタンを追加」から作ってください。</div>';
+  }
   // index は SET_AICTX_RM_ROWS 内の位置（_deleted 含む）
   for (var i=0;i<SET_AICTX_RM_ROWS.length;i++){
     var r = SET_AICTX_RM_ROWS[i];
@@ -5455,10 +5632,273 @@ function setRenderAiContextRichMenu(){
       + '</select>'
       + '<label>飛び先（URL／送信テキスト／postback data）</label><input type="text" data-rmf="action_value" value="'+esc(r.action_value)+'" placeholder="例）https://liff.line.me/… ／ 口コミ">'
       + '<label>AIへの補足説明（任意）</label><textarea data-rmf="description" rows="2" placeholder="例）押すと予約ページが開く ／ 地図は別院名で表示される">'+esc(r.description)+'</textarea>'
+      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">'
+      +   '<label>X<input type="number" inputmode="numeric" data-rmf="area_x" value="'+esc(r.area_x||0)+'"></label>'
+      +   '<label>Y<input type="number" inputmode="numeric" data-rmf="area_y" value="'+esc(r.area_y||0)+'"></label>'
+      +   '<label>幅<input type="number" inputmode="numeric" data-rmf="area_width" value="'+esc(r.area_width||0)+'"></label>'
+      +   '<label>高さ<input type="number" inputmode="numeric" data-rmf="area_height" value="'+esc(r.area_height||0)+'"></label>'
+      + '</div>'
       + '<div class="set-acts" style="margin-top:8px"><button type="button" class="set-btn set-ghost" data-act="aictx_rm_del" data-rmidx="'+i+'">この行を削除</button></div>'
       + '</div>';
   }
+  h += '</details>';
   box.innerHTML = h;
+  rmRenderAreas();
+  rmBindCanvas();
+  rmUpdateHistoryButtons();
+}
+
+function rmPanelHtml(){
+  var r = SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED];
+  if (!r || r._deleted){
+    return '<h4>ボタン設定</h4><div class="rm-side-empty">画像上の領域をクリックすると、ここでラベルと飛び先を編集できます。</div>';
+  }
+  return '<h4>選択中のボタン</h4>'
+    + '<label>ラベル</label><input type="text" data-rmp="label" value="'+esc(r.label)+'" placeholder="例）予約">'
+    + '<label>動作</label><select data-rmp="action_type">'
+    +   '<option value="uri"'+(r.action_type==='uri'?' selected':'')+'>URLを開く</option>'
+    +   '<option value="message"'+(r.action_type==='message'?' selected':'')+'>メッセージを送信</option>'
+    +   '<option value="postback"'+(r.action_type==='postback'?' selected':'')+'>postback</option>'
+    +   '<option value="none"'+(r.action_type==='none'?' selected':'')+'>なし</option>'
+    + '</select>'
+    + '<label>飛び先</label><input type="text" data-rmp="action_value" value="'+esc(r.action_value)+'">'
+    + '<label>AIへの補足</label><textarea data-rmp="description" rows="3">'+esc(r.description)+'</textarea>'
+    + '<div class="set-hint">位置：X '+esc(r.area_x||0)+' / Y '+esc(r.area_y||0)+' / 幅 '+esc(r.area_width||0)+' / 高さ '+esc(r.area_height||0)+'</div>'
+    + '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_del" data-rmidx="'+SET_AICTX_RM_SELECTED+'" style="color:#c2410c">この領域を削除</button>';
+}
+
+function rmRenderAreas(){
+  var c = document.getElementById('set-rm-canvas');
+  if (!c) return;
+  var old = c.querySelectorAll('.rm-area');
+  for (var k=0;k<old.length;k++) old[k].parentNode.removeChild(old[k]);
+  var sc = rmScale();
+  for (var i=0;i<SET_AICTX_RM_ROWS.length;i++){
+    var r = SET_AICTX_RM_ROWS[i];
+    if (!r || r._deleted || !r.area_width || !r.area_height) continue;
+    rmNormalizeArea(r);
+    var el = document.createElement('div');
+    el.className = 'rm-area' + (i===SET_AICTX_RM_SELECTED ? ' rm-on' : '') + (rmOverlaps(i) ? ' rm-overlap' : '');
+    el.setAttribute('data-rmidx', String(i));
+    el.setAttribute('tabindex', '0');
+    el.style.left = (r.area_x * sc.x) + 'px';
+    el.style.top = (r.area_y * sc.y) + 'px';
+    el.style.width = (r.area_width * sc.x) + 'px';
+    el.style.height = (r.area_height * sc.y) + 'px';
+    el.innerHTML = '<div class="rm-area-label">'+esc(r.label || '未設定')+'</div>'
+      + '<span class="rm-handle nw" data-rmh="nw"></span><span class="rm-handle n" data-rmh="n"></span><span class="rm-handle ne" data-rmh="ne"></span>'
+      + '<span class="rm-handle w" data-rmh="w"></span><span class="rm-handle e" data-rmh="e"></span>'
+      + '<span class="rm-handle sw" data-rmh="sw"></span><span class="rm-handle s" data-rmh="s"></span><span class="rm-handle se" data-rmh="se"></span>';
+    c.appendChild(el);
+  }
+  var warn = document.getElementById('set-rm-warn');
+  if (warn) warn.className = 'rm-warn' + (rmHasOverlap() ? ' rm-show' : '');
+}
+
+function rmBindCanvas(){
+  var box = document.getElementById('set-aictxRmList');
+  var c = document.getElementById('set-rm-canvas');
+  if (!box || !c) return;
+  if (c.getAttribute('data-bound') !== '1'){
+    c.setAttribute('data-bound', '1');
+    c.addEventListener('mousedown', rmStartPointer);
+    c.addEventListener('keydown', rmKeydown);
+    c.addEventListener('dragover', function(e){ e.preventDefault(); c.classList.add('rm-dragover'); });
+    c.addEventListener('dragleave', function(){ c.classList.remove('rm-dragover'); });
+    c.addEventListener('drop', function(e){
+      e.preventDefault();
+      c.classList.remove('rm-dragover');
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) setUploadRichMenuImage(file);
+    });
+  }
+  if (!SET_AICTX_RM_DOC_BOUND){
+    SET_AICTX_RM_DOC_BOUND = true;
+    document.addEventListener('mousemove', rmMovePointer);
+    document.addEventListener('mouseup', rmEndPointer);
+    document.addEventListener('paste', rmPasteImage);
+  }
+  if (box.getAttribute('data-rm-bound') === '1') return;
+  box.setAttribute('data-rm-bound', '1');
+  box.addEventListener('input', function(e){
+    var t = e.target;
+    if (!t || !t.getAttribute) return;
+    var pf = t.getAttribute('data-rmp');
+    if (pf && SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED]){
+      SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED][pf] = t.value;
+      rmRenderAreas();
+      return;
+    }
+    var tf = t.getAttribute('data-rmf');
+    if (tf){
+      setCollectAiContextRichMenu();
+      rmRenderAreas();
+    }
+  });
+  box.addEventListener('change', function(e){
+    var t = e.target;
+    if (!t || !t.getAttribute) return;
+    if (t.id === 'set-rm-size'){
+      SET_AICTX_RM_IMAGE_SIZE = t.value === 'small' ? 'small' : 'large';
+      setRenderAiContextRichMenu();
+      return;
+    }
+    if (t.id === 'set-rm-file' && t.files && t.files[0]){
+      setUploadRichMenuImage(t.files[0]);
+      t.value = '';
+      return;
+    }
+    var pf = t.getAttribute('data-rmp');
+    if (pf && SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED]){
+      SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED][pf] = t.value;
+      rmPushHistory();
+    }
+  });
+}
+
+function rmStartPointer(e){
+  if (e.button !== 0) return;
+  var area = e.target.closest ? e.target.closest('.rm-area') : null;
+  var handle = e.target.getAttribute ? e.target.getAttribute('data-rmh') : null;
+  var p = rmPoint(e);
+  if (area){
+    var idx = parseInt(area.getAttribute('data-rmidx'),10);
+    if (!isNaN(idx)) SET_AICTX_RM_SELECTED = idx;
+    var r = SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED];
+    if (!r) return;
+    SET_AICTX_RM_DRAG = { mode: handle ? 'resize' : 'move', handle: handle || '', idx: SET_AICTX_RM_SELECTED, start:p, orig:Object.assign({}, r) };
+    setRenderAiContextRichMenu();
+    e.preventDefault();
+    return;
+  }
+  SET_AICTX_RM_SELECTED = -1;
+  SET_AICTX_RM_DRAG = { mode:'create', start:p, current:p };
+  e.preventDefault();
+}
+
+function rmMovePointer(e){
+  if (!SET_AICTX_RM_DRAG) return;
+  var d = SET_AICTX_RM_DRAG;
+  var p = rmPoint(e);
+  var sz = rmImageSize();
+  if (d.mode === 'move'){
+    var r = SET_AICTX_RM_ROWS[d.idx];
+    r.area_x = rmSnap(rmClamp(d.orig.area_x + (p.x - d.start.x), 0, sz.width - d.orig.area_width));
+    r.area_y = rmSnap(rmClamp(d.orig.area_y + (p.y - d.start.y), 0, sz.height - d.orig.area_height));
+    rmRenderAreas();
+  } else if (d.mode === 'resize'){
+    var rr = SET_AICTX_RM_ROWS[d.idx];
+    var x1 = d.orig.area_x, y1 = d.orig.area_y, x2 = d.orig.area_x + d.orig.area_width, y2 = d.orig.area_y + d.orig.area_height;
+    if (d.handle.indexOf('w') >= 0) x1 = p.x;
+    if (d.handle.indexOf('e') >= 0) x2 = p.x;
+    if (d.handle.indexOf('n') >= 0) y1 = p.y;
+    if (d.handle.indexOf('s') >= 0) y2 = p.y;
+    var nx = rmSnap(Math.min(x1, x2)), ny = rmSnap(Math.min(y1, y2));
+    var nw = rmSnap(Math.abs(x2 - x1)), nh = rmSnap(Math.abs(y2 - y1));
+    rr.area_x = rmClamp(nx, 0, sz.width - 50);
+    rr.area_y = rmClamp(ny, 0, sz.height - 50);
+    rr.area_width = rmClamp(nw, 50, sz.width - rr.area_x);
+    rr.area_height = rmClamp(nh, 50, sz.height - rr.area_y);
+    rmRenderAreas();
+  } else if (d.mode === 'create'){
+    d.current = p;
+    var tempIdx = SET_AICTX_RM_ROWS.length;
+    var x = rmSnap(Math.min(d.start.x, p.x)), y = rmSnap(Math.min(d.start.y, p.y));
+    var w = rmSnap(Math.abs(p.x - d.start.x)), h = rmSnap(Math.abs(p.y - d.start.y));
+    var ghost = { area_x:x, area_y:y, area_width:w, area_height:h, label:'新しいボタン', action_type:'uri', action_value:'', description:'', position:tempIdx+1, _deleted:false };
+    SET_AICTX_RM_ROWS.push(ghost);
+    SET_AICTX_RM_SELECTED = tempIdx;
+    rmRenderAreas();
+    SET_AICTX_RM_ROWS.pop();
+    SET_AICTX_RM_SELECTED = -1;
+  }
+  e.preventDefault();
+}
+
+function rmEndPointer(e){
+  if (!SET_AICTX_RM_DRAG) return;
+  var d = SET_AICTX_RM_DRAG;
+  if (d.mode === 'create'){
+    var p = d.current || rmPoint(e);
+    var x = rmSnap(Math.min(d.start.x, p.x)), y = rmSnap(Math.min(d.start.y, p.y));
+    var w = rmSnap(Math.abs(p.x - d.start.x)), h = rmSnap(Math.abs(p.y - d.start.y));
+    if (w >= 50 && h >= 50){
+      var maxPos = 0;
+      SET_AICTX_RM_ROWS.forEach(function(r){ if(!r._deleted && r.position>maxPos) maxPos = r.position; });
+      SET_AICTX_RM_ROWS.push({ id:null, position:maxPos+1, label:'新しいボタン', action_type:'uri', action_value:'', description:'', area_x:x, area_y:y, area_width:w, area_height:h, _deleted:false });
+      SET_AICTX_RM_SELECTED = SET_AICTX_RM_ROWS.length - 1;
+      rmPushHistory();
+    }
+  } else {
+    rmPushHistory();
+  }
+  SET_AICTX_RM_DRAG = null;
+  setRenderAiContextRichMenu();
+}
+
+function rmKeydown(e){
+  var r = SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED];
+  if (!r || r._deleted) return;
+  var step = e.shiftKey ? 10 : 1;
+  var sz = rmImageSize();
+  if (e.key === 'Delete' || e.key === 'Backspace'){
+    setDeleteAiContextRichMenu(SET_AICTX_RM_SELECTED);
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'Tab'){
+    var live = [];
+    SET_AICTX_RM_ROWS.forEach(function(row, idx){ if(!row._deleted) live.push(idx); });
+    var pos = live.indexOf(SET_AICTX_RM_SELECTED);
+    SET_AICTX_RM_SELECTED = live[(pos + 1) % live.length];
+    setRenderAiContextRichMenu();
+    e.preventDefault();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z'){ e.shiftKey ? rmRedo() : rmUndo(); e.preventDefault(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y'){ rmRedo(); e.preventDefault(); return; }
+  if (e.key === 'ArrowLeft') r.area_x = rmClamp(r.area_x - step, 0, sz.width - r.area_width);
+  else if (e.key === 'ArrowRight') r.area_x = rmClamp(r.area_x + step, 0, sz.width - r.area_width);
+  else if (e.key === 'ArrowUp') r.area_y = rmClamp(r.area_y - step, 0, sz.height - r.area_height);
+  else if (e.key === 'ArrowDown') r.area_y = rmClamp(r.area_y + step, 0, sz.height - r.area_height);
+  else return;
+  rmPushHistory();
+  setRenderAiContextRichMenu();
+  e.preventDefault();
+}
+
+function rmPasteImage(e){
+  if (!document.getElementById('set-rm-canvas')) return;
+  var items = (e.clipboardData && e.clipboardData.items) || [];
+  for (var i=0;i<items.length;i++){
+    if (items[i].kind === 'file' && /^image\//.test(items[i].type || '')){
+      var file = items[i].getAsFile();
+      if (file){
+        e.preventDefault();
+        setUploadRichMenuImage(file);
+        return;
+      }
+    }
+  }
+}
+
+function rmApiError(j, fallback){
+  var reason = j && (j.reason || j.error || j.message);
+  if (!reason) return fallback || '保存に失敗しました。';
+  var map = {
+    bad_origin: 'この画面のURLからは画像アップロードできません。本番の管理画面URLから開き直してください。',
+    forbidden: 'この店舗の画像を変更する権限がありません。',
+    forbidden_manager: '画像変更はオーナー／管理者だけができます。',
+    bad_image: '画像形式を読み取れません。PNG または JPEG を選んでください。',
+    too_large: '画像は1MB以内にしてください。',
+    too_small: '画像の横幅が小さすぎます。LINE用の画像を選んでください。',
+    bad_aspect: '画像の縦横比がLINEリッチメニュー用と合いません。大は約3:2、小は約3:1です。',
+    no_dimensions: '画像サイズを確認できませんでした。別のPNG/JPEGで試してください。',
+    upload_failed: '画像の保存先へのアップロードに失敗しました。',
+    save_failed: '画像URLの保存に失敗しました。',
+    unknown_action: '画像アップロードの呼び出し形式が不正です。'
+  };
+  return map[reason] || String(reason);
 }
 
 /* 行の編集値を SET_AICTX_RM_ROWS に取り込む（保存・追加・削除前に呼ぶ） */
@@ -5473,7 +5913,11 @@ function setCollectAiContextRichMenu(){
       var f = ins[j].getAttribute('data-rmf');
       var v = ins[j].value;
       if (f === 'position') v = parseInt(v,10); if (f === 'position' && isNaN(v)) v = 0;
+      if (f === 'area_x' || f === 'area_y' || f === 'area_width' || f === 'area_height'){
+        v = parseInt(v,10); if (isNaN(v)) v = 0;
+      }
       r[f] = v;
+      rmNormalizeArea(r);
     }
   }
 }
@@ -5482,7 +5926,14 @@ function setAddAiContextRichMenu(){
   setCollectAiContextRichMenu();
   var maxPos = 0;
   SET_AICTX_RM_ROWS.forEach(function(r){ if(!r._deleted && r.position>maxPos) maxPos = r.position; });
-  SET_AICTX_RM_ROWS.push({ id:null, position: maxPos+1, label:'', action_type:'uri', action_value:'', description:'', _deleted:false });
+  var area = rmDefaultArea(SET_AICTX_RM_ROWS.filter(function(r){ return !r._deleted; }).length);
+  SET_AICTX_RM_ROWS.push({
+    id:null, position: maxPos+1, label:'新しいボタン', action_type:'uri', action_value:'', description:'',
+    area_x:area.area_x, area_y:area.area_y, area_width:area.area_width, area_height:area.area_height,
+    _deleted:false
+  });
+  SET_AICTX_RM_SELECTED = SET_AICTX_RM_ROWS.length - 1;
+  rmPushHistory();
   setRenderAiContextRichMenu();
 }
 
@@ -5491,7 +5942,52 @@ function setDeleteAiContextRichMenu(idx){
   // id 無し（新規行）はその場で消す。id 有りは _deleted フラグだけ立て、保存時に DELETE。
   if (SET_AICTX_RM_ROWS[idx].id) SET_AICTX_RM_ROWS[idx]._deleted = true;
   else SET_AICTX_RM_ROWS.splice(idx,1);
+  SET_AICTX_RM_SELECTED = -1;
+  rmPushHistory();
   setRenderAiContextRichMenu();
+}
+
+function setUploadRichMenuImage(file){
+  if (!file || !SET_AI_CTX_STORE){ setMsg('set-aictxRmMsg','店舗が選ばれていません。', false); return; }
+  if (!/^image\/(png|jpeg)$/.test(file.type || '')){
+    setMsg('set-aictxRmMsg','画像は PNG または JPEG を選んでください。', false); return;
+  }
+  if (file.size > 1024 * 1024){
+    setMsg('set-aictxRmMsg','画像は1MB以内にしてください。', false); return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(){
+    setMsg('set-aictxRmMsg','画像をアップロード中です…', true);
+    fetch(SB_URL + '/functions/v1/manage-rich-menu-image', {
+      method:'POST',
+      headers:Object.assign({ 'Content-Type':'application/json' }, hdr()),
+      body: JSON.stringify({ action:'upload_image', store_id: SET_AI_CTX_STORE, image_size: SET_AICTX_RM_IMAGE_SIZE, data_url: reader.result })
+    }).then(function(res){ return res.json().then(function(j){ if(!res.ok || !j.ok) throw new Error(rmApiError(j, 'HTTP '+res.status)); return j; }); })
+      .then(function(j){
+        SET_AICTX_RM_IMAGE_URL = j.url || '';
+        setMsg('set-aictxRmMsg','画像を保存しました。続けてボタン範囲を配置してください。', true);
+        setRenderAiContextRichMenu();
+      })
+      .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-aictxRmMsg', setReason(err), false); });
+  };
+  reader.onerror = function(){ setMsg('set-aictxRmMsg','画像の読み込みに失敗しました。', false); };
+  reader.readAsDataURL(file);
+}
+
+function setDeleteRichMenuImage(){
+  if (!SET_AI_CTX_STORE) return;
+  if (!confirm('リッチメニュー画像を外します。ボタン範囲の入力内容は残ります。よろしいですか？')) return;
+  fetch(SB_URL + '/functions/v1/manage-rich-menu-image', {
+    method:'POST',
+    headers:Object.assign({ 'Content-Type':'application/json' }, hdr()),
+    body: JSON.stringify({ action:'delete_image', store_id: SET_AI_CTX_STORE })
+  }).then(function(res){ return res.json().then(function(j){ if(!res.ok || !j.ok) throw new Error(rmApiError(j, 'HTTP '+res.status)); return j; }); })
+    .then(function(){
+      SET_AICTX_RM_IMAGE_URL = '';
+      setMsg('set-aictxRmMsg','画像を外しました。', true);
+      setRenderAiContextRichMenu();
+    })
+    .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-aictxRmMsg', setReason(err), false); });
 }
 
 function setSaveAiContextRichMenu(){
@@ -5507,6 +6003,10 @@ function setSaveAiContextRichMenu(){
     if (r.action_type === 'uri' && r.action_value && !/^https?:\/\//i.test(r.action_value)){
       setMsg('set-aictxRmMsg','URLは http(s) で始めてください（行：'+esc(r.label)+'）。', false); return;
     }
+    rmNormalizeArea(r);
+  }
+  if (rmHasOverlap() && !confirm('重なっているボタン範囲があります。このまま保存しますか？')){
+    return;
   }
   // 操作を3群に分ける
   var inserts = [], updates = [], deletes = [];
@@ -5523,6 +6023,10 @@ function setSaveAiContextRichMenu(){
       action_type: String(r.action_type||'none'),
       action_value: String(r.action_value||'').trim() || null,
       description: String(r.description||'').trim() || null,
+      area_x: rmNum(r.area_x, 0),
+      area_y: rmNum(r.area_y, 0),
+      area_width: rmNum(r.area_width, 0),
+      area_height: rmNum(r.area_height, 0),
       updated_at: new Date().toISOString(),
     };
     if (r.id){ updates.push({ id:r.id, patch: payload }); }
@@ -6025,6 +6529,10 @@ function setMsg(id, text, ok){
     if (act === 'aictx_save_info'){ setSaveAiContextInfo(); return; }
     if (act === 'aictx_rm_add'){ setAddAiContextRichMenu(); return; }
     if (act === 'aictx_rm_del'){ setDeleteAiContextRichMenu(parseInt(b.getAttribute('data-rmidx'),10)); return; }
+    if (act === 'aictx_rm_upload'){ var rf = document.getElementById('set-rm-file'); if (rf) rf.click(); return; }
+    if (act === 'aictx_rm_delete_image'){ setDeleteRichMenuImage(); return; }
+    if (act === 'aictx_rm_undo'){ rmUndo(); return; }
+    if (act === 'aictx_rm_redo'){ rmRedo(); return; }
     if (act === 'aictx_rm_save'){ setSaveAiContextRichMenu(); return; }
   });
   // data-shft 入力 → draft 反映（time/checkbox は change で十分）
