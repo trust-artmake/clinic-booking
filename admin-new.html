@@ -1923,14 +1923,21 @@ function lineSecretLoad(tenantId){
   lsecLoadInner();
 }
 
+/* 貼り付けトークン等のサニタイズ：制御文字（改行・タブ・unicode制御）を除去＋前後 trim。
+   LINE Developers の「コピー」ボタンが末尾改行を含めることがあり、manage-tenant 側の cleanSecret が
+   制御文字を bad_input として弾いてしまうため、送信前にここで除去する（2026-06-17 復旧対応）。 */
+function lsecSanitize(v){
+  return String(v == null ? "" : v).replace(/[\x00-\x1F\x7F]/g, "").trim();
+}
+
 /* 保存：manage-tenant set_line_secrets。空欄は「変更しない」。成功でクリア＋再読込。 */
 function lsecSave(){
   if (!LSEC_TENANT) { lsecMsg("対象の店舗が選べていません。"); return; }
   var btn = document.getElementById("lsecSaveBtn");
-  var channelId     = (document.getElementById("lsecChannelId")||{}).value || "";
-  var channelToken  = (document.getElementById("lsecChannelToken")||{}).value || "";
-  var channelSecret = (document.getElementById("lsecChannelSecret")||{}).value || "";
-  var groupId       = (document.getElementById("lsecGroupId")||{}).value || "";
+  var channelId     = lsecSanitize((document.getElementById("lsecChannelId")||{}).value);
+  var channelToken  = lsecSanitize((document.getElementById("lsecChannelToken")||{}).value);
+  var channelSecret = lsecSanitize((document.getElementById("lsecChannelSecret")||{}).value);
+  var groupId       = lsecSanitize((document.getElementById("lsecGroupId")||{}).value);
   if (btn) btn.disabled = true;
   lsecMsg("保存中…", true);
   fetch(SB_URL + "/functions/v1/manage-tenant", {
