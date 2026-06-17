@@ -728,7 +728,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <a href="https://trust-artmake.github.io/clinic-booking/staff-operation-pack.html" target="_blank" rel="noopener">予約の見方・操作</a>
     <a href="https://trust-artmake.github.io/clinic-booking/staff-operation-pack.html" target="_blank" rel="noopener">変更・キャンセル</a>
   </div>
-  <div class="help-hint">💡 電話予約のお客様は <b>問診リマインド・同意書送信</b> はできません（LINE未連携のため）。来店時に紙でご対応ください。</div>
+  <div class="help-hint">💡 電話予約のお客様にはLINEで自動案内送信できません。来店時に<b>LINE追加してもらってから</b>、問診票や同意書に進んでください。</div>
   <!-- 店舗切替（任意）。全店=owner/admin のみ。staff は自店に固定されるので隠してもよい -->
   <div class="resv-storebar" id="resvStoreBar" style="display:none">
     <label>店舗</label>
@@ -821,7 +821,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
   <!-- 詳細（カルテ） -->
   <div class="crm-detail" id="crmDetail">
     <button type="button" class="crm-back" id="crmBack">← 一覧へ戻る</button>
-    <div id="crmDetailBody"><div class="crm-placeholder">← 上の一覧からお客様を選んでください</div></div>
+    <div id="crmDetailBody"><div class="crm-placeholder">左側のリストからお客様の名前をタップして選んでください</div></div>
   </div>
 </div>
 
@@ -921,7 +921,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <span class="help-label">📖 操作方法</span>
     <a href="https://trust-artmake.github.io/clinic-booking/admin-operation-pack.html" target="_blank" rel="noopener">集客（流入経路）の使い方</a>
   </div>
-  <div class="help-hint">💡 <b>流入経路</b>とは「お客様がどこから予約に来たか」のことです。Instagram・チラシ・Google広告など、媒体ごとに専用リンクを発行してお客様に渡すと、どの媒体が一番効いているか自動で集計できます。</div>
+  <div class="help-hint">💡 <b>流入経路</b>＝お客様がどこから予約に来たか。Instagram・チラシ・広告ごとに専用リンクを発行すると、どれが一番効いているか自動集計できます。</div>
   <h3>🔗 流入元リンク（発行・コピー）</h3>
   <div id="acqList"><div class="placeholder">読み込み中…</div></div>
 
@@ -931,14 +931,12 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <input type="text" id="acqLabel" maxlength="40" placeholder="表示名を入力" autocomplete="off">
     <button type="button" class="save" id="acqAddBtn" onclick="addRefSource()">＋ 追加してリンク発行</button>
     <div class="acq-msg" id="acqMsg"></div>
-    <div class="acq-hint">表示名から英数字のタグを自動生成し、集客リンク（LINEで開く）に <b>?ref=タグ</b> を付けます。お客様がリンクをタップした時点で流入元が記録されます（友達追加されればリストに残ります）。</div>
+    <div class="acq-hint">表示名を入れると自動でLINEリンクを作成。お客様がタップすると「どこから来たか」が記録されます（友達追加されればリストに残ります）。</div>
   </div>
 
   <h3>📊 流入分析（どこから予約が来たか）</h3>
   <div class="acq-hint" style="margin:0 4px 6px">
-    集計の基準を選べます。「申込日」は<b>その月に予約申込が入った件数</b>＝集客の効き目を見る用。
-    「施術日」は<b>その月に施術された件数</b>＝来店や売上の実績を見る用。
-    「友達追加日」は<b>その月にLINE友達追加された人数</b>＝Instagram等からの集客の効きを見る用（LIFFリンクで来た人だけ流入元が分かります）。
+    集計の基準を選べます。<b>申込日</b>＝予約申込の件数（集客の効き目）／<b>施術日</b>＝施術された件数（来店・売上の実績）／<b>友達追加日</b>＝LINE友達追加された人数（広告の効き／LIFFリンク経由のみ流入元が分かる）。
   </div>
   <!-- ★patch-52：表示モード切替（合計表示／日別表示）。日別では基準別タブを使わず、
        1行＝1日に「友達追加・申込・来店・売上」が同時に並ぶ。 -->
@@ -971,11 +969,9 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <span class="help-label">📖 操作方法</span>
     <a href="https://trust-artmake.github.io/clinic-booking/admin-operation-pack.html" target="_blank" rel="noopener">ステップ配信の作り方</a>
   </div>
-  <div class="help-hint">💡 配信は<b>朝〜夜の時間帯のみ</b>（友だち追加直後の即時挨拶＝遅延0は時間帯問わず届きます）。<b>予約が入ると自動で停止</b>します（追わない＝ブロック対策）。</div>
+  <div class="help-hint">💡 朝〜夜だけ送ります。ただし<b>最初の挨拶は夜中も届きます</b>。予約が入ると自動で停止（しつこくしないため）。</div>
   <div class="stp-note">
-    友だち追加をきっかけに、決めた順番でメッセージを自動配信します。各メッセージに<b>画像も添付</b>でき、
-    <b>予約が入ったら自動で停止</b>します（追わない＝ブロック対策）。<br>
-    配信は朝〜夜の時間帯のみ。<b>ただし「即時（遅延0）」の挨拶だけは時間帯を問わず友だち追加した瞬間に届きます。</b>
+    友だち追加をきっかけに、決めた順番でメッセージを自動配信します。<b>画像も添付可能</b>。予約が入ると停止します（しつこくしないため）。配信は朝〜夜のみ。<b>ただし最初の挨拶（遅延0）は夜中でも届きます。</b>
   </div>
   <div class="stp-toolbar">
     <button type="button" class="stp-btn primary" onclick="stpNewScenario()">＋ 新しいシナリオ</button>
@@ -1068,7 +1064,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
         </select>
       </div>
     </div>
-    <div class="help-hint">⚠️ <b>役割の選び間違いに注意。</b>　スタッフ＝予約・カルテの閲覧のみ／管理者＝ユーザー管理も可／オーナー＝最上位（お店の設定すべて）。<b>新しい人はまず「スタッフ」</b>で発行し、必要になってから上げるのが安全です。</div>
+    <div class="help-hint">⚠️ <b>役割の選び間違いに注意。</b>　スタッフ＝予約だけ／管理者＝ユーザー管理も可／オーナー＝全設定。<b>新しい人はまず「スタッフ」</b>で発行し、必要になってから上げるのが安全です。</div>
 
     <label style="margin-top:8px">担当店舗</label>
     <select id="usrStore"><option value="all">🏢 全店</option></select>
@@ -1737,7 +1733,7 @@ function lsecBuild(){
   panel.appendChild(h);
 
   var note = lsecEl("div", { className:"setup-note",
-    text:"全体管理者だけが、この店舗のLINE鍵を登録できます。鍵は暗号化して保存され、二度と画面には表示されません（末尾4文字のみ表示）。未入力の欄は変更しません。削除は各欄の削除ボタンで行ってください。" });
+    text:"全体管理者だけが、この店舗のLINE鍵（接続に必要な秘密情報）を登録できます。鍵は安全のため暗号化して保存（末尾4文字のみ表示）。空欄のまま保存すれば変更されません。" });
   panel.appendChild(note);
 
   // 現在の状態（textContentで更新する箱）
@@ -1774,13 +1770,13 @@ function lsecBuild(){
 
   panel.appendChild(field(
     "チャネルID",
-    "LINE Developers → 対象チャネル → 「チャネル基本設定」のチャネルID（数字）。",
+    "LINE Developers Console（LINE公式アカウントの設定ページ）→ 対象チャネル → 「チャネル基本設定」の数字IDをコピー。",
     "lsecChannelId", "text", "例）1234567890"));
 
   // トークン欄＋削除ボタン
   var tokWrap = field(
     "チャネルアクセストークン",
-    "LINE Developers → 「Messaging API設定」→ 長期アクセストークンを発行してコピー。",
+    "LINE Developers Console → 「Messaging API設定」→ 「長期アクセストークン」を発行してコピー。LINE送信に必要な鍵です。",
     "lsecChannelToken", "password", "未入力なら変更しません");
   var tokDel = lsecEl("button", { type:"button", text:"このトークンを削除" });
   tokDel.style.marginTop = "6px";
@@ -1797,7 +1793,7 @@ function lsecBuild(){
   // シークレット欄＋削除ボタン
   var secWrap = field(
     "チャネルシークレット",
-    "LINE Developers → 「チャネル基本設定」→ チャネルシークレットをコピー。",
+    "LINE Developers Console → 「チャネル基本設定」→ 「チャネルシークレット」をコピー。トークンと一緒に必要な認証用の鍵です。",
     "lsecChannelSecret", "password", "未入力なら変更しません");
   var secDel = lsecEl("button", { type:"button", text:"このシークレットを削除" });
   secDel.style.marginTop = "6px";
@@ -1813,7 +1809,7 @@ function lsecBuild(){
 
   panel.appendChild(field(
     "通知先グループID",
-    "スタッフ通知を送るLINEグループのID（C で始まる文字列）。",
+    "スタッフ用LINEグループのID（C で始まる文字列）。ここに新規予約・要対応の通知が届きます。",
     "lsecGroupId", "text", "例）Cxxxxxxxx"));
 
   // 保存ボタン＋メッセージ
@@ -1833,7 +1829,7 @@ function lsecBuild(){
   // LINEと接続：保存済みの鍵を使って bot のID(destination)を取得し、振り分け表に登録する。
   //   ・鍵の保存後に押す。これで chat-webhook が「この公式LINE＝この店」と判定できる＝喋れる。
   var linkNote = lsecEl("div", { className:"setup-note",
-    text:"↓ アクセストークンとチャネルシークレットを保存したら、このボタンで「この公式LINE＝この店」をシステムに登録します（IDは自動取得・手入力不要）。" });
+    text:"↓ 上のトークンとシークレットを保存したら、このボタンで「この公式LINE＝この店」とシステムに教えます（IDは自動取得・手入力不要）。" });
   linkNote.style.marginTop = "14px";
   panel.appendChild(linkNote);
   var linkBtn = lsecEl("button", { type:"button", id:"lsecLinkBtn", text:"🔗 LINEと接続（IDを取得して登録）" });
@@ -3149,7 +3145,7 @@ function crmRenderList(){
 
   var listEl = document.getElementById('crmList');
   if (!people.length){
-    listEl.innerHTML = '<li class="crm-placeholder" style="min-height:24vh">該当する顧客がいません</li>';
+    listEl.innerHTML = '<li class="crm-placeholder" style="min-height:24vh">そのお名前の顧客が見つかりませんでした</li>';
     return;
   }
   listEl.innerHTML = people.map(function(p){
@@ -4647,7 +4643,7 @@ function setLoadInfo(){
     h += row('この管理画面', lk(pubBase+'admin-new.html','admin-new.html'))
       + '</div>';
 
-    h += '<div class="set-note">※ 読み取り専用の確認画面です。数字は開いた時点の集計。LINEのトークンなど鍵情報は安全のため表示していません。各種編集は上の各タブから（オーナー／管理者のみ）。</div>';
+    h += '<div class="set-note">※ ここは「見るだけ」の画面です。LINE接続の秘密情報は安全のため表示されません。編集は上の各タブから（オーナー／管理者のみ）。</div>';
     body.innerHTML = h;
   }).catch(function(err){
     if (setHandleAuth(err)) return;
@@ -4674,12 +4670,12 @@ function setLoadMenus(){
         +   '<label>メニュー名（必須）</label><input type="text" id="set-maname" placeholder="例）眉アートメイク（2D/3D/4D）">'
         +   '<label>通常価格（円）</label><input type="number" inputmode="numeric" id="set-manor" placeholder="例）55000">'
         +   '<label>モニター価格（円・空なら通常と同額）</label><input type="number" inputmode="numeric" id="set-mamon" placeholder="例）44000">'
-        +   '<div class="set-hint" style="margin:2px 0 8px">モニター価格＝モニター（症例写真の協力）として予約された方向けの料金です。設定が無ければ空欄で大丈夫です。</div>'
+        +   '<div class="set-hint" style="margin:2px 0 8px">モニター価格＝症例写真の撮影に協力してくれるお客様向けの割引価格です（不要なら空欄でOK）。</div>'
         +   '<div class="set-acts">'
         +     '<button type="button" class="set-btn set-primary" data-act="maddsave">💾 追加する</button>'
         +     '<button type="button" class="set-btn set-ghost" data-act="maddcancel">やめる</button>'
         +   '</div>'
-        +   '<div class="set-note" style="margin-top:6px">※ 追加後、予約ページに表示するには「アーティスト」タブで各アーティストの「✏️ 編集」を開き、「担当できるメニューと施術時間」を設定してください。</div>'
+        +   '<div class="set-note" style="margin-top:6px">※ 追加したメニューは「メニューとアーティスト → 👩‍⚕️ アーティスト」で各担当者の「✏️ 編集」を開き、「担当できるメニュー」にチェックを入れると予約ページに表示されます。</div>'
         + '</div></div>';
       if (!rows.length){ h += '<div class="set-ph">登録済みメニューはまだありません。</div>'; }
       rows.forEach(function(m){
@@ -4833,7 +4829,7 @@ function setLoadArtists(){
         +   '<label>得意・専門</label><input type="text" id="set-aspec-'+aid+'" value="'+esc(a.specialty||'')+'">'
         +   '<label>経歴</label><input type="text" id="set-acareer-'+aid+'" value="'+esc(a.career||'')+'">'
         +   '<label>指名料（この担当を指名したときの追加料金・円）</label><input type="number" inputmode="numeric" id="set-afee-'+aid+'" value="'+esc(a.nomination_fee==null?'':a.nomination_fee)+'">'
-        +   '<div class="set-hint" style="margin:2px 0 8px">この担当を指名すると通常料金に上乗せされる金額です。指名料が無い場合は空欄にしてください。</div>'
+        +   '<div class="set-hint" style="margin:2px 0 8px">この担当者を指名するお客様が追加で払う料金です（不要なら空欄でOK）。</div>'
         +   '<div class="set-acts">'
         +     '<button type="button" class="set-btn set-primary" data-act="asave" data-aid="'+aid+'">💾 保存</button>'
         +     '<button type="button" class="set-btn set-ghost" data-act="acancel" data-aid="'+aid+'">やめる</button>'
@@ -4876,7 +4872,7 @@ function setSaveArtist(aid){
 function setArtistMenuAssignHtml(aid, menus, pmap){
   var h = '<div class="set-am-wrap">'
     + '<label>担当できるメニューと施術時間</label>'
-    + '<div class="set-hint" style="margin:2px 0 8px">チェックしたメニューが、このアーティストの予約で選べるようになります。施術時間（分）は予約の所要時間に使われます（空欄なら60分）。</div>';
+    + '<div class="set-hint" style="margin:2px 0 8px">チェックしたメニューがこの担当者で予約できます。時間（分）は施術にかかる時間（空欄なら60分）。</div>';
   if (!menus.length){
     h += '<div class="set-hint">先に「メニュー・料金」でメニューを登録すると、ここで担当を割り当てられます。</div></div>';
     return h;
@@ -5376,8 +5372,8 @@ function setLoadAiContext(){
     var h = picker
       + '<div class="set-card set-aictx">'
       +   '<div class="set-name">📍 店舗情報（AIがお客様に伝える内容）</div>'
-      +   '<div class="set-hint" style="margin:2px 0 8px">「場所どこ？」「アクセスは？」「ここ間借り？」のような質問に AI が正しく答えるために使います。</div>'
-      +   '<label>住所</label><input type="text" id="set-aictx-addr" placeholder="例）〒802-0002 福岡県北九州市小倉北区京町1-2-24 201号室">'
+      +   '<div class="set-hint" style="margin:2px 0 8px">お客様から「場所どこ？」「アクセスは？」と聞かれたときに AI が答える情報です。</div>'
+      +   '<label>住所</label><input type="text" id="set-aictx-addr" placeholder="例）福岡県北九州市小倉北区京町1-2-24 201号">'
       +   '<label>アクセス（最寄駅・徒歩時間）</label><input type="text" id="set-aictx-access" placeholder="例）JR小倉駅から徒歩約8分">'
       +   '<label>施設の補足（間借り・別院名表示などの注意）</label><textarea id="set-aictx-facility" rows="2" placeholder="例）銀座美容クリニック小倉院に間借り。地図表示は別院名になります"></textarea>'
       +   '<div class="set-acts" style="margin-top:12px">'
@@ -5387,7 +5383,7 @@ function setLoadAiContext(){
       + '</div>'
       + '<div class="set-card set-aictx">'
       +   '<div class="set-name">📱 リッチメニュー（AIに教えるボタンの並び）</div>'
-      +   '<div class="set-hint" style="margin:2px 0 8px">画像の上でボタン範囲を作ると、AIに教えるボタン名と位置を一緒に管理できます。LINE公式側の実メニュー配信は今まで通り別設定です。</div>'
+      +   '<div class="set-hint" style="margin:2px 0 8px">画像にボタンを作って、AIに「この位置に何があるか」を教えます。実際のLINEメニュー配信は今まで通り別で設定します。</div>'
       +   '<div id="set-aictxRmList">読み込み中…</div>'
       +   '<div class="set-acts" style="margin-top:8px">'
       +     '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_add">＋ ボタンを追加</button>'
