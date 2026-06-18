@@ -2072,11 +2072,13 @@ function login(){
    ============================================================================ */
 function resetTenantScopedCaches(){
   STORE_MAP = null;
+  STORE_MAP_TENANT = null;
   if (typeof CRM_MENU_MAP   !== 'undefined') CRM_MENU_MAP = null;
   if (typeof CRM_ARTIST_MAP !== 'undefined') CRM_ARTIST_MAP = null;
   if (typeof CRM_PEOPLE     !== 'undefined') CRM_PEOPLE = [];
   if (typeof CRM_BY_KEY     !== 'undefined') CRM_BY_KEY = {};
   if (typeof CRM_CARDS      !== 'undefined') CRM_CARDS = {};
+  if (typeof STP !== 'undefined') STP = { scenarios: [], messages: [], editing: null, draft: null };
   var sel = document.getElementById('resvStore'); if (sel) sel.value = 'all';
 }
 /* ログイン後の入口：扱えるテナントを取得して分岐。失敗時は従来どおり自店運用。 */
@@ -2370,6 +2372,7 @@ function renderTenantHeader(){
 
 /* ---- 設定：店舗 slug → UUID キャッシュ（stores から1回だけ解決） ---- */
 var STORE_MAP = null;        // { kurume:{id,name}, hakata:{id,name}, ... }
+var STORE_MAP_TENANT = null; // STORE_MAP を読み込んだ時点の TENANT_ID。店切替中の古い応答を捨てる。
 var BOARD_PERIOD = 'today';
 var WD = ['日','月','火','水','木','金','土'];
 
@@ -2417,14 +2420,18 @@ function sbRpc(fn, body){
 
 /* stores（code→id）を1回ロードしてキャッシュ。store セレクタの店舗名も補完 */
 function ensureStoreMap(){
-  if (STORE_MAP) return Promise.resolve(STORE_MAP);
+  if (STORE_MAP && STORE_MAP_TENANT === TENANT_ID) return Promise.resolve(STORE_MAP);
+  var loadTenant = TENANT_ID;
   // ★public_slug も同時取得（patch-47.2）。集客リンク生成(acqTenantSlug)は code ではなく
   //   public_slug を使う必要がある（予約ページ index.html の resolveStoreConfig が
   //   public_store_resolve RPC で public_slug を引いて店を解決する設計）。
   //   code は (tenant_id,code) でしか一意でないため、テナント横断の公開リンクには使えない。
   // ★patch-51：liff_id も同時取得。集客タブの「Instagram用LIFFリンク」発行に使う。
   return sbGet('stores?select=id,name,code,public_slug,liff_id&order=name').then(function(rows){
+    // 店切替の直後に前テナントの応答が遅れて返っても、現在の画面を古い店情報で上書きしない。
+    if (loadTenant !== TENANT_ID) return ensureStoreMap();
     STORE_MAP = {};
+    STORE_MAP_TENANT = loadTenant;
     (rows||[]).forEach(function(s){
       if(s.code) STORE_MAP[s.code] = { id:s.id, name:s.name, public_slug:s.public_slug||null, liff_id:s.liff_id||null };
     });
@@ -6629,7 +6636,10 @@ function stpCall(action, extra){
   if(!TOKEN){ if(typeof showLogin==='function') showLogin('もう一度ログインしてください。'); return Promise.resolve({ok:false,reason:'no_auth'}); }
   // tenant_id＝選択中テナント。platform_admin(仁義)は staff行を持たず関数側で店を絞れないため必須。
   // staff の場合は関数側が自テナントを優先し、この値は無視される（詐称防止）。
-  var body = Object.assign({ action: action, tenant_id: TENANT_ID }, extra||{});
+  var body = Object.assign({ action: action }, extra||{});
+  // extra 側の tenant_id/action は信用しない。最後に画面の現在値で上書きして送る。
+  body.action = action;
+  body.tenant_id = TENANT_ID;
   return fetch(SB_URL + '/functions/v1/manage-steps', {
     method:'POST',
     headers:{ 'Content-Type':'application/json', 'apikey':SB_KEY, 'Authorization':'Bearer '+TOKEN },
@@ -6653,7 +6663,9 @@ function showSteps(el){
 function stpReload(){
   var list=document.getElementById('stpList');
   if(list) list.innerHTML='<div class="placeholder">読み込み中…</div>';
+  var loadTenant = TENANT_ID;
   return stpCall('scenario_list', {}).then(function(d){
+    if(loadTenant !== TENANT_ID) return; // 店切替前の古い一覧応答は描画しない
     if(!d.ok){ stpTopMsg(stpReason(d.reason), false); if(list) list.innerHTML=''; return; }
     STP.scenarios = Array.isArray(d.scenarios)?d.scenarios:[];
     STP.messages  = Array.isArray(d.messages)?d.messages:[];
@@ -6718,13 +6730,18 @@ function stpNewScenario(){
   //   ごく稀に表示の店と保存先テナントがズレるケースがあった（小倉店表示で久留米店に保存される事故）。
   //   防御：作成前に「今 TENANT_ID が指す店名」を仁義さんに見せて、押す前に気づけるようにする。
   //   既存シナリオの編集・削除は対象のシナリオ自身の tenant_id をサーバーが見るのでズレ得ない＝ガード不要。
+  var createTenant = TENANT_ID;
   var tname = (function(){
     if (typeof MY_TENANTS !== 'undefined' && Array.isArray(MY_TENANTS)){
-      for(var i=0;i<MY_TENANTS.length;i++){ if(MY_TENANTS[i].tenant_id===TENANT_ID) return MY_TENANTS[i].tenant_name; }
+      for(var i=0;i<MY_TENANTS.length;i++){ if(MY_TENANTS[i].tenant_id===createTenant) return MY_TENANTS[i].tenant_name; }
     }
     return '不明な店';
   })();
   if (!confirm('「' + tname + '」に新しい友達追加シナリオを作成します。\n\nこの店で作成して合っていますか？\n（違う店ならキャンセルして、画面を一度閉じて開き直してから操作してください）')) return;
+  if (createTenant !== TENANT_ID) {
+    stpTopMsg('店が切り替わりました。もう一度「新しいシナリオ」を押してください。', false);
+    return;
+  }
   return stpCall('scenario_save', { scenario:{ name:'新しいシナリオ', trigger_type:'friend_add', is_active:false, send_hour_from:9, send_hour_to:21 } })
     .then(function(d){
       if(!d.ok || !d.scenario){ stpTopMsg(stpReason(d.reason), false); return; }
