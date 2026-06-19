@@ -1308,7 +1308,14 @@ function loadHome(){
   function q(label,fn){ var b=document.createElement('button'); b.textContent=label; b.onclick=fn; quick.appendChild(b); }
   q('📋 予約管理', function(){ gotoSubtab('resv','showReservations'); });
   q('🗂 顧客カルテ', function(){ gotoSubtab('resv','showCustomers'); });
-  q('🌐 予約ページを開く', function(){ window.open((typeof BOOKING_URL!=='undefined'?BOOKING_URL:'https://trust-artmake.github.io/clinic-booking/new.html'), '_blank'); });
+  q('🌐 予約入口を開く', function(){
+    var prep = (typeof ensureStoreMap === 'function') ? ensureStoreMap() : Promise.resolve();
+    prep.then(function(){
+      var url = (typeof acqLiffUrl === 'function') ? acqLiffUrl('') : null;
+      if(url) window.open(url, '_blank');
+      else if(typeof gotoSubtab === 'function') gotoSubtab('settings','showSetup');
+    });
+  });
   if(isMgr) q('⚙️ お店の設定', function(){ gotoSubtab('settings','showStoreBasic'); });
   qc.appendChild(quick); body.appendChild(qc);
 
@@ -4624,24 +4631,17 @@ function setLoadInfo(){
       + '</div>';
 
     // 🔗 公開ページ（鍵情報ではないので表示OK・毎回URLを探さなくて済む）
-    //   ★店ごとに正しいリンクを出す（久留米固定のハードコードを撤去）。
-    //     直リンクは ?store=<店コード> で店を確定。お客様用は店の liff_id から生成（未設定なら警告）。
-    //     複数店のときは店名を頭に付ける。code/liff_id は encodeURIComponent で href を安全化。
+    //   ★お客様へ出す入口は LIFF のみに統一。直予約URLはここに表示しない。
+    //     複数店のときは店名を頭に付ける。liff_id は encodeURIComponent で href を安全化。
     var pubBase = 'https://trust-artmake.github.io/clinic-booking/';
     h += '<div class="set-sect"><h3>🔗 公開ページ</h3>';
     if (stores.length){
       stores.forEach(function(s){
         var pre = (stores.length>1 ? esc(s.name||'店')+'：' : '');
-        if (s.code){
-          var direct = pubBase + 'new.html?store=' + encodeURIComponent(s.code);
-          h += row(pre+'予約ページ（直リンク）', lk(direct, 'new.html?store='+esc(s.code)));
-        } else {
-          h += row(pre+'予約ページ（直リンク）', '<span class="set-ngb">⚠️ 店コード未設定</span>');
-        }
         if (s.liff_id){
-          h += row(pre+'予約ページ（お客様用）', lk('https://liff.line.me/'+encodeURIComponent(s.liff_id),'LINEで開く'));
+          h += row(pre+'予約入口（お客様用）', lk('https://liff.line.me/'+encodeURIComponent(s.liff_id),'LINEで開く'));
         } else {
-          h += row(pre+'予約ページ（お客様用）', '<span class="set-ngb">⚠️ LIFF未設定</span>');
+          h += row(pre+'予約入口（お客様用）', '<span class="set-ngb">⚠️ LIFF未設定</span>');
         }
       });
     } else {
@@ -6587,8 +6587,6 @@ function setMsg(id, text, ok){
      !TOKEN は showLogin()。null/空配列で落ちない。
    ============================================================================ */
 
-/* 予約ページのベースURL（?ref=タグ を付けて配布する） */
-var BOOKING_URL = 'https://trust-artmake.github.io/clinic-booking/new.html';
 var ACQ_PERIOD = 'this_month';
 /* 集計の基準軸：'created'＝申込日（マーケ視点・既定）／'start'＝施術日（実績視点）／'friend_added'＝友達追加日（patch-51） */
 var ACQ_BASIS  = 'created';
@@ -7025,40 +7023,6 @@ function acqRandToken(n){
   }catch(e){ /* フォールバックへ */ }
   for(var j=0;j<n;j++){ out += chars[Math.floor(Math.random()*chars.length)]; }
   return out;
-}
-
-/* 1つの ref_sources 行から「現在のテナントの予約ページ」へのリンクを組み立てる。
-   ?store=<slug>&ref=<tag>。store を明示しないと予約ページが既定（久留米）にフォールバックし、
-   小倉テナントで発行したリンクからのお客様が全員久留米として予約される越境バグになる
-   （patch-47で根絶、patch-47.1で STORE_MAP 参照、patch-47.2で public_slug に統一）。
-   ★patch-47.2：STORE_MAP[code].public_slug を使う。
-     理由：予約ページ index.html の resolveStoreConfig() は public_store_resolve(p_slug) で
-     stores.public_slug を引いて店を解決する設計。code は (tenant_id,code) でしか一意でないため、
-     code と public_slug が異なる店舗が将来できると集客リンクが解決できずエラーになる。
-     現状の久留米・小倉は code=public_slug で一致しており、この修正前後で出力URLは不変。
-   ★フォールバック：public_slug が未設定なら code を使い、それも無ければ resvStore セレクタ。 */
-function acqTenantSlug(){
-  if (STORE_MAP){
-    var keys = Object.keys(STORE_MAP);
-    if (keys.length){
-      var entry = STORE_MAP[keys[0]];
-      if (entry && entry.public_slug) return entry.public_slug;  // ★本来の経路
-      return keys[0];  // フォールバック：public_slug 未設定なら code を返す
-    }
-  }
-  // 二段目フォールバック：resvStore があり 'all' でなければそれ
-  if (typeof currentStoreSlug === 'function'){
-    var s = currentStoreSlug();
-    if (s && s !== 'all') return s;
-  }
-  return '';
-}
-function acqBookingUrl(tag){
-  var slug = acqTenantSlug();
-  var qs = [];
-  if (slug) qs.push('store=' + encodeURIComponent(slug));
-  if (tag) qs.push('ref=' + encodeURIComponent(tag));
-  return BOOKING_URL + (qs.length ? '?' + qs.join('&') : '');
 }
 
 /* patch-51：Instagram プロフィール等に貼る「LIFFリンク」を発行する。
