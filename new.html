@@ -891,12 +891,19 @@ function canSub(){
   return true;
 }
 function updSub(){ var b=document.getElementById('bsub'); if(b)b.disabled=!canSub(); }
+function hasLineUid(uid){ return String(uid == null ? "" : uid).trim() !== ""; }
+var LINE_UID_REQUIRED_MESSAGE = 'LINEアプリで開くと予約できます。予約確認やキャンセル案内を正しくお届けするために必要です。';
 function doSub(){
   if(!canSub())return;  // ★同意＋（モニター選択可なら選択済み）の両方が揃わないと送らない（patch-48）
   // ★日付・時間が未選択なら送信しない（満席で枠を捨てた後などに null:00 で送るのを防止）。時間選択へ戻す。
   if(!st.date || !st.time){
     var e0=document.getElementById('serr'); if(e0){e0.className='msg-err';e0.textContent='日付と時間をもう一度お選びください。';}
     go(3); return;
+  }
+  // 媒体別LIFFリンク運用の保険：LINE UID が取れない予約は本人紐付けが弱くなるため作らない。
+  if(!hasLineUid(st.uid)){
+    var e1=document.getElementById('serr'); if(e1){e1.className='msg-err';e1.textContent=LINE_UID_REQUIRED_MESSAGE;}
+    return;
   }
   var btn=document.getElementById('bsub');
   if(btn){btn.disabled=true;btn.textContent='送信中…';}
