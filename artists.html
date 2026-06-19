@@ -10,8 +10,8 @@
       一覧       … public_artist_list(p_store_id)
       症例写真   … public_artist_profile(p_store_id, p_artist_id) の photos を使う（career/reviews は使わない）
   ・XSS対策：自由入力(caption等)は必ず esc()。画像URLは https:// か Supabase Storage 公開URL のみ許可（safeImg）。
-  ・「予約する」は予約ページ(new.html?store=...)へ遷移。施術者を初期選択する artist パラメータも付ける。
-  ・GitHub Pages で配信する純粋な静的HTML（外部依存なし）。LIFFは不要（公開閲覧のみ・PIIを扱わない）。
+  ・「予約する」は店のLIFF URLへ遷移。施術者を初期選択する artist パラメータも付ける。
+  ・GitHub Pages で配信する純粋な静的HTML（外部依存なし）。閲覧は公開、予約入口だけLIFFへ集約する。
 -->
 <html lang="ja">
 <head>
@@ -125,6 +125,7 @@ var SB_KEY  = "sb_publishable_e5A9MJzOCvzsfWXBd9DLzg_Wa_hJ0qb";
 var STORE_ID   = "22222222-0000-0000-0000-000000000001";
 var TENANT_ID  = "11111111-1111-1111-1111-111111111111";
 var STORE_NAME = "久留米";
+var LIFF_ID    = "";
 
 // LIFFは元のクエリを ?liff.state=... に包む場合があるので両方を見る（index.html と同じ作法）。
 function getQueryParam(name){
@@ -185,11 +186,13 @@ function errBox(msg){
   document.getElementById('bookBtn').style.display = 'none';
 }
 
-// 予約ページURL（new.html?store=...）。施術者を初期選択する artist も付ける（任意）。
+// 予約入口URL。直予約URLは表に出さず、店のLIFFリンクへ集約する。
 function bookUrl(artistId){
-  var u = 'new.html?store=' + encodeURIComponent(STORE);
-  if(artistId) u += '&artist=' + encodeURIComponent(artistId);
-  return u;
+  if(!LIFF_ID) return '';
+  var qs = [];
+  if(STORE) qs.push('store=' + encodeURIComponent(STORE));
+  if(artistId) qs.push('artist=' + encodeURIComponent(artistId));
+  return 'https://liff.line.me/' + encodeURIComponent(LIFF_ID) + (qs.length ? '?' + qs.join('&') : '');
 }
 
 // ===== 状態 =====
@@ -270,9 +273,15 @@ function selectArtist(artistId){
   var nm = a ? a.name : '';
   // 予約ボタン更新
   var btn = document.getElementById('bookBtn');
-  btn.style.display = 'block';
-  btn.textContent = (nm ? nm + ' さんで予約する' : '予約する');
-  btn.setAttribute('href', bookUrl(artistId));
+  var bu = bookUrl(artistId);
+  if(bu){
+    btn.style.display = 'block';
+    btn.textContent = (nm ? nm + ' さんで予約する' : '予約する');
+    btn.setAttribute('href', bu);
+  }else{
+    btn.style.display = 'none';
+    btn.removeAttribute('href');
+  }
 
   var body = document.getElementById('body');
   body.innerHTML = '<div class="lead"><b>'+esc(nm)+'</b> さんの症例写真</div><div class="sec-h">症例写真</div><div style="text-align:center;color:#aaa;padding:24px;">読み込み中…</div>';
@@ -336,6 +345,7 @@ document.addEventListener('click', function(e){
       if(s.id)        STORE_ID   = s.id;
       if(s.tenant_id) TENANT_ID  = s.tenant_id;
       if(s.name)      STORE_NAME = s.name;
+      if(s.liff_id)   LIFF_ID    = s.liff_id;
     }else if(!fallbackOk()){
       // 明示された別店が見つからない → 久留米へ倒さずエラー（誤った店の情報を出さない）。
       errBox('お店が見つかりませんでした。お店の公式LINEのメニューから、もう一度お試しください。');
