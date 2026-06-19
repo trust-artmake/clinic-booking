@@ -1436,8 +1436,8 @@ function setupStepRows(status){
       jumpFn:"showStoreBasic", jumpLabel:"お店の基本を設定する" },
     { key:"line", field:"line_done", name:"LINEとつなぐ", desc:"このお店の公式LINEと安全につなぐ鍵（LINE管理画面からコピーして貼る2つの文字列）を登録します。",
       jumpFn:"__samepage", jumpLabel:"下のLINE接続パネルへ" },
-    { key:"liff", field:"liff_done", name:"予約ページのリンク", desc:"お客様がLINEのトーク内で開く「予約・問診・同意書」のページのリンクを設定します。",
-      jumpFn:"showStoreBasic", jumpLabel:"予約ページのリンクを確認する" },
+    { key:"liff", field:"liff_done", name:"予約入口のリンク", desc:"お客様がLINEのトーク内で開く「予約・問診・同意書」の入口を設定します。未設定の間はお客様用リンクを出しません。",
+      jumpFn:"showStoreBasic", jumpLabel:"予約入口のリンクを確認する" },
     { key:"calendar", field:"calendar_done", name:"Googleカレンダー連携", desc:"予約をこのお店専用のGoogleカレンダーへ自動で書き込む設定です。",
       jumpFn:"showStoreBasic", jumpLabel:"カレンダー連携を確認する" },
     { key:"staff", field:"staff_done", name:"スタッフのログイン", desc:"この管理画面に入れる管理者・スタッフのログインを作ります。",
@@ -5243,8 +5243,8 @@ function setLoadStores(){
         +   '<label>最終受付（この時刻の枠まで予約可）</label><input type="time" id="set-se-'+id+'" value="'+esc(setHM(s.business_hours_end))+'">'
         +   '<label>予約の刻み（分）</label><input type="number" inputmode="numeric" id="set-si-'+id+'" value="'+esc(s.slot_interval_min==null?'':s.slot_interval_min)+'">'
         +   '<label>席数（同時に施術できる人数・1以上）</label><input type="number" inputmode="numeric" id="set-sc-'+id+'" value="'+esc(s.seat_count==null?'':s.seat_count)+'">'
-        +   '<label>LIFF ID（予約ページのLINEログイン用）</label><input type="text" id="set-sliff-'+id+'" value="'+esc(s.liff_id||'')+'" placeholder="例）2010315389-1lSwQW1K" autocomplete="off">'
-        +   '<div class="set-hint" style="margin:2px 0 8px">LINE Developers → 該当チャネル → LIFF タブで確認できます。空欄でも保存できます（後で設定）。</div>'
+        +   '<label>LIFF ID（お客様用の予約入口）</label><input type="text" id="set-sliff-'+id+'" value="'+esc(s.liff_id||'')+'" placeholder="例）2010315389-1lSwQW1K" autocomplete="off">'
+        +   '<div class="set-hint" style="margin:2px 0 8px">LINE Developers → 該当チャネル → LIFF タブで確認できます。未設定の間は、お客様用の予約入口・集客リンクは発行されません。</div>'
         +   '<label>Googleカレンダー ID（予約をカレンダーに自動反映）</label><input type="text" id="set-sgcal-'+id+'" value="'+esc(s.google_calendar_id||'')+'" placeholder="例）xxxxx@group.calendar.google.com" autocomplete="off">'
         +   '<div class="set-hint" style="margin:2px 0 8px">Googleカレンダーの「カレンダーの設定」→ カレンダーID。サービスアカウントへの共有も必要です（運営者にご相談ください）。</div>'
         +   '<div class="set-acts">'
@@ -5264,7 +5264,7 @@ function setLoadStores(){
 
 function setIsHHMM(v){ return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v||'')); }
 
-/* LIFF ID（任意・空欄OK）。LINE 公式パターン＝「数字8〜12桁-英数字6〜16桁」緩め検証。 */
+/* LIFF ID（未設定ならお客様用リンクを出さない）。LINE 公式パターン＝「数字8〜12桁-英数字6〜16桁」緩め検証。 */
 function setIsLiffId(v){
   v = String(v||'').trim();
   if (!v) return true;
@@ -7053,7 +7053,7 @@ function loadAcqList(){
   var box = document.getElementById('acqList');
   if(!box) return;
   box.innerHTML = '<div class="placeholder">読み込み中…</div>';
-  // ★STORE_MAP を先にロード＝acqBookingUrl が現テナントの slug を取れるようにする。
+  // ★STORE_MAP を先にロード＝acqLiffUrl が現テナントの slug を取れるようにする。
   //   これが無いと小倉テナントでも URL が ?ref=... 単独で発行され、予約ページが
   //   既定の久留米にフォールバック＝越境バグになる（patch-47.1）。
   var prep = (typeof ensureStoreMap === 'function') ? ensureStoreMap() : Promise.resolve();
