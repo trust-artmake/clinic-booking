@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>本番開始 直前チェックリスト | アートメイクLINEシステム</title>
 <meta name="robots" content="noindex,nofollow">
 <style>
@@ -98,27 +100,24 @@ li.task-list-item{list-style:none;margin-left:-18px}
 </ul></li>
 </ul>
 <hr>
-<h2>D. 予約ページが開くか</h2>
+<h2>D. 予約入口が開くか</h2>
 <ul>
-<li class="task-list-item"><input type="checkbox" disabled> <strong>予約ページ</strong> を実際に開いて、メニュー・担当・日時が選べる
+<li class="task-list-item"><input type="checkbox" disabled> <strong>予約入口（お客様用）</strong> を実際に開いて、メニュー・担当・日時が選べる
 <ul>
-<li><strong>お店の設定</strong> → <strong>ℹ️ システム情報</strong> に予約ページのリンクがある</li>
+<li><strong>お店の設定</strong> → <strong>ℹ️ システム情報</strong> に「予約入口（お客様用）」のリンクがある</li>
 <li>そのリンクを別タブで開く</li>
 <li>メニュー → 担当 → 日時 → 「予約する」まで進めるか確認</li>
 <li><strong>開けない場合はシステム管理者へ連絡</strong></li>
 </ul></li>
 </ul>
-<p>予約ページURL（参考）：</p>
-<ul>
-<li>久留米：<code>https://trust-artmake.github.io/clinic-booking/new.html?store=kurume</code></li>
-<li>小倉：<code>https://trust-artmake.github.io/clinic-booking/new.html?store=kokura</code></li>
-</ul>
+<p>お客様へ案内するURLは、管理画面に出る <strong>LINEで開く予約入口（LIFF）</strong> だけです。<br>
+<code>new.html?store=...</code> の直URLは、LINE Developers の LIFF Endpoint 設定用で、お客様には配りません。</p>
 <hr>
 <h2>E. LINE通知が届くか</h2>
 <ul>
 <li class="task-list-item"><input type="checkbox" disabled> テスト予約を1件入れて、LINEに通知が届いた
 <ul>
-<li>D で開いた予約ページで <strong>自分の名前で1件予約</strong> を入れる</li>
+<li>D で開いた予約入口で <strong>自分の名前で1件予約</strong> を入れる</li>
 <li><strong>自分のLINEにお客様用の自動返信</strong> が届くか</li>
 <li><strong>スタッフのLINE（管理用）にも通知</strong> が来るか</li>
 <li><strong>届かない場合はシステム管理者へ連絡</strong></li>
