@@ -358,7 +358,6 @@ var STORE = STORE_RAW || 'kurume';              // 店舗slug（既定 kurume）
 var MODE  = getQueryParam('mode')  || 'book';   // 'book'（予約）/ 'cancel'（実装済み）/ 'consent'（準備中）
 var REF   = getQueryParam('ref')   || '';       // 流入元タグ（集客：?ref= で来た予約に記録）
 var INIT_ARTIST = getQueryParam('artist') || ''; // 症例写真ページから来た時に最初から開くアーティストID。
-var STORE_RESOLVED_OK = false; // ★resolveStoreConfigでこの店のLIFFを確定できたらtrue（行き止まりボタンの取り違え防止）
 
 // コース選択はイベント委譲（data-* から取得）。onclick に名前を文字列連結しない＝XSS/壊れ防止。
 // ★メニュー名で価格区分を決める運用(patch-48前期)は撤回（メニュー名管理が煩雑になる）。
@@ -903,13 +902,7 @@ function doSub(){
   }
   // 媒体別LIFFリンク運用の保険：LINE UID が取れない予約は本人紐付けが弱くなるため作らない。
   if(!hasLineUid(st.uid)){
-    var e1=document.getElementById('serr');
-    if(e1){
-      e1.className='msg-err';
-      e1.textContent=LINE_UID_REQUIRED_MESSAGE;
-      var act1=document.createElement('div'); e1.appendChild(act1);
-      renderLiffOpenButton(act1, '予約', 'book');   // ★LINEで開き直すボタン（店名は内部で付与）
-    }
+    var e1=document.getElementById('serr'); if(e1){e1.className='msg-err';e1.textContent=LINE_UID_REQUIRED_MESSAGE;}
     return;
   }
   var btn=document.getElementById('bsub');
@@ -1001,46 +994,6 @@ function backToTalk(){
   // ★LINEの中で開いた時だけ closeWindow でトークへ戻す。
   //   ブラウザ（LINE外）では戻り先が無いので何もしない＝「外部アプリを開きますか」ポップアップを出さない。
   if(inLineClient()){ try{ liff.closeWindow(); }catch(e){} }
-}
-
-// ===== 行き止まり改善：LINE外/未ログインで line_uid が取れない時の「LINEで開き直す」ボタン =====
-// （poc/_pure.mjs の同名関数と実装を一致させること＝テストで構文照合する）
-function isValidLiffId(id){ return /^\d{6,}-[0-9A-Za-z]+$/.test(String(id==null?'':id).trim()); }
-function buildLiffOpenUrl(liffId, store, mode, ref){
-  var id=String(liffId==null?'':liffId).trim();
-  if(!isValidLiffId(id)) return null;            // 空/形式不正→出さない（誤った店へ飛ばさない・空飛び防止）
-  var url='https://liff.line.me/'+id;            // LIFF ID はパスに直結（エンコード不要）
-  var q=[];
-  if(store) q.push('store='+encodeURIComponent(store));
-  if(mode && mode!=='book') q.push('mode='+encodeURIComponent(mode));
-  if(ref) q.push('ref='+encodeURIComponent(ref)); // refは必ず引き継ぐ（流入元タグを保つ）
-  if(q.length) url+='?'+q.join('&');
-  return url;
-}
-// ボタン文言を組み立てる（poc/_pure.mjs の同名関数と一致）。店名を前置して取り違えを一目で分かるように。
-function buildLiffButtonLabel(storeName, action){
-  var sn=String(storeName==null?'':storeName).trim();
-  return (sn?sn+'の':'')+'LINEで'+action+'を続ける';
-}
-// 行き止まり画面の container（空div）に「LINEで開き直す」ボタンをDOMで生成して追加する（4モード共通）。
-//   ・STORE_RESOLVED_OK（この店のLIFFを確定できた）が立つ時だけ出す＝取り違え防止。
-//   ・ボタン文言に店名を入れる（例「小倉院のLINEで予約を続ける」）＝お客様がどの店か分かる・取り違え確認も一目。
-//   ・innerHTML連結でなくcreateElementで作る＝エラー文(textContent)の上書きでボタンが消える事故を防ぐ。
-function renderLiffOpenButton(container, action, mode){
-  if(!container) return;
-  if(!STORE_RESOLVED_OK) return;                 // 店のLIFF未確定なら出さない
-  var url=buildLiffOpenUrl(LIFF_ID, STORE, mode, REF);
-  if(!url) return;                               // 念のための二重ガード
-  var btn=document.createElement('button');
-  btn.type='button'; btn.className='btn btn-p';
-  btn.style.display='inline-block';              // CSSのdisplay:none対策（明示値）
-  btn.style.marginTop='16px'; btn.style.paddingLeft='28px'; btn.style.paddingRight='28px';
-  btn.textContent=buildLiffButtonLabel(STORE_NAME, action);  // 店名入り文言（textContent＝XSS不可）
-  btn.addEventListener('click', function(){
-    var u=buildLiffOpenUrl(LIFF_ID, STORE, mode, REF); // 押下時に再評価（確定後の値）
-    if(u) location.href=u;
-  });
-  container.appendChild(btn);
 }
 
 // ===== 利用規約 =====
@@ -1163,8 +1116,7 @@ function loadCancelList(){
   var body=document.getElementById('cancelBody'); if(!body) return;
   if(!st.idToken){
     // LINE外（ブラウザ）／本人確認トークン未取得＝LINEから開いてもらう案内（#92）
-    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">ご予約のキャンセルは、公式LINEのトーク画面（予約メニュー）から開いてご利用ください。</div><div id="cancelLiffAct"></div></div>';
-    renderLiffOpenButton(document.getElementById('cancelLiffAct'), 'キャンセル', 'cancel');   // ★LINEで開き直すボタン（店名は内部で付与）
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">ご予約のキャンセルは、公式LINEのトーク画面（予約メニュー）から開いてご利用ください。</div></div>';
     return;
   }
   body.innerHTML='<div class="cl-loading">ご予約を確認しています…</div>';
@@ -1223,8 +1175,7 @@ function qChecks(name){ var a=[]; var els=document.querySelectorAll('input[name=
 function qLoad(){
   var body=document.getElementById('qBody'); if(!body) return;
   if(!st.idToken){
-    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">事前問診は、公式LINEのトーク画面（問診のご案内）から開いてご記入ください。</div><div id="qLiffAct"></div></div>';
-    renderLiffOpenButton(document.getElementById('qLiffAct'), '問診', 'questionnaire');   // ★LINEで開き直すボタン（店名は内部で付与）
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">事前問診は、公式LINEのトーク画面（問診のご案内）から開いてご記入ください。</div></div>';
     return;
   }
   var dz=['高血圧','糖尿病','心臓の病気','アレルギー体質','ケロイド体質','皮膚の病気','感染症（肝炎等）','その他'];
@@ -1394,8 +1345,7 @@ function consentToday(){
 function loadConsentForm(){
   var body=document.getElementById('consentBody'); if(!body) return;
   if(!st.uid){
-    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">同意書のご署名は、公式LINEのトーク画面から開いてご利用ください。</div><div id="consentLiffAct"></div></div>';
-    renderLiffOpenButton(document.getElementById('consentLiffAct'), '同意書', 'consent');   // ★LINEで開き直すボタン（店名は内部で付与）
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">同意書のご署名は、公式LINEのトーク画面から開いてご利用ください。</div></div>';
     return;
   }
   // 写真項目は毎回リセット（再表示時の取り違え防止）。
@@ -1741,8 +1691,6 @@ function showStoreError(){
   // ★まず店舗設定を解決してから初期化（LIFF_ID/STORE_ID/TENANT_ID を店に合わせる）。
   resolveStoreConfig().then(function(ok){
     if(!ok){ showStoreError(); return; }  // 明示された店が特定できない → 久留米へ倒さず停止。
-    // ★この店のLIFFを有効に確定できた時だけ、行き止まりで「LINEで開き直す」ボタンを出す（取り違え防止）。
-    STORE_RESOLVED_OK = isValidLiffId(LIFF_ID);
     // 予約モードのみマスタ取得（キャンセルは自分の予約一覧をUID確定後に取得・同意書は準備中）。
     if(MODE==='book') loadOptions();
     initLiff();
