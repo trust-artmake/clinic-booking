@@ -908,7 +908,7 @@ function doSub(){
       e1.className='msg-err';
       e1.textContent=LINE_UID_REQUIRED_MESSAGE;
       var act1=document.createElement('div'); e1.appendChild(act1);
-      renderLiffOpenButton(act1, 'LINEで予約を続ける', 'book');   // ★LINEで開き直すボタン
+      renderLiffOpenButton(act1, '予約', 'book');   // ★LINEで開き直すボタン（店名は内部で付与）
     }
     return;
   }
@@ -1017,10 +1017,16 @@ function buildLiffOpenUrl(liffId, store, mode, ref){
   if(q.length) url+='?'+q.join('&');
   return url;
 }
+// ボタン文言を組み立てる（poc/_pure.mjs の同名関数と一致）。店名を前置して取り違えを一目で分かるように。
+function buildLiffButtonLabel(storeName, action){
+  var sn=String(storeName==null?'':storeName).trim();
+  return (sn?sn+'の':'')+'LINEで'+action+'を続ける';
+}
 // 行き止まり画面の container（空div）に「LINEで開き直す」ボタンをDOMで生成して追加する（4モード共通）。
 //   ・STORE_RESOLVED_OK（この店のLIFFを確定できた）が立つ時だけ出す＝取り違え防止。
+//   ・ボタン文言に店名を入れる（例「小倉院のLINEで予約を続ける」）＝お客様がどの店か分かる・取り違え確認も一目。
 //   ・innerHTML連結でなくcreateElementで作る＝エラー文(textContent)の上書きでボタンが消える事故を防ぐ。
-function renderLiffOpenButton(container, label, mode){
+function renderLiffOpenButton(container, action, mode){
   if(!container) return;
   if(!STORE_RESOLVED_OK) return;                 // 店のLIFF未確定なら出さない
   var url=buildLiffOpenUrl(LIFF_ID, STORE, mode, REF);
@@ -1029,7 +1035,7 @@ function renderLiffOpenButton(container, label, mode){
   btn.type='button'; btn.className='btn btn-p';
   btn.style.display='inline-block';              // CSSのdisplay:none対策（明示値）
   btn.style.marginTop='16px'; btn.style.paddingLeft='28px'; btn.style.paddingRight='28px';
-  btn.textContent=label;                         // 文言はtextContent（XSS不可）
+  btn.textContent=buildLiffButtonLabel(STORE_NAME, action);  // 店名入り文言（textContent＝XSS不可）
   btn.addEventListener('click', function(){
     var u=buildLiffOpenUrl(LIFF_ID, STORE, mode, REF); // 押下時に再評価（確定後の値）
     if(u) location.href=u;
@@ -1158,7 +1164,7 @@ function loadCancelList(){
   if(!st.idToken){
     // LINE外（ブラウザ）／本人確認トークン未取得＝LINEから開いてもらう案内（#92）
     body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">ご予約のキャンセルは、公式LINEのトーク画面（予約メニュー）から開いてご利用ください。</div><div id="cancelLiffAct"></div></div>';
-    renderLiffOpenButton(document.getElementById('cancelLiffAct'), 'LINEでキャンセルを続ける', 'cancel');   // ★LINEで開き直すボタン
+    renderLiffOpenButton(document.getElementById('cancelLiffAct'), 'キャンセル', 'cancel');   // ★LINEで開き直すボタン（店名は内部で付与）
     return;
   }
   body.innerHTML='<div class="cl-loading">ご予約を確認しています…</div>';
@@ -1218,7 +1224,7 @@ function qLoad(){
   var body=document.getElementById('qBody'); if(!body) return;
   if(!st.idToken){
     body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">事前問診は、公式LINEのトーク画面（問診のご案内）から開いてご記入ください。</div><div id="qLiffAct"></div></div>';
-    renderLiffOpenButton(document.getElementById('qLiffAct'), 'LINEで問診を続ける', 'questionnaire');   // ★LINEで開き直すボタン
+    renderLiffOpenButton(document.getElementById('qLiffAct'), '問診', 'questionnaire');   // ★LINEで開き直すボタン（店名は内部で付与）
     return;
   }
   var dz=['高血圧','糖尿病','心臓の病気','アレルギー体質','ケロイド体質','皮膚の病気','感染症（肝炎等）','その他'];
@@ -1389,7 +1395,7 @@ function loadConsentForm(){
   var body=document.getElementById('consentBody'); if(!body) return;
   if(!st.uid){
     body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">同意書のご署名は、公式LINEのトーク画面から開いてご利用ください。</div><div id="consentLiffAct"></div></div>';
-    renderLiffOpenButton(document.getElementById('consentLiffAct'), 'LINEで同意書を続ける', 'consent');   // ★LINEで開き直すボタン
+    renderLiffOpenButton(document.getElementById('consentLiffAct'), '同意書', 'consent');   // ★LINEで開き直すボタン（店名は内部で付与）
     return;
   }
   // 写真項目は毎回リセット（再表示時の取り違え防止）。
