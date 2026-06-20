@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>管理者用 運用マニュアル | アートメイクLINEシステム</title>
 <meta name="robots" content="noindex,nofollow">
 <style>
@@ -260,7 +262,7 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <tr><td>1</td><td>お店をつくる（テナント登録）</td><td>コンソール（システム管理者）</td></tr>
 <tr><td>2</td><td>お店の基本情報</td><td>🏪 お店の基本</td></tr>
 <tr><td>3</td><td>LINEとつなぐ（鍵2本）</td><td>🔗 LINE接続（システム管理者のみ）</td></tr>
-<tr><td>4</td><td>予約ページのリンク確認</td><td>ℹ️ システム情報</td></tr>
+<tr><td>4</td><td>予約入口のリンク確認</td><td>ℹ️ システム情報</td></tr>
 <tr><td>5</td><td>Googleカレンダー連携</td><td>🔗 LINE接続 内</td></tr>
 <tr><td>6</td><td>スタッフのログイン</td><td>👥 スタッフ</td></tr>
 <tr><td>7</td><td>メニューと担当者</td><td>💉メニュー＋👩‍⚕️アーティスト</td></tr>
@@ -282,7 +284,7 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <li>☐ 正式メニュー・料金・所要時間が正しい</li>
 <li>☐ アーティストと担当メニューの紐付け全員分OK</li>
 <li>☐ シフト（基本＋例外日）が翌月分まで登録済み</li>
-<li>☐ 予約ページを実際に開いて選べる</li>
+<li>☐ LINEで開く予約入口を実際に開いて選べる</li>
 <li>☐ LINE通知が届く</li>
 <li>☐ Googleカレンダーに反映される</li>
 </ul>
@@ -334,7 +336,7 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <li><strong>「＋ 追加してリンク発行」</strong></li>
 <li><strong>LINEで開く集客リンク</strong> が発行される</li>
 <li>このリンクを <strong>SNSプロフィール・チラシ</strong> に貼ると、どこからLINE追加・予約に来たか自動で記録されます</li>
-<li>店舗のLINE予約ページ（LIFF）が未設定の場合、集客リンクは発行できません。先に <strong>お店の設定 → 初期設定</strong> でLIFFを登録してください</li>
+<li>店舗のLINEで開く予約入口（LIFF）が未設定の場合、集客リンクは発行できません。先に <strong>お店の設定 → 初期設定</strong> でLIFFを登録してください</li>
 </ol>
 <h3>流入分析の見方</h3>
 <p>下部の <strong>「📊 流入分析」</strong>：</p>
@@ -386,7 +388,7 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <h3>予約のキャンセル処理</h3>
 <ul>
 <li>予約カードの <strong>「キャンセル」</strong> → Googleカレンダーからも自動削除（gcal-sync）</li>
-<li>LINE通知も自動でお客様に送信されます</li>
+<li><strong>お客様への自動連絡は送られません</strong>（必要なら別途LINEで連絡する）</li>
 </ul>
 <h3>取得失敗・画面エラー</h3>
 <ul>
