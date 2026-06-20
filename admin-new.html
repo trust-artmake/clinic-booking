@@ -921,7 +921,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <span class="help-label">📖 操作方法</span>
     <a href="https://trust-artmake.github.io/clinic-booking/admin-operation-pack.html" target="_blank" rel="noopener">集客（流入経路）の使い方</a>
   </div>
-  <div class="help-hint">💡 <b>流入経路</b>＝お客様がどこから予約に来たか。Instagram・チラシ・広告ごとに専用リンクを発行すると、どれが一番効いているか自動集計できます。</div>
+  <div class="help-hint">💡 <b>流入経路</b>＝お客様がどこから予約に来たか。Instagram・チラシ・広告ごとに専用リンクを発行すると、どれが一番効いているか自動集計できます。<br>※タップ数も計測したいリンクは、新しく発行して貼り替えてください（古いリンクのままだとタップは計測されず、CVRは「—」になります）。</div>
   <h3>🔗 流入元リンク（発行・コピー）</h3>
   <div id="acqList"><div class="placeholder">読み込み中…</div></div>
 
@@ -7048,6 +7048,28 @@ function acqLiffUrl(tag){
   return 'https://liff.line.me/' + encodeURIComponent(liffId) + (qs.length ? '?' + qs.join('&') : '');
 }
 
+/* patch-54：タップ計測つきの集客リンク（計測URL）を発行する。
+   形：<SB_URL>/functions/v1/r?t=<slug>&ref=<tag>
+   ・Edge Function "r" がタップを ref_clicks に記録 → 店の予約LIFFへ302転送する。
+   ・お客様の体感は acqLiffUrl と同じ（裏で一瞬記録するだけ／画面は出ない）。
+   ・liff_id か slug が無い店舗は転送先を組めないため null（呼び出し側で発行不可表示）。 */
+function acqTrackUrl(tag){
+  var liffId = null, slug = null;
+  if (STORE_MAP){
+    var keys = Object.keys(STORE_MAP);
+    for (var i = 0; i < keys.length; i++){
+      var e = STORE_MAP[keys[i]];
+      if (e && e.liff_id){ liffId = e.liff_id; slug = e.public_slug || keys[i]; break; }
+    }
+  }
+  if (!liffId || !slug) return null;
+  var base = String(SB_URL || '').replace(/\/$/, '');
+  if (!base) return null;
+  var qs = 't=' + encodeURIComponent(slug);
+  if (tag) qs += '&ref=' + encodeURIComponent(tag);
+  return base + '/functions/v1/r?' + qs;
+}
+
 /* ===== ① 流入元リンク一覧 ===== */
 function loadAcqList(){
   var box = document.getElementById('acqList');
@@ -7081,9 +7103,9 @@ function renderAcqList(rows){
   box.innerHTML = rows.map(function(s){
     var shown = (s.is_shown !== false);
     var id  = esc(s.id);
-    var liffUrl = acqLiffUrl(s.tag);
+    var liffUrl = acqTrackUrl(s.tag);   // ★patch-54：計測URL（タップ記録→LIFFへ転送）に切替
     var linkBlock = liffUrl
-      ? ('<div class="acq-hint" style="margin:6px 4px 2px;font-size:11px">📱 集客リンク（LINEで開く・タップで友達追加導線へ）</div>'
+      ? ('<div class="acq-hint" style="margin:6px 4px 2px;font-size:11px">📱 集客リンク（LINEで開く・タップ数も計測）</div>'
         + '<div class="acq-url">'
           + '<input type="text" readonly value="'+esc(liffUrl)+'" onclick="this.select()" title="Instagram・YouTube・X等のプロフィールに貼る">'
           + '<button type="button" class="acq-btn copy" data-aq="copy" data-url="'+esc(liffUrl)+'">📋 コピー</button>'
@@ -7260,9 +7282,19 @@ function loadAcqStats(){
       });
     return;
   }
-  // 既存：合計表示（ベース別）
-  sbRpc('ref_stats', { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID, p_basis: ACQ_BASIS })
-    .then(function(rows){ renderAcqStats(Array.isArray(rows) ? rows : [], ACQ_PERIOD, ACQ_BASIS); })
+  // 既存：合計表示（ベース別）＋ patch-54：タップ計測（ref_click_stats）を同時取得して突合。
+  //   ref_click_stats が未適用のDB（patch-54前）でも落ちないよう、失敗時は [] にフォールバック。
+  Promise.all([
+    sbRpc('ref_stats',       { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID, p_basis: ACQ_BASIS }),
+    sbRpc('ref_click_stats', { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID }).catch(function(){ return []; })
+  ])
+    .then(function(res){
+      var rows = Array.isArray(res[0]) ? res[0] : [];
+      var clk  = Array.isArray(res[1]) ? res[1] : [];
+      var taps = {};
+      clk.forEach(function(c){ if(c && c.ref != null) taps[c.ref] = Number(c.taps) || 0; });
+      renderAcqStats(rows, ACQ_PERIOD, ACQ_BASIS, taps);
+    })
     .catch(function(err){
       if(acqNeedsLogin()) return;
       box.innerHTML = '<div class="placeholder">取得に失敗しました<br>'+esc(acqReason(err))+'</div>';
@@ -7340,29 +7372,41 @@ function acqYen(n){
 /* 集計描画：ref 別の件数・キャンセル・来店・売上をバー＋表で表示。
    reservations 降順は RPC 側で確定済み。
    basis: 'created'＝申込日（既定／マーケ視点）、'start'＝施術日（実績視点） */
-function renderAcqStats(rows, period, basis){
+function renderAcqStats(rows, period, basis, tapsMap){
   var box = document.getElementById('acqStats');
   if(!box) return;
+  tapsMap = tapsMap || {};
+  rows = Array.isArray(rows) ? rows.slice() : [];
   var label = acqPeriodLabel(period);
   var isFriend = (basis === 'friend_added');
   var basisLabel = isFriend ? '友達追加日' : (basis === 'start' ? '施術日' : '申込日');
+
+  // ★patch-54：タップはあるが ref_stats に出ない流入元（タップされたが追加・予約ゼロ）も行に足す。
+  //   「タップされたのに誰も追加していない」を見える化＝集客リンクの良し悪し判定の肝。
+  var seen = {};
+  rows.forEach(function(r){ seen[r.ref] = true; });
+  Object.keys(tapsMap).forEach(function(k){
+    if(!seen[k]) rows.push({ ref:k, reservations:0, cancelled:0, visited:0, sales:0, friendAdded:0 });
+  });
+
   var emptyHint = isFriend
-    ? esc(label) + '：その月にLINE友達追加された人はまだいません。'
+    ? esc(label) + '：その月にLINE友達追加された人・タップはまだありません。'
     : (basis === 'start'
       ? esc(label) + '：その月に施術された予約はまだありません。'
-      : esc(label) + '：その月に申込みが入った予約はまだありません。');
+      : esc(label) + '：その月に申込みが入った予約・タップはまだありません。');
   if(!rows.length){
-    box.innerHTML = '<div class="placeholder">'+emptyHint+'<br>追跡リンクから予約が入ると、ここに流入元別の集計が出ます。</div>';
+    box.innerHTML = '<div class="placeholder">'+emptyHint+'<br>計測リンクがタップ・予約されると、ここに流入元別の集計が出ます。</div>';
     return;
   }
 
   // バー値：友達追加日ベースは friendAdded 件数、それ以外は予約件数で正規化
-  var maxBar = 0, totFriend = 0, totResv = 0, totCanc = 0, totVisited = 0, totSales = 0;
+  var maxBar = 0, totTaps = 0, totFriend = 0, totResv = 0, totCanc = 0, totVisited = 0, totSales = 0;
   rows.forEach(function(r){
     var rv = Number(r.reservations) || 0;
     var fa = Number(r.friendAdded)  || 0;
     var bar = isFriend ? fa : rv;
     if(bar > maxBar) maxBar = bar;
+    totTaps    += (tapsMap[r.ref] != null ? (Number(tapsMap[r.ref]) || 0) : 0);
     totFriend  += fa;
     totResv    += rv;
     totCanc    += (Number(r.cancelled) || 0);
@@ -7370,6 +7414,10 @@ function renderAcqStats(rows, period, basis){
     totSales   += (Number(r.sales)     || 0);
   });
   if(maxBar <= 0) maxBar = 1;
+
+  // CVR（追加 ÷ タップ）。タップ0/未計測は '—'。
+  function cvr(adds, taps){ var t = Number(taps) || 0; if(t <= 0) return '—'; return Math.round((Number(adds) || 0) / t * 100) + '%'; }
+  function tapCell(ref){ var t = tapsMap[ref]; return (t == null) ? '—' : esc(Number(t) || 0); }
 
   var h = '<div class="acq-hint" style="margin:0 4px 8px">'
         + esc(label) + '（' + esc(basisLabel) + 'ベース）'
@@ -7386,23 +7434,25 @@ function renderAcqStats(rows, period, basis){
       + '</div>';
   }).join('');
 
-  // 明細表：友達追加日ベースは先頭に「友達追加」列を追加
+  // 明細表：タップ列を追加。友達追加日ベースのみ「友達追加」「CVR」も出す。
   h += '<table class="acq-tbl" style="margin-top:10px">'
-    + '<tr><th>流入元</th>'
-    + (isFriend ? '<th>友達追加</th>' : '')
+    + '<tr><th>流入元</th><th>タップ</th>'
+    + (isFriend ? '<th>友達追加</th><th>CVR</th>' : '')
     + '<th>予約</th><th>キャンセル</th><th>来店</th><th>売上</th></tr>';
   h += rows.map(function(r){
+    var fa = Number(r.friendAdded) || 0;
     return '<tr>'
       + '<td>'+esc(r.ref)+'</td>'
-      + (isFriend ? '<td>'+esc(Number(r.friendAdded) || 0)+'</td>' : '')
+      + '<td>'+tapCell(r.ref)+'</td>'
+      + (isFriend ? ('<td>'+esc(fa)+'</td><td>'+cvr(fa, tapsMap[r.ref])+'</td>') : '')
       + '<td>'+esc(Number(r.reservations) || 0)+'</td>'
       + '<td>'+esc(Number(r.cancelled)    || 0)+'</td>'
       + '<td>'+esc(Number(r.visited)      || 0)+'</td>'
       + '<td>'+esc(acqYen(r.sales))+'</td>'
       + '</tr>';
   }).join('');
-  h += '<tr class="tot"><td>合計</td>'
-    + (isFriend ? '<td>'+esc(totFriend)+'</td>' : '')
+  h += '<tr class="tot"><td>合計</td><td>'+esc(totTaps)+'</td>'
+    + (isFriend ? '<td>'+esc(totFriend)+'</td><td>'+cvr(totFriend, totTaps)+'</td>' : '')
     + '<td>'+esc(totResv)+'</td><td>'+esc(totCanc)+'</td><td>'+esc(totVisited)+'</td><td>'+esc(acqYen(totSales))+'</td></tr>';
   h += '</table>';
 
