@@ -586,6 +586,19 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .acq-summary-item b{display:block;font-size:11px;color:#667;margin-bottom:3px}
 .acq-summary-item span{display:block;font-size:13px;font-weight:800;color:#0b5c55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acq-ref-name{font-weight:700;color:#1f2937}
+.acq-pill{display:inline-block;font-size:10.5px;line-height:1.2;color:#557;background:#eef2f1;border-radius:999px;padding:3px 7px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+.acq-ref-cell{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.acq-ref-cell .acq-pill{margin-left:0}
+.acq-insights{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 2px 10px}
+.acq-insight-card{border:1px solid #e6eceb;background:#fff;border-radius:10px;padding:9px 10px;min-width:0}
+.acq-insight-card b{display:block;font-size:11px;color:#667;margin-bottom:4px}
+.acq-insight-card span{display:block;font-size:12.5px;font-weight:800;color:#1f2937;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acq-insight-card.warn{border-color:#f5d39b;background:#fffaf0}
+.acq-insight-card.warn span{color:#9a4b00}
+.acq-insight-card.ok{border-color:#b7e4ca;background:#f3fbf6}
+.acq-insight-card.ok span{color:#0b5c55}
+.acq-catline{display:flex;flex-wrap:wrap;gap:5px;margin:0 2px 10px}
+.acq-catline .acq-pill{margin-left:0}
 
 /* ===== users タブ CSS ===== */
 /* ============================================================================
@@ -7034,6 +7047,22 @@ function acqKnownRef(ref){
   return !key || key === '(直接・ref無し)' || !!ACQ_REF_LABELS[key];
 }
 
+function acqRefCategory(ref){
+  var label = acqRefLabel(ref);
+  var s = String(label || '').toLowerCase();
+  if(!ref || label === '(直接・ref無し)') return '直接';
+  if(/instagram|insta|インスタ/.test(s)) return 'Instagram';
+  if(/google|yahoo|meta|facebook|広告|ad\b|ads\b|リスティング/.test(s)) return '広告';
+  if(/チラシ|ちらし|flyer|フライヤー/.test(s)) return 'チラシ';
+  if(/紹介|referral|既存客/.test(s)) return '紹介';
+  if(/line|ライン|公式/.test(s)) return '公式LINE';
+  return 'その他';
+}
+
+function acqRefCellHtml(ref){
+  return '<div class="acq-ref-cell">'+acqRefHtml(ref)+'<span class="acq-pill">'+esc(acqRefCategory(ref))+'</span></div>';
+}
+
 /* 表示名 → 英数字スラッグ（サーバ add_ref_source の正規化に合わせる）。
    [^a-z0-9-] を除去・小文字化・先頭末尾ハイフン除去。空なら 'ref'+短い乱数。 */
 function acqSlugify(label){
@@ -7149,7 +7178,7 @@ function renderAcqList(rows){
         + '</div>')
       : ('<div class="acq-hint" style="margin:6px 4px 2px;color:#b00">⚠️ この店舗のLINE設定（LIFF）が未完了のため、集客リンクを発行できません。設定タブ→セットアップから LIFF を登録してください。</div>');
     return '<div class="acq-card'+(shown?'':' off')+'">'
-      + '<div><span class="ac-label">'+esc(s.label)+'</span></div>'
+      + '<div><span class="ac-label">'+esc(s.label)+'</span><span class="acq-pill">'+esc(acqRefCategory(s.tag))+'</span></div>'
       + linkBlock
       + '<div class="acq-actions">'
         + '<button type="button" class="acq-btn ghost" data-aq="'+(shown?'hide':'show')+'" data-id="'+id+'">'+(shown?'⏸ 非表示にする':'▶️ 表示する')+'</button>'
@@ -7480,8 +7509,49 @@ function renderAcqStats(rows, period, basis, tapsMap){
     var text = (best.row && best.val > 0) ? (acqRefLabel(best.row.ref) + ' ' + best.val + unit) : 'まだなし';
     return '<div class="acq-summary-item"><b>'+esc(title)+'</b><span title="'+esc(text)+'">'+esc(text)+'</span></div>';
   }
+  function mainValue(r){ return isFriend ? (Number(r.friendAdded) || 0) : (Number(r.reservations) || 0); }
+  function insightCard(title, text, kind){
+    return '<div class="acq-insight-card '+esc(kind || '')+'"><b>'+esc(title)+'</b><span title="'+esc(text)+'">'+esc(text)+'</span></div>';
+  }
+  function categorySummaryHtml(){
+    var cats = {};
+    rows.forEach(function(r){
+      var c = acqRefCategory(r.ref);
+      if(!cats[c]) cats[c] = { name:c, taps:0, main:0, reservations:0, sales:0 };
+      cats[c].taps += (tapsMap[r.ref] != null ? (Number(tapsMap[r.ref]) || 0) : 0);
+      cats[c].main += mainValue(r);
+      cats[c].reservations += (Number(r.reservations) || 0);
+      cats[c].sales += (Number(r.sales) || 0);
+    });
+    var arr = Object.keys(cats).map(function(k){ return cats[k]; })
+      .sort(function(a,b){
+        if(b.main !== a.main) return b.main - a.main;
+        if(b.taps !== a.taps) return b.taps - a.taps;
+        return a.name.localeCompare(b.name, 'ja');
+      })
+      .slice(0, 4);
+    if(!arr.length) return '';
+    return '<div class="acq-catline">' + arr.map(function(c){
+      var text = c.name + ' ' + c.main + (isFriend ? '人' : '件') + ' / ' + c.taps + 'タップ';
+      return '<span class="acq-pill" title="'+esc(text)+'">'+esc(text)+'</span>';
+    }).join('') + '</div>';
+  }
   var mainBest = bestBy(function(r){ return isFriend ? r.friendAdded : r.reservations; });
   var tapBest  = bestBy(function(r){ return tapsMap[r.ref]; });
+  var noConversionBest = bestBy(function(r){
+    var taps = tapsMap[r.ref] != null ? (Number(tapsMap[r.ref]) || 0) : 0;
+    return (taps > 0 && mainValue(r) === 0) ? taps : 0;
+  });
+  var highValueBest = bestBy(function(r){
+    if(mainValue(r) <= 0) return 0;
+    return (Number(r.sales) || 0) > 0 ? Number(r.sales) : mainValue(r);
+  });
+  var okText = highValueBest.row && highValueBest.val > 0
+    ? (acqRefLabel(highValueBest.row.ref) + '：' + mainValue(highValueBest.row) + (isFriend ? '人' : '件') + ' / ' + acqYen(highValueBest.row.sales))
+    : 'まだ成果ありの流入元なし';
+  var warnText = noConversionBest.row && noConversionBest.val > 0
+    ? (acqRefLabel(noConversionBest.row.ref) + '：' + noConversionBest.val + 'タップ・成果0')
+    : 'タップだけ多い流入元なし';
 
   var h = '<div class="acq-hint" style="margin:0 4px 8px">'
         + esc(label) + '（' + esc(basisLabel) + 'ベース）'
@@ -7490,6 +7560,11 @@ function renderAcqStats(rows, period, basis, tapsMap){
     + summaryItem(isFriend ? '友達追加1位' : '予約1位', mainBest, isFriend ? '人' : '件')
     + summaryItem('タップ1位', tapBest, '回')
     + '</div>';
+  h += '<div class="acq-insights">'
+    + insightCard('成果あり', okText, 'ok')
+    + insightCard('改善候補', warnText, noConversionBest.row && noConversionBest.val > 0 ? 'warn' : '')
+    + '</div>';
+  h += categorySummaryHtml();
 
   // バー（友達追加ベース＝友達追加人数、その他＝予約件数）
   h += rows.map(function(r){
@@ -7510,7 +7585,7 @@ function renderAcqStats(rows, period, basis, tapsMap){
   h += rows.map(function(r){
     var fa = Number(r.friendAdded) || 0;
     return '<tr>'
-      + '<td>'+acqRefHtml(r.ref)+'</td>'
+      + '<td>'+acqRefCellHtml(r.ref)+'</td>'
       + '<td>'+tapCell(r.ref)+'</td>'
       + (isFriend ? ('<td>'+esc(fa)+'</td><td>'+cvr(fa, tapsMap[r.ref])+'</td>') : '')
       + '<td>'+esc(Number(r.reservations) || 0)+'</td>'
