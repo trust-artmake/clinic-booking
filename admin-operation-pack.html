@@ -60,13 +60,16 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <table>
 <thead><tr><th>やりたいこと</th><th>飛ぶ場所</th></tr></thead>
 <tbody>
-<tr><td>メニュー追加・料金変更</td><td>お店の設定 → 💉メニュー</td></tr>
-<tr><td>アーティスト追加・担当メニュー</td><td>お店の設定 → 👩‍⚕️アーティスト</td></tr>
-<tr><td>シフト・休み変更</td><td>お店の設定 → 🗓シフト</td></tr>
-<tr><td>症例写真の公開承認</td><td>お店の設定 → 👩‍⚕️アーティスト → 各人の編集</td></tr>
+<tr><td>メニュー追加・料金変更</td><td>お店の設定 → メニューとアーティスト → 💉メニュー・料金</td></tr>
+<tr><td>アーティスト追加・担当メニュー</td><td>お店の設定 → メニューとアーティスト → 👩‍⚕️アーティスト</td></tr>
+<tr><td>シフト・休み変更</td><td>お店の設定 → メニューとアーティスト → 🗓シフト</td></tr>
+<tr><td>症例写真の公開承認</td><td>お店の設定 → メニューとアーティスト → 各人の編集</td></tr>
+<tr><td>口コミの追加・公開切替</td><td>予約・顧客 → ⭐口コミ</td></tr>
 <tr><td>営業時間・席数・休日</td><td>お店の設定 → 🏪 お店の基本</td></tr>
 <tr><td>AI活用レポート</td><td>📊 分析 → AI活用</td></tr>
-<tr><td>集客（流入分析）</td><td>📣 集客</td></tr>
+<tr><td>AIに伝える店舗情報</td><td>お店の設定 → 🤖 AI向け情報</td></tr>
+<tr><td>集客（流入分析）</td><td>📣 集客 → 流入経路</td></tr>
+<tr><td>ステップ配信</td><td>📣 集客 → ステップ配信</td></tr>
 <tr><td>スタッフ追加・権限</td><td>お店の設定 → 👥 スタッフ</td></tr>
 <tr><td>初期設定（本番準備）</td><td>お店の設定 → 🧭 初期設定</td></tr>
 <tr><td>本番開始の最終チェック</td><td><a href="go-live-one-page-checklist.html">go-live-one-page-checklist.html</a></td></tr>
@@ -202,6 +205,21 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <p>⚠️ <strong>「アップロードしただけでは非公開」</strong>。必ず「公開する」を押すまでお客様には見えません。</p>
 </blockquote>
 <hr>
+<h2>⭐ 口コミ管理</h2>
+<h3>開く</h3>
+<p><strong>予約・顧客</strong> → <strong>⭐ 口コミ</strong></p>
+<h3>追加する</h3>
+<ol>
+<li>Googleの本物の口コミをコピー</li>
+<li>担当・評価・本文・店舗を入力</li>
+<li><strong>「＋ 追加して公開」</strong> を押す</li>
+</ol>
+<h3>公開を止める・戻す</h3>
+<ul>
+<li>一覧の <strong>「非表示」</strong> / <strong>「公開」</strong> を押す</li>
+<li>削除は戻せないので、迷う場合は <strong>非表示</strong> にする</li>
+</ul>
+<hr>
 <h2>🏪 店舗情報変更</h2>
 <h3>店舗カードを開く</h3>
 <p><strong>お店の設定</strong> → <strong>🏪 お店の基本</strong></p>
@@ -251,6 +269,20 @@ li.task-list-item{list-style:none;margin-left:-18px}
 </tbody></table>
 <h3>FAQ化候補</h3>
 <p>「AIがよく失敗した質問」のランキングが出ます。 ここに多く出る内容は、テンプレ追加 or AIへの追加学習の候補。<strong>システム管理者（システム管理者）に共有してください</strong>。</p>
+<hr>
+<h2>🤖 AI向け情報</h2>
+<h3>開く</h3>
+<p><strong>お店の設定</strong> → <strong>🤖 AI向け情報</strong></p>
+<h3>何を入れる？</h3>
+<ul>
+<li><strong>店舗情報</strong>：住所・アクセス・施設の補足</li>
+<li><strong>リッチメニュー</strong>：LINEのボタン名、飛び先、説明</li>
+</ul>
+<h3>使いどころ</h3>
+<p>お客様が「場所どこ？」「予約ボタンどれ？」と聞いた時に、AIがこの内容を見て答えます。</p>
+<blockquote>
+<p>💡 ここは <strong>LINEのリッチメニュー自体を配信する画面ではありません</strong>。AIに内容を教えるための設定です。</p>
+</blockquote>
 <hr>
 <h2>🧭 初期設定チェック（新店舗の準備）</h2>
 <h3>開く</h3>
@@ -329,12 +361,12 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <hr>
 <h2>📊 集客分析（集客リンク / 友達追加 / 日別表示）</h2>
 <h3>開く</h3>
-<p>上部タブの <strong>📣 集客</strong></p>
+<p>上部タブの <strong>📣 集客</strong> → <strong>流入経路</strong></p>
 <h3>流入元リンクを発行する</h3>
 <ol>
 <li><strong>「➕ 流入元を追加」</strong> で表示名（例：「遠山Instagram」「久留米チラシ」）を入力</li>
 <li><strong>「＋ 追加してリンク発行」</strong></li>
-<li><strong>LINEで開く集客リンク</strong> が発行される</li>
+<li><strong>タップ計測つきのLINEリンク</strong> が発行される</li>
 <li>このリンクを <strong>SNSプロフィール・チラシ</strong> に貼ると、どこからLINE追加・予約に来たか自動で記録されます</li>
 <li>店舗のLINEで開く予約入口（LIFF）が未設定の場合、集客リンクは発行できません。先に <strong>お店の設定 → 初期設定</strong> でLIFFを登録してください</li>
 </ol>
@@ -367,9 +399,28 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <tr><td>来店</td><td>実際に来店した件数</td></tr>
 <tr><td>売上</td><td>来店した分の合計売上</td></tr>
 </tbody></table>
+<h3>「未計測・直接」と出るもの</h3>
+<p>専用リンクを通っていない予約や、古いリンク経由は <strong>未計測・直接</strong> にまとまります。</p>
 <blockquote>
 <p>💡 <strong>キャンセル率が高い流入元</strong> は集客の質が低い可能性。広告費の見直し目安に。</p>
 </blockquote>
+<hr>
+<h2>📨 ステップ配信</h2>
+<h3>開く</h3>
+<p><strong>📣 集客</strong> → <strong>ステップ配信</strong></p>
+<h3>作る</h3>
+<ol>
+<li><strong>「＋ 新しいシナリオ」</strong></li>
+<li>名前・きっかけ・配信時間を入れる</li>
+<li>メッセージを追加。必要なら画像も追加</li>
+<li><strong>「保存する」</strong> → 問題なければ <strong>「配信開始」</strong></li>
+</ol>
+<h3>注意</h3>
+<ul>
+<li>友だち追加後の配信は、予約が入ると自動で止まります</li>
+<li>配信時間外は次の送れる時間に回ります</li>
+<li>ただし、最初の挨拶（遅延0）はすぐ届きます</li>
+</ul>
 <hr>
 <h2>🆘 トラブル対応</h2>
 <h3>「要対応」のお客様への対応</h3>
@@ -388,7 +439,7 @@ li.task-list-item{list-style:none;margin-left:-18px}
 <h3>予約のキャンセル処理</h3>
 <ul>
 <li>予約カードの <strong>「キャンセル」</strong> → Googleカレンダーからも自動削除（gcal-sync）</li>
-<li><strong>お客様への自動連絡は送られません</strong>（必要なら別途LINEで連絡する）</li>
+<li>お客様への自動連絡は送られません。LINEか電話で一言伝えてください</li>
 </ul>
 <h3>取得失敗・画面エラー</h3>
 <ul>
