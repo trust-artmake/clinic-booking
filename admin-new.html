@@ -7034,7 +7034,7 @@ function acqLoadRefSources(){
 
 function acqRefLabel(ref){
   var key = String(ref || '');
-  if(!key || key === '(直接・ref無し)') return '(直接・ref無し)';
+  if(!key || key === '(直接・ref無し)') return '未計測・直接';
   return ACQ_REF_LABELS[key] || key;
 }
 
@@ -7047,10 +7047,15 @@ function acqKnownRef(ref){
   return !key || key === '(直接・ref無し)' || !!ACQ_REF_LABELS[key];
 }
 
+function acqIsDirectRef(ref){
+  var key = String(ref || '');
+  return !key || key === '(直接・ref無し)';
+}
+
 function acqRefCategory(ref){
   var label = acqRefLabel(ref);
   var s = String(label || '').toLowerCase();
-  if(!ref || label === '(直接・ref無し)') return '直接';
+  if(acqIsDirectRef(ref)) return '未計測';
   if(/instagram|insta|インスタ/.test(s)) return 'Instagram';
   if(/google|yahoo|meta|facebook|広告|ad\b|ads\b|リスティング/.test(s)) return '広告';
   if(/チラシ|ちらし|flyer|フライヤー/.test(s)) return 'チラシ';
@@ -7459,6 +7464,9 @@ function renderAcqStats(rows, period, basis, tapsMap){
   rows = rows.filter(function(r){ return acqKnownRef(r.ref); });
 
   rows.sort(function(a, b){
+    var ad = acqIsDirectRef(a.ref) ? 1 : 0;
+    var bd = acqIsDirectRef(b.ref) ? 1 : 0;
+    if(ad !== bd) return ad - bd;
     var av = isFriend ? (Number(a.friendAdded) || 0) : (Number(a.reservations) || 0);
     var bv = isFriend ? (Number(b.friendAdded) || 0) : (Number(b.reservations) || 0);
     if(bv !== av) return bv - av;
@@ -7500,6 +7508,7 @@ function renderAcqStats(rows, period, basis, tapsMap){
   function bestBy(valueFn){
     var best = null, bestVal = 0;
     rows.forEach(function(r){
+      if(acqIsDirectRef(r.ref)) return;
       var v = Number(valueFn(r)) || 0;
       if(!best || v > bestVal){ best = r; bestVal = v; }
     });
