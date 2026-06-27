@@ -581,6 +581,11 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .acq-bar-track{flex:1;height:14px;background:#eef2f1;border-radius:999px;overflow:hidden}
 .acq-bar-fill{height:100%;background:#0b5c55;border-radius:999px;min-width:2px}
 .acq-bar-val{flex:0 0 auto;font-size:11.5px;color:#557;font-weight:700;white-space:nowrap}
+.acq-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 2px 10px}
+.acq-summary-item{border:1px solid #e6eceb;background:#f8fbfa;border-radius:10px;padding:9px 10px;min-width:0}
+.acq-summary-item b{display:block;font-size:11px;color:#667;margin-bottom:3px}
+.acq-summary-item span{display:block;font-size:13px;font-weight:800;color:#0b5c55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acq-ref-name{font-weight:700;color:#1f2937}
 
 /* ===== users タブ CSS ===== */
 /* ============================================================================
@@ -6592,6 +6597,8 @@ var ACQ_PERIOD = 'this_month';
 var ACQ_BASIS  = 'created';
 /* ★patch-52：表示モード。'summary'＝既存の合計表示、'daily'＝日別1行ずつ */
 var ACQ_MODE   = 'summary';
+/* 流入元タグ(refgu8to2等) → 管理者が付けた表示名。分析表示では表示名を優先する。 */
+var ACQ_REF_LABELS = {};
 
 /* ===== 表示切替（必須パターン）。hideAllViews → setActiveNav → 表示 → 読込 ===== */
 function showAcq(el){
@@ -6997,6 +7004,36 @@ function acqSetMsg(t, ok){
   el.className = 'acq-msg' + (t ? (ok ? ' ok' : ' ng') : '');
 }
 
+function acqRememberRefSources(rows){
+  ACQ_REF_LABELS = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r){
+    var tag = r && r.tag != null ? String(r.tag) : '';
+    var label = r && r.label != null ? String(r.label).trim() : '';
+    if(tag && label) ACQ_REF_LABELS[tag] = label;
+  });
+}
+
+function acqLoadRefSources(){
+  return sbGet('ref_sources?select=label,tag')
+    .then(function(rows){ acqRememberRefSources(rows || []); return rows || []; })
+    .catch(function(){ return []; });
+}
+
+function acqRefLabel(ref){
+  var key = String(ref || '');
+  if(!key || key === '(直接・ref無し)') return '(直接・ref無し)';
+  return ACQ_REF_LABELS[key] || key;
+}
+
+function acqRefHtml(ref){
+  return '<span class="acq-ref-name">'+esc(acqRefLabel(ref))+'</span>';
+}
+
+function acqKnownRef(ref){
+  var key = String(ref || '');
+  return !key || key === '(直接・ref無し)' || !!ACQ_REF_LABELS[key];
+}
+
 /* 表示名 → 英数字スラッグ（サーバ add_ref_source の正規化に合わせる）。
    [^a-z0-9-] を除去・小文字化・先頭末尾ハイフン除去。空なら 'ref'+短い乱数。 */
 function acqSlugify(label){
@@ -7082,7 +7119,7 @@ function loadAcqList(){
   prep.then(function(){
     return sbGet('ref_sources?select=id,label,tag,is_shown,created_at&order=created_at.desc');
   })
-    .then(function(rows){ renderAcqList(rows || []); })
+    .then(function(rows){ acqRememberRefSources(rows || []); renderAcqList(rows || []); })
     .catch(function(err){
       if(acqNeedsLogin()) return;
       box.innerHTML = '<div class="placeholder">取得に失敗しました<br>'+esc(acqReason(err))+'</div>';
@@ -7112,7 +7149,7 @@ function renderAcqList(rows){
         + '</div>')
       : ('<div class="acq-hint" style="margin:6px 4px 2px;color:#b00">⚠️ この店舗のLINE設定（LIFF）が未完了のため、集客リンクを発行できません。設定タブ→セットアップから LIFF を登録してください。</div>');
     return '<div class="acq-card'+(shown?'':' off')+'">'
-      + '<div><span class="ac-label">'+esc(s.label)+'</span><span class="ac-tag">'+esc(s.tag)+'</span></div>'
+      + '<div><span class="ac-label">'+esc(s.label)+'</span></div>'
       + linkBlock
       + '<div class="acq-actions">'
         + '<button type="button" class="acq-btn ghost" data-aq="'+(shown?'hide':'show')+'" data-id="'+id+'">'+(shown?'⏸ 非表示にする':'▶️ 表示する')+'</button>'
@@ -7286,7 +7323,8 @@ function loadAcqStats(){
   //   ref_click_stats が未適用のDB（patch-54前）でも落ちないよう、失敗時は [] にフォールバック。
   Promise.all([
     sbRpc('ref_stats',       { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID, p_basis: ACQ_BASIS }),
-    sbRpc('ref_click_stats', { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID }).catch(function(){ return []; })
+    sbRpc('ref_click_stats', { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID }).catch(function(){ return []; }),
+    acqLoadRefSources()
   ])
     .then(function(res){
       var rows = Array.isArray(res[0]) ? res[0] : [];
@@ -7388,6 +7426,18 @@ function renderAcqStats(rows, period, basis, tapsMap){
   Object.keys(tapsMap).forEach(function(k){
     if(!seen[k]) rows.push({ ref:k, reservations:0, cancelled:0, visited:0, sales:0, friendAdded:0 });
   });
+  // ref_sources に表示名が残っていない古いタグは、スタッフ画面では不要な内部IDなので出さない。
+  rows = rows.filter(function(r){ return acqKnownRef(r.ref); });
+
+  rows.sort(function(a, b){
+    var av = isFriend ? (Number(a.friendAdded) || 0) : (Number(a.reservations) || 0);
+    var bv = isFriend ? (Number(b.friendAdded) || 0) : (Number(b.reservations) || 0);
+    if(bv !== av) return bv - av;
+    var at = tapsMap[a.ref] != null ? (Number(tapsMap[a.ref]) || 0) : 0;
+    var bt = tapsMap[b.ref] != null ? (Number(tapsMap[b.ref]) || 0) : 0;
+    if(bt !== at) return bt - at;
+    return acqRefLabel(a.ref).localeCompare(acqRefLabel(b.ref), 'ja');
+  });
 
   var emptyHint = isFriend
     ? esc(label) + '：その月にLINE友達追加された人・タップはまだありません。'
@@ -7418,17 +7468,35 @@ function renderAcqStats(rows, period, basis, tapsMap){
   // CVR（追加 ÷ タップ）。タップ0/未計測は '—'。
   function cvr(adds, taps){ var t = Number(taps) || 0; if(t <= 0) return '—'; return Math.round((Number(adds) || 0) / t * 100) + '%'; }
   function tapCell(ref){ var t = tapsMap[ref]; return (t == null) ? '—' : esc(Number(t) || 0); }
+  function bestBy(valueFn){
+    var best = null, bestVal = 0;
+    rows.forEach(function(r){
+      var v = Number(valueFn(r)) || 0;
+      if(!best || v > bestVal){ best = r; bestVal = v; }
+    });
+    return { row: best, val: bestVal };
+  }
+  function summaryItem(title, best, unit){
+    var text = (best.row && best.val > 0) ? (acqRefLabel(best.row.ref) + ' ' + best.val + unit) : 'まだなし';
+    return '<div class="acq-summary-item"><b>'+esc(title)+'</b><span title="'+esc(text)+'">'+esc(text)+'</span></div>';
+  }
+  var mainBest = bestBy(function(r){ return isFriend ? r.friendAdded : r.reservations; });
+  var tapBest  = bestBy(function(r){ return tapsMap[r.ref]; });
 
   var h = '<div class="acq-hint" style="margin:0 4px 8px">'
         + esc(label) + '（' + esc(basisLabel) + 'ベース）'
         + '</div>';
+  h += '<div class="acq-summary">'
+    + summaryItem(isFriend ? '友達追加1位' : '予約1位', mainBest, isFriend ? '人' : '件')
+    + summaryItem('タップ1位', tapBest, '回')
+    + '</div>';
 
   // バー（友達追加ベース＝友達追加人数、その他＝予約件数）
   h += rows.map(function(r){
     var val = isFriend ? (Number(r.friendAdded) || 0) : (Number(r.reservations) || 0);
     var pct = Math.max(2, Math.round(val / maxBar * 100));
     return '<div class="acq-bar-wrap">'
-      + '<span class="acq-bar-name">'+esc(r.ref)+'</span>'
+      + '<span class="acq-bar-name">'+acqRefHtml(r.ref)+'</span>'
       + '<span class="acq-bar-track"><span class="acq-bar-fill" style="width:'+pct+'%"></span></span>'
       + '<span class="acq-bar-val">'+esc(val)+(isFriend?'人':'件')+'</span>'
       + '</div>';
@@ -7442,7 +7510,7 @@ function renderAcqStats(rows, period, basis, tapsMap){
   h += rows.map(function(r){
     var fa = Number(r.friendAdded) || 0;
     return '<tr>'
-      + '<td>'+esc(r.ref)+'</td>'
+      + '<td>'+acqRefHtml(r.ref)+'</td>'
       + '<td>'+tapCell(r.ref)+'</td>'
       + (isFriend ? ('<td>'+esc(fa)+'</td><td>'+cvr(fa, tapsMap[r.ref])+'</td>') : '')
       + '<td>'+esc(Number(r.reservations) || 0)+'</td>'
