@@ -1406,12 +1406,10 @@ function loadHomeSetup(){
     var missing=checks.filter(function(c){ return !row[c.f]; });
     sb.innerHTML='';
     if(!missing.length){
-      if(card) card.className='home-card ok';
-      var ok=document.createElement('div'); ok.textContent='✅ 必要な設定はすべて完了しています。今日の対応に進めます。';
-      ok.style.cssText='font-size:13.5px;color:#15803d;font-weight:700'; sb.appendChild(ok);
+      if(card) card.style.display='none';
       return;
     }
-    if(card) card.className='home-card alert';
+    if(card){ card.className='home-card alert'; card.style.display=''; }
     var lead=document.createElement('div'); lead.textContent='未完了の設定があります：';
     lead.style.cssText='font-size:13px;color:#9a3412;font-weight:800'; sb.appendChild(lead);
     var ul=document.createElement('ul'); ul.className='home-todo';
