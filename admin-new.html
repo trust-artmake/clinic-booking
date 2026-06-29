@@ -1156,7 +1156,15 @@ window.addEventListener("load", function(){
   tryAutoLogin();
   setInterval(function(){ refreshAuth(); }, 45*60*1000); // 約45分ごとに更新し失効を防ぐ
 });
-function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;"); }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#39;"); }
+function safeStoredImageUrl(u, bucket){
+  u = String(u || '').trim();
+  bucket = String(bucket || '').replace(/[^a-z0-9-]/g, '');
+  if (!u || !bucket) return '';
+  if (u.indexOf(SB_URL + '/storage/v1/object/public/' + bucket + '/') === 0) return u;
+  if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(u)) return u;
+  return '';
+}
 function ymd(d){ return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2); }
 function hhmm(iso){ var d=new Date(iso); return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2); }
 
@@ -4825,9 +4833,10 @@ function setLoadArtists(){
     if (!rows.length){ h += '<div class="set-ph">登録済みアーティストはまだいません。</div>'; }
     rows.forEach(function(a){
       var aid = esc(a.id);
+      var photoUrl = safeStoredImageUrl(a.profile_photo_url, 'artist-photos');
       h += '<div class="set-card'+(a.is_active?'':' set-off')+'" data-aid="'+aid+'">'
         + '<div class="set-name">'
-        +   (a.profile_photo_url ? '<img src="'+esc(a.profile_photo_url)+'" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">' : '')
+        +   (photoUrl ? '<img src="'+esc(photoUrl)+'" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">' : '')
         +   esc(a.name)+(a.is_active?'':' <span class="set-tag set-tagng">停止中</span>')+'</div>'
         + '<div class="set-meta"><span>'+esc(a.qualification||'—')+'</span><span>得意：'+esc(a.specialty||'—')+'</span>'
         +   '<span>指名料 '+(a.nomination_fee?setYen(a.nomination_fee):'—')+'</span></div>'
@@ -4841,11 +4850,11 @@ function setLoadArtists(){
         +   '<div class="set-hint" style="margin:2px 0 8px">お客様が予約するとき、アーティストを選ぶ画面に丸いアイコンとして表示されます。正方形・顔がはっきり写った明るい写真がおすすめです（自動で正方形に整えます／5MBまで）。未設定のときは名前の頭文字が表示されます。</div>'
         +   '<div style="display:flex;align-items:center;gap:12px;margin:4px 0 12px">'
         +     '<div style="width:56px;height:56px;border-radius:50%;overflow:hidden;background:#eef0f2;display:inline-flex;align-items:center;justify-content:center;color:#9aa0a6;font-weight:800;flex-shrink:0">'
-        +       (a.profile_photo_url ? '<img src="'+esc(a.profile_photo_url)+'" alt="" style="width:100%;height:100%;object-fit:cover">' : esc((a.name||'?').charAt(0)))
+        +       (photoUrl ? '<img src="'+esc(photoUrl)+'" alt="" style="width:100%;height:100%;object-fit:cover">' : esc((a.name||'?').charAt(0)))
         +     '</div>'
         +     '<div class="set-acts" style="margin:0">'
         +       '<button type="button" class="set-btn set-ghost" data-act="aphoto" data-aid="'+aid+'">📷 写真を選ぶ</button>'
-        +       (a.profile_photo_url ? '<button type="button" class="set-btn set-ghost" data-act="aphotodel" data-aid="'+aid+'" style="color:#c2410c">🗑 消す</button>' : '')
+        +       (photoUrl ? '<button type="button" class="set-btn set-ghost" data-act="aphotodel" data-aid="'+aid+'" style="color:#c2410c">🗑 消す</button>' : '')
         +     '</div>'
         +     '<input type="file" accept="image/*" id="set-aphotofile-'+aid+'" style="display:none">'
         +   '</div>'
@@ -5621,22 +5630,23 @@ function setRenderAiContextRichMenu(){
   if (SET_AICTX_RM_SELECTED >= 0 && (!SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED] || SET_AICTX_RM_ROWS[SET_AICTX_RM_SELECTED]._deleted)){
     SET_AICTX_RM_SELECTED = -1;
   }
-  var img = SET_AICTX_RM_IMAGE_URL
-    ? '<img src="'+esc(SET_AICTX_RM_IMAGE_URL)+'" alt="リッチメニュー画像">'
+  var safeRmImageUrl = safeStoredImageUrl(SET_AICTX_RM_IMAGE_URL, 'rich-menu-images');
+  var img = safeRmImageUrl
+    ? '<img src="'+esc(safeRmImageUrl)+'" alt="リッチメニュー画像">'
     : '<div class="rm-empty-note">画像未設定です。画像を選ぶ／ここにドラッグ／画像をコピーして貼り付けで登録できます。</div>';
   var h = ''
     + '<div class="rm-tools">'
     +   '<input type="file" id="set-rm-file" accept="image/png,image/jpeg" style="display:none">'
     +   '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_upload">画像を選ぶ</button>'
-    +   (SET_AICTX_RM_IMAGE_URL ? '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_delete_image" style="color:#c2410c">画像を外す</button>' : '')
-    +   '<select id="set-rm-size"'+(SET_AICTX_RM_IMAGE_URL?' disabled':'')+'><option value="large"'+(SET_AICTX_RM_IMAGE_SIZE==='large'?' selected':'')+'>大 2500×1686</option><option value="small"'+(SET_AICTX_RM_IMAGE_SIZE==='small'?' selected':'')+'>小 2500×843</option></select>'
+    +   (safeRmImageUrl ? '<button type="button" class="set-btn set-ghost" data-act="aictx_rm_delete_image" style="color:#c2410c">画像を外す</button>' : '')
+    +   '<select id="set-rm-size"'+(safeRmImageUrl?' disabled':'')+'><option value="large"'+(SET_AICTX_RM_IMAGE_SIZE==='large'?' selected':'')+'>大 2500×1686</option><option value="small"'+(SET_AICTX_RM_IMAGE_SIZE==='small'?' selected':'')+'>小 2500×843</option></select>'
     +   '<label class="rm-check"><input type="checkbox" id="set-rm-snap" checked>25pxに吸着</label>'
     +   '<button type="button" class="set-btn set-ghost" id="set-rm-undo" data-act="aictx_rm_undo">戻す</button>'
     +   '<button type="button" class="set-btn set-ghost" id="set-rm-redo" data-act="aictx_rm_redo">やり直す</button>'
     + '</div>'
     + '<div class="rm-editor">'
     +   '<div class="rm-work">'
-    +     '<div id="set-rm-canvas" class="rm-canvas '+(SET_AICTX_RM_IMAGE_SIZE==='small'?'rm-small ':'')+(!SET_AICTX_RM_IMAGE_URL?'rm-empty':'')+'" tabindex="0">'+img+'</div>'
+    +     '<div id="set-rm-canvas" class="rm-canvas '+(SET_AICTX_RM_IMAGE_SIZE==='small'?'rm-small ':'')+(!safeRmImageUrl?'rm-empty':'')+'" tabindex="0">'+img+'</div>'
     +     '<div id="set-rm-warn" class="rm-warn'+(rmHasOverlap()?' rm-show':'')+'">重なっている領域があります。AI用の保存はできますが、LINE公式側のタップ範囲とズレないか確認してください。</div>'
     +   '</div>'
     +   '<div class="rm-side" id="set-rm-panel">'+rmPanelHtml()+'</div>'
