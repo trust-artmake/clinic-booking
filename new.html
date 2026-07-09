@@ -378,11 +378,8 @@ var DEF_OPEN_H = 9, DEF_CLOSE_H = 19, DEF_INTERVAL = 30;
 
 var H = { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY };
 
-// ===== Supabase REST / RPC =====
-function sbGet(path){
-  return fetch(SB_URL + "/rest/v1/" + path, { headers: H })
-    .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, status:r.status, data:j }; }); });
-}
+// ===== Supabase RPC =====
+// 公開ページはテーブルを直接読まず、許可リスト化したSECURITY DEFINER RPCだけを呼ぶ。
 function sbRpc(fn, args){
   return fetch(SB_URL + "/rest/v1/rpc/" + fn, {
     method:"POST", headers: Object.assign({ "Content-Type":"application/json" }, H), body: JSON.stringify(args||{})
