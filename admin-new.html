@@ -1087,7 +1087,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <label style="margin-top:8px">担当店舗</label>
     <select id="usrStore"><option value="all">🏢 全店</option></select>
 
-    <label style="margin-top:8px">暗証番号（パスワード・8文字以上）<span style="color:#c2410c">（必須）</span></label>
+    <label style="margin-top:8px">暗証番号（12文字以上・英大/英小/数字/記号の3種類以上）<span style="color:#c2410c">（必須）</span></label>
     <div class="usr-passrow">
       <input id="usrPass" type="text" placeholder="例）Komiya-9xK2mZ" autocomplete="off">
       <button type="button" class="usr-gen" onclick="usrGenPass()">🎲 自動発行</button>
@@ -1127,11 +1127,15 @@ var MY_TENANTS = [];   // ログイン者が扱えるテナント [{tenant_id,te
 var TOKEN     = ""; // ログイン後のアクセストークン。これが無いとPIIは読めない（RLS保護）。
 function hdr(){ return { "apikey": SB_KEY, "Authorization": "Bearer " + (TOKEN || SB_KEY) }; }
 
-// ===== ログイン維持（localStorageにセッション保存→リロードしても自動ログイン）=====
+// ===== ログイン維持（sessionStorageのみ。ブラウザを閉じたら破棄）=====
 var SESS_KEY = "dion_admin_sess_v1";
-function saveSession(d){ try{ if(d&&d.access_token) localStorage.setItem(SESS_KEY, JSON.stringify({access_token:d.access_token, refresh_token:d.refresh_token})); }catch(e){} }
-function clearSession(){ try{ localStorage.removeItem(SESS_KEY); }catch(e){} }
-function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESS_KEY)||"null"); }catch(e){ return null; } }
+function purgeLegacySession(){ try{ localStorage.removeItem(SESS_KEY); }catch(e){} }
+function saveSession(d){
+  purgeLegacySession();
+  try{ if(d&&d.access_token) sessionStorage.setItem(SESS_KEY, JSON.stringify({access_token:d.access_token, refresh_token:d.refresh_token})); }catch(e){}
+}
+function clearSession(){ purgeLegacySession(); try{ sessionStorage.removeItem(SESS_KEY); }catch(e){} }
+function loadSession(){ purgeLegacySession(); try{ return JSON.parse(sessionStorage.getItem(SESS_KEY)||"null"); }catch(e){ return null; } }
 // refresh_token で新しい access_token を取得。done(成功bool) を呼ぶ。
 function refreshAuth(done){
   var s=loadSession();
@@ -7688,7 +7692,7 @@ function usrReason(err){
   if (/bad_role/i.test(r))                  return '役割の指定が正しくありません';
   if (/staff_not_found/i.test(r))           return '対象のスタッフが見つかりません';
   if (/email_exists/i.test(r))              return 'このメールは既に登録されています';
-  if (/weak_password/i.test(r))             return 'パスワードは8文字以上にしてください';
+  if (/weak_password/i.test(r))             return 'パスワードは12文字以上・3種類以上の文字を混ぜてください';
   if (/bad_email/i.test(r))                 return 'メールアドレスの形式が正しくありません';
   if (/staff_insert_failed|create_failed/i.test(r)) return '作成に失敗しました。入力をご確認ください';
   // patch-49 reset_password 用
@@ -7821,7 +7825,7 @@ function renderStaff(rows){
       + '</div>'
       // ★パスワード再発行UI（patch-49）：通常は隠す。ボタン押下で展開して入力＋🎲＋確定。
       + '<div class="usr-reset" id="usr-reset-' + id + '" style="display:none;margin-top:8px;padding:10px;background:#f0fdf9;border:1px solid #b9e8da;border-radius:8px">'
-        + '<label style="font-weight:700;font-size:13px;color:#0b5c55;display:block;margin-bottom:6px">🔑 このスタッフの新しい暗証番号（8文字以上）</label>'
+        + '<label style="font-weight:700;font-size:13px;color:#0b5c55;display:block;margin-bottom:6px">🔑 このスタッフの新しい暗証番号（12文字以上・3種類以上）</label>'
         + '<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">'
           + '<input type="text" class="usr-reset-pw" placeholder="新しい暗証番号" autocomplete="new-password" style="flex:1;padding:8px;border:1px solid #cdd6d4;border-radius:6px;font-size:14px">'
           + '<button type="button" class="usr-btn usr-ghost" data-usr-act="resetgen" data-usr-id="' + id + '" style="flex:0 0 auto;min-width:80px">🎲 サイコロ</button>'
@@ -7945,16 +7949,37 @@ function usrSaveRow(card, id, btn, opt){
    ・サーバ(manage-staff: action=reset_password)が認可と Auth admin API 経由の更新を担当。
    ・新パスワードは画面に1回だけ表示してコピーしてもらう＝サーバはレスポンスに含めない。
    ============================================================================ */
-function usrGenResetPassword(staffId){
-  // 既存の usrGenPass と同じ文字種・長さ（紛らわしい I, l, 0, O, 1 を除外）
-  var cs = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*?';
-  var n = 12, out = '';
-  if (window.crypto && crypto.getRandomValues){
-    var rnd = crypto.getRandomValues(new Uint32Array(n));
-    for (var i=0;i<n;i++) out += cs.charAt(rnd[i] % cs.length);
-  } else {
-    for (var j=0;j<n;j++) out += cs.charAt(Math.floor(Math.random() * cs.length));
+function usrSecureRandomIndex(max){
+  if (!window.crypto || !crypto.getRandomValues || !max) return null;
+  var limit = Math.floor(0x100000000 / max) * max;
+  var buf = new Uint32Array(1), n;
+  do { crypto.getRandomValues(buf); n = buf[0]; } while (n >= limit);
+  return n % max;
+}
+function usrGenerateStrongPassword(){
+  var groups = [
+    'ABCDEFGHJKLMNPQRSTUVWXYZ',
+    'abcdefghijkmnpqrstuvwxyz',
+    '23456789',
+    '!@#$%&*?'
+  ];
+  var all = groups.join(''), out = [];
+  for (var g=0;g<groups.length;g++){
+    var gi = usrSecureRandomIndex(groups[g].length); if (gi===null) return null;
+    out.push(groups[g].charAt(gi));
   }
+  while(out.length<12){ var ai=usrSecureRandomIndex(all.length); if(ai===null)return null; out.push(all.charAt(ai)); }
+  for(var i=out.length-1;i>0;i--){ var j=usrSecureRandomIndex(i+1); if(j===null)return null; var t=out[i];out[i]=out[j];out[j]=t; }
+  return out.join('');
+}
+function usrPasswordLooksStrong(pw){
+  if (!pw || pw.length < 12 || pw.length > 128) return false;
+  var n=0; if(/[a-z]/.test(pw))n++; if(/[A-Z]/.test(pw))n++; if(/[0-9]/.test(pw))n++; if(/[^A-Za-z0-9]/.test(pw))n++;
+  return n>=3;
+}
+function usrGenResetPassword(staffId){
+  var out = usrGenerateStrongPassword();
+  if (!out){ usrRowMsg(staffId, '安全な乱数を使えないため、暗証番号を生成できません。', false); return; }
   var panel = document.getElementById('usr-reset-' + staffId);
   if (!panel) return;
   var input = panel.querySelector('.usr-reset-pw');
@@ -7966,7 +7991,7 @@ function usrResetPassword(card, id, btn){
   if (!panel) return;
   var input = panel.querySelector('.usr-reset-pw');
   var pw = (input && input.value || '').trim();
-  if (pw.length < 8){ usrRowMsg(id, '暗証番号は8文字以上にしてください（🎲サイコロが安全です）。', false); return; }
+  if (!usrPasswordLooksStrong(pw)){ usrRowMsg(id, '暗証番号は12文字以上・3種類以上にしてください（🎲サイコロが安全です）。', false); return; }
   if (!window.confirm('このスタッフの暗証番号を再発行します。\n本人に新しい暗証番号を必ず伝えてください。\n進めてよろしいですか？')) return;
   if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
 
@@ -8012,16 +8037,10 @@ function usrResetPassword(card, id, btn){
    新規スタッフ追加（ログイン発行）— Edge Function manage-staff を呼ぶ
    ============================================================================ */
 
-/* 強めのパスワードを自動生成（英大小・数字・記号から12文字程度）。crypto 優先、無ければフォールバック。 */
+/* 強めのパスワードを自動生成（英大小・数字・記号を必ず含む12文字）。WebCrypto必須。 */
 function usrGenPass(){
-  var cs = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*?';
-  var n = 12, out = '';
-  if (window.crypto && crypto.getRandomValues){
-    var rnd = crypto.getRandomValues(new Uint32Array(n));
-    for (var i=0;i<n;i++) out += cs.charAt(rnd[i] % cs.length);
-  } else {
-    for (var j=0;j<n;j++) out += cs.charAt(Math.floor(Math.random() * cs.length));
-  }
+  var out = usrGenerateStrongPassword();
+  if (!out){ usrAddSetMsg('安全な乱数を使えないため、暗証番号を生成できません。'); return; }
   var inp = document.getElementById('usrPass');
   if (inp) inp.value = out;
   usrShowPass(out);   // 発行値を見せる（コピーして本人へ）
@@ -8051,7 +8070,7 @@ function usrAddStaff(){
 
   if (!email){ usrAddSetMsg('メールアドレスを入力してください。'); return; }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ usrAddSetMsg('メールアドレスの形式が正しくありません。'); return; }
-  if (!pass || pass.length < 8){ usrAddSetMsg('パスワードは8文字以上にしてください（🎲自動発行が安全です）。'); return; }
+  if (!usrPasswordLooksStrong(pass)){ usrAddSetMsg('パスワードは12文字以上・3種類以上にしてください（🎲自動発行が安全です）。'); return; }
 
   // 担当店舗 slug → uuid（'all'→null＝全店）。slug 指定なのに解決できなければ中止。
   var storeId = null;
