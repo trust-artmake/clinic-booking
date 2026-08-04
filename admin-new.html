@@ -6266,7 +6266,7 @@ function setRenderShiftBody(){
   // 基本シフトカード（曜日パターン）
   var view = shiftState.weeklyDraft || shiftState.server.weekly;
   h+='<div class="set-card">'
-    +'<div class="set-hint">曜日ごとの出勤時間を設定します。何も入れない曜日は「受付時間内ずっと予約可」。「休」にチェックでその曜日は予約に出ません。区間は最大2つ（昼休みを空ける用）。</div>'
+    +'<div class="set-hint">曜日ごとの出勤時間を設定します。<b>ここで入力した時間だけ、お客様が予約できます。</b>何も入れない曜日・「休」にチェックした曜日は、予約に出ません。区間は最大2つ（昼休みを空ける用）。</div>'
     +'<table class="set-shift-tbl"><tr><th>曜日</th><th>休</th><th>区間1</th><th>区間2</th></tr>';
   for (var d=0; d<7; d++){
     var wd = view[d] || {off:false, ranges:[]};
