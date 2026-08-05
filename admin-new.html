@@ -4645,7 +4645,7 @@ function setLoadInfo(){
     // 🏪 店舗
     h += '<div class="set-sect"><h3>🏪 店舗</h3>' + (stores.length ? stores.map(function(s){
       return row('店舗名', esc(s.name||'—'))
-        + row('予約受付', esc(s.business_hours_start||'—')+' 〜 '+esc(s.business_hours_end||'—'))
+        + row('受付開始 〜 施術終了', esc(s.business_hours_start||'—')+' 〜 '+esc(s.business_hours_end||'—'))
         + row('予約の刻み', esc(s.slot_interval_min||'—')+'分ごと')
         + row('席数', s.seat_count>0 ? ('<b>'+esc(s.seat_count)+'</b>席') : '制限なし')
         + row('定休日', esc(s.closed_days||'—'))
@@ -5262,7 +5262,7 @@ function setLoadStores(){
       var id = esc(s.id);
       h += '<div class="set-card" data-store="'+id+'">'
         + '<div class="set-name">🏪 '+esc(s.name||'—')+'</div>'
-        + '<div class="set-now">現在の予約受付：<b>'+esc(s.business_hours_start||'—')+' 〜 '+esc(s.business_hours_end||'—')+'</b></div>'
+        + '<div class="set-now">受付開始 <b>'+esc(s.business_hours_start||'—')+'</b> ／ 施術終了 <b>'+esc(s.business_hours_end||'—')+'</b>（この時刻までに施術が終わる枠だけ出ます）</div>'
         + '<div class="set-hint">'+esc(s.slot_interval_min||'—')+'分ごと ／ 席数 '+(s.seat_count>0?('<b>'+esc(s.seat_count)+'席</b>（同時施術の上限）'):'制限なし')+(s.google_calendar_id?'':' ／ ⚠️ カレンダーID未設定')+(s.liff_id?'':' ／ ⚠️ LIFF未設定')+'</div>'
         + '<div class="set-acts"><button type="button" class="set-btn set-ghost" data-act="sedit" data-store="'+id+'">✏️ 設定を変更</button></div>'
         + '<div class="set-edit" id="set-sedit-'+id+'">'
@@ -5319,7 +5319,7 @@ function setSaveStore(id){
   if (!name){ setMsg('set-storeMsg','店舗名を入力してください。', false); return; }
   if (name.length > 60){ setMsg('set-storeMsg','店舗名は60文字以内で入力してください。', false); return; }
   if (!setIsHHMM(start) || !setIsHHMM(end)){ setMsg('set-storeMsg','時刻は HH:MM 形式で入力してください。', false); return; }
-  if (start >= end){ setMsg('set-storeMsg','最終受付は開始より後の時刻にしてください。', false); return; }
+  if (start >= end){ setMsg('set-storeMsg','施術終了は、受付開始より後の時刻にしてください。', false); return; }
   var nIntv = parseInt(intv,10), nSeat = parseInt(seat,10);
   if (isNaN(nIntv) || nIntv < 5 || nIntv > 120){ setMsg('set-storeMsg','刻みは5〜120分で入力してください。', false); return; }
   if (isNaN(nSeat) || nSeat < 1){ setMsg('set-storeMsg','席数は1以上の半角数字で入力してください。', false); return; }
@@ -6197,8 +6197,17 @@ function shEffectiveShiftForDate(server, dateStr, dow){
   return {source:'none',off:false,ranges:[]};
 }
 
+/* ★2026-08-04：保存後も「行が1件でもあるか」を保つ（admin_shift_pure.mjs の nextRowCount と同義）。
+   落とすとカレンダーが「受付時間内」に戻り、実際は予約不可の日を開いているように見せてしまう。 */
+function shNextRowCount(server, payload){
+  var saved = (payload && payload.length) ? payload.length : 0;
+  if (saved > 0) return saved;
+  var prev = Number(server && server.rowCount) || 0;
+  return prev > 0 ? prev : 0;
+}
+
 function shApplyDateSaveResult(server, date, payload){
-  var next={ weekly:Object.assign({},server.weekly||{}), dates:Object.assign({},server.dates||{}) };
+  var next={ weekly:Object.assign({},server.weekly||{}), dates:Object.assign({},server.dates||{}), rowCount:shNextRowCount(server,payload) };
   if (!payload||payload.length===0){ delete next.dates[date]; return next; }
   var first=payload[0];
   var ranges=payload.filter(function(p){return !p.is_off && p.start_time && p.end_time;})
@@ -6208,7 +6217,7 @@ function shApplyDateSaveResult(server, date, payload){
 }
 
 function shApplyWeeklySaveResult(server, payload){
-  var next={ weekly:{}, dates:Object.assign({},server.dates||{}) };
+  var next={ weekly:{}, dates:Object.assign({},server.dates||{}), rowCount:shNextRowCount(server,payload) };
   (payload||[]).forEach(function(p){
     var d=Number(p.day_of_week);
     if (!next.weekly[d]) next.weekly[d]={off:false,ranges:[]};
@@ -6244,7 +6253,10 @@ function setLoadShiftEditor(aid, name){
       var now=new Date();
       shiftState.aid=aid;
       shiftState.name=name||'';
-      shiftState.server={ weekly:g.weekly, dates:g.dates };
+      // ★2026-08-04：予約側は「artist_shifts の行が1件でもあるか」で判定する。
+      //   グループ後のキー数だと day_of_week / shift_date が NULL の行を取りこぼし、
+      //   実際は終日予約不可の日を「受付時間内」と表示してしまう（判定は admin_shift_pure.mjs の hasAnyShiftRow）。
+      shiftState.server={ weekly:g.weekly, dates:g.dates, rowCount:(rows||[]).length };
       shiftState.weeklyDraft=null;
       shiftState.dateDraft=null;
       shiftState.cursor={ y:now.getFullYear(), m:now.getMonth()+1 };
@@ -6304,16 +6316,26 @@ function setRenderShiftBody(){
 
 function shRenderCalendarCells(){
   var cells=shBuildCalendarCells(shiftState.cursor.y, shiftState.cursor.m);
+  /* ★2026-08-04：シフトが予約枠に反映されるようになったため、表示の意味が変わった。
+     予約側(artist_shift_busy_ranges)の判定は
+       ・このアーティストのシフト行が1件も無い → 一切制限しない（久留米はこの状態）
+       ・1件でもある → ルールが無い日は「終日休み」
+     カレンダーが常に「（受付時間内）」と出していると、実際は予約が入らない日を
+     「開いている」と誤読させる。シフト有無で表示を分ける。 */
+  //   ★キー数ではなく「取得した生の行数」で判定する（admin_shift_pure.mjs の hasAnyShiftRow と同義）。
+  //     day_of_week / shift_date が NULL の行はグループ化で落ちるため、キー数だとDBとズレる。
+  var hasAnyShift = ((shiftState.server&&shiftState.server.rowCount)||0) > 0;
   return cells.map(function(c){
     if (!c.inMonth) return '<div class="set-shcal-cell out"><div class="d">'+c.day+'</div></div>';
     var eff=shEffectiveShiftForDate(shiftState.server, c.date, c.dow);
+    var noRule = !eff.off && !eff.ranges.length;
     var cls='set-shcal-cell';
     if (eff.source==='date') cls+=' ex';
-    if (eff.off) cls+=' off';
+    if (eff.off || (noRule && hasAnyShift)) cls+=' off';   // 実際に予約が入らない日は休みと同じ見た目にする
     var label='';
     if (eff.off) label='休';
     else if (eff.ranges.length) label=shFormatRanges(eff.ranges);
-    else label='（受付時間内）';
+    else label = hasAnyShift ? '休（未設定）' : '（受付時間内）';
     var badge = (eff.source==='date') ? ' <span class="badge">例外</span>' : '';
     return '<button type="button" class="'+cls+'" data-act="shopenmod" data-date="'+esc(c.date)+'" data-dow="'+c.dow+'">'
       +'<div class="d">'+c.day+badge+'</div><div class="t">'+esc(label)+'</div></button>';
@@ -6879,7 +6901,15 @@ function stpBuildEditor(){
   var tagBox=document.createElement('div'); tagBox.className='stp-note'; tagBox.style.marginBottom='6px';
   tagBox.innerHTML='本文に次のタグを書くと、送信時にお店の実際の値へ自動で置き換わります（価格は手入力せずタグ推奨）：<br>'
     +'<code>{{店名}}</code> <code>{{予約URL}}</code> <code>{{眉通常価格}}</code> <code>{{眉モニター価格}}</code> '
-    +'<code>{{セット価格}}</code> <code>{{所要時間}}</code> <code>{{最終受付}}</code> <code>{{支払い}}</code>';
+    +'<code>{{セット価格}}</code> <code>{{所要時間}}</code> <code>{{支払い}}</code>'
+    /* ★2026-08-04：{{最終受付}} は案内から外した。
+       置き換わる値は stores.business_hours_end ＝「施術が終わる時刻」で、最終受付ではない。
+       名前と中身が食い違うタグを勧めると、お客様へ誤った時刻を配信してしまう
+       （終了17:00・施術2時間30分なら、実際に予約できる最後は14:30）。
+       さらに置換元は「テナントの先頭店舗」固定のため、多店舗では別の店の時刻が入る危険もある。
+       既に本文へ書かれている分は互換のため置換され続ける（壊さない）。 */
+    +'<br>💡 予約できる最終時刻は、メニューの施術時間によって変わります。文面に時刻を書かず、'
+    +'<code>{{予約URL}}</code> で予約ページを見てもらうのが確実です。';
   if(d.trigger_type==='reservation'){
     tagBox.innerHTML+='<br>予約リマインド専用：<code>{{予約日時}}</code> <code>{{担当}}</code> <code>{{メニュー}}</code>（その予約の日時・担当・コース名に置き換わります）';
   }
@@ -6978,7 +7008,7 @@ function stpDeleteScenario(s){
 var STP_TPL_STD = [
   { days:0,  hours:0,  content:'{{店名}}です🤍\n数あるアカウントの中から友だち追加いただき、ありがとうございます✨\nご覧いただいた眉のデザインは、お一人おひとりのお顔立ちに合わせてご提案しています。\n「気になるけれど、まず聞いてみたい」だけでも大歓迎です💬 このトークにそのまま送っていただければ、ご質問にお答えします。\nご予約はこちらから承っています🗓️\n{{予約URL}}' },
   { days:0,  hours:3,  content:'こんにちは、{{店名}}です🤍\n「アートメイクって痛そう…」というご不安、とても多くいただきます。\n当院では施術前に麻酔を使い、痛みをやわらげる工夫をしています。感じ方には個人差がありますが、「思っていたより楽だった」というお声もいただきます☺️\n痛みや麻酔のことで気になる点があれば、遠慮なくこのトークでご質問ください💬' },
-  { days:0,  hours:21, content:'{{店名}}です🤍 昨日は友だち追加いただきありがとうございました✨\n当日は、カウンセリングでデザインをじっくりすり合わせてから施術に入ります。所要時間は{{所要時間}}ほどが目安です（最終受付 {{最終受付}}）。\n実際に受けられた方の口コミをご覧いただけます。このトークに「口コミ」と送っていただくと一覧が表示されます👀\nご都合のよい日時はこちらからご確認いただけます🗓️\n{{予約URL}}' },
+  { days:0,  hours:21, content:'{{店名}}です🤍 昨日は友だち追加いただきありがとうございました✨\n当日は、カウンセリングでデザインをじっくりすり合わせてから施術に入ります。所要時間は{{所要時間}}ほどが目安です。\n実際に受けられた方の口コミをご覧いただけます。このトークに「口コミ」と送っていただくと一覧が表示されます👀\nご都合のよい日時はこちらからご確認いただけます🗓️\n{{予約URL}}' },
   { days:3,  hours:0,  content:'{{店名}}です🤍 今日は料金についてはっきりお伝えします。\n眉は、通常 {{眉通常価格}}／モニター {{眉モニター価格}} です。\nアートメイクは色の定着に個人差があり、1〜2回で仕上げていく施術です。最初から2回セット（{{セット価格}}）にされる方も多いです。\n追加料金の有無など、気になる点はこのトークでお尋ねください💬 金額をぼかさずお答えします。' },
   { days:6,  hours:0,  content:'{{店名}}です🤍 お問い合わせの多いご質問をまとめました。\n・ダウンタイム：数日は色が濃く見え、かさぶたが落ち着くと自然な発色になります（経過には個人差があります）\n・お支払い：{{支払い}}\n・持ち物：基本は手ぶらでOKです\nご予約枠は埋まりやすい時間帯もあります。気になる日程はお早めにご確認ください🗓️\n{{予約URL}}' },
   { days:10, hours:0,  content:'{{店名}}です🤍 クリニックを選ぶときに見ていただきたい点をお伝えします。\n・医療機関で、衛生管理のもと施術していること\n・カウンセリングでデザインを一緒に決められること\n・施術後のフォロー体制があること\n当院はこれらを大切にしています。比較検討中の方も、疑問はこのトークで遠慮なくどうぞ💬' },
