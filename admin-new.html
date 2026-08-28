@@ -832,6 +832,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
         <span class="crm-chip" data-f="new">新規</span>
         <span class="crm-chip" data-f="rep">常連</span>
         <span class="crm-chip" data-f="att">要対応</span>
+        <span class="crm-chip" data-f="resv">📅 予約あり</span>
       </div>
     </div>
     <div class="crm-count" id="crmCount"></div>
@@ -3167,7 +3168,7 @@ function crmBuildPeople(resvs, custs, storeId){
     if (!byKey[ckey]){
       byKey[ckey] = {
         ckey: ckey, name:'', realName:'', lineName:'', line_uid:'', phone:'', store_id:null,
-        visit_count:0, last_visit_at:null, resv_count:0, has_active:false,
+        visit_count:0, last_visit_at:null, resv_count:0, has_active:false, next_resv_at:null,
         resvs:[], _newestAt:null,
         customer_type:'', human_status:'', human_reason:'', background_memo:'',
         hasCustomerRow:false
@@ -3190,6 +3191,13 @@ function crmBuildPeople(resvs, custs, storeId){
     p.resvs.push(r);
     p.resv_count += 1;
     if (r.status !== 'cancelled') p.has_active = true;
+    // ★予約ありフィルタ用（2026-08-28）：今後の予約のうち最も近い日時を持たせる。
+    if (r.status !== 'cancelled' && r.start_at){
+      var futAt = new Date(r.start_at).getTime();
+      if (isFinite(futAt) && futAt >= Date.now() && (!p.next_resv_at || futAt < p.next_resv_at)){
+        p.next_resv_at = futAt;
+      }
+    }
     if (uid && !p.line_uid) p.line_uid = uid;
     if (ph && !p.phone) p.phone = ph;
 
@@ -3277,6 +3285,7 @@ function crmVisiblePeople(){
     if (CRM_FILTER === 'new') return st === 'new';
     if (CRM_FILTER === 'rep') return st === 'rep' || st === 'vip';
     if (CRM_FILTER === 'att') return st === 'att';
+    if (CRM_FILTER === 'resv') return !!p.next_resv_at;
     return true;
   });
 }
@@ -3287,6 +3296,10 @@ function crmRenderList(){
   var scopeLbl = storeId ? ('（' + esc((STORE_MAP && STORE_MAP[slug] && STORE_MAP[slug].name) || slug) + '）') : '（全店）';
 
   var people = crmVisiblePeople();
+  // 「📅 予約あり」表示中は、予約が近いお客様を上に（今日これから来る人が先頭）。
+  if (CRM_FILTER === 'resv'){
+    people = people.slice().sort(function(a,b){ return (a.next_resv_at||9e15) - (b.next_resv_at||9e15); });
+  }
   document.getElementById('crmCount').textContent = people.length + '件 ' + scopeLbl;
 
   var listEl = document.getElementById('crmList');
@@ -3300,6 +3313,11 @@ function crmRenderList(){
     var keyForColor = p.line_uid || p.ckey;
     var sel = (CRM_SELECTED && CRM_SELECTED === (p.line_uid || p.ckey)) ? ' crm-sel' : '';
     var sub = '来店' + esc(p.visit_count || 0) + '回 ・ 最終 ' + esc(crmDate(p.last_visit_at));
+    if (p.next_resv_at){
+      var nd = new Date(p.next_resv_at);
+      sub = '<span style="color:#0b6e77;font-weight:700">📅 次回 ' + (nd.getMonth()+1) + '/' + nd.getDate()
+          + ' ' + ('0'+nd.getHours()).slice(-2) + ':' + ('0'+nd.getMinutes()).slice(-2) + '</span> ・ ' + sub;
+    }
     if (!p.line_uid) sub += ' ・ 📞LINE未連携';
     var typeLbl = crmTypeLabel(p.customer_type);
     if (typeLbl) sub += ' ・ ' + esc(typeLbl);
