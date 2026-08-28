@@ -4379,8 +4379,12 @@ function renderAiReport(s, improvementCandidates){
 
   html += '<div class="ai-sect-h">安全状況</div><div class="ai-grid">';
   html += card('ガード発動', guardBlocked + ' 件', guardBlocked > 0);
-  html += card('システムエラー', systemErrors + ' 件', systemErrors > 0);
-  html += card('通知失敗', staffNotifyFailed + ' 件', staffNotifyFailed > 0);
+  /* ★2026-08-28：この2つは「直近24時間」の件数（DB側 ai_report_stats）。期間タブと無関係。
+     エラーが止まれば自動で0に戻る＝出ている間だけ「いま問題がある」。 */
+  html += card('システムエラー', systemErrors + ' 件', systemErrors > 0,
+               '直近24時間の件数。止まれば自動で0に戻ります');
+  html += card('通知失敗', staffNotifyFailed + ' 件', staffNotifyFailed > 0,
+               '直近24時間の件数。止まれば自動で0に戻ります');
   html += card('未対応の最古', minLabel(oldestOpenMinutes), open > 0 && Number.isFinite(oldestOpenMinutes) && oldestOpenMinutes >= 60);
   html += '</div>';
 
