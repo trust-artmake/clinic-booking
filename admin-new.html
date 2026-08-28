@@ -2601,8 +2601,9 @@ function renderBoard(rows){
           (manual ? '' : '<button type="button" class="rbtn" data-act="consent" data-rid="'+rid+'">📝 同意書を送る</button>') +
           '<button type="button" class="rbtn" data-act="visited" data-rid="'+rid+'">✅ 来店済み</button>' +
           '<button type="button" class="rbtn" data-act="noshow" data-rid="'+rid+'">⚠️ 無断</button>' +
-          /* ★2026-08-28：日時変更。キャンセル→取り直しが不要になる（設計書 docs/reschedule-design.md）。 */
-          '<button type="button" class="rbtn" data-act="reschedule" data-rid="'+rid+'">🗓 日時を変更</button>' +
+          /* ★2026-08-28：日時変更。キャンセル→取り直しが不要になる（設計書 docs/reschedule-design.md）。
+             来店済み/無断が確定した予約は出さない（動かすと「未来の予約が来店済み」になり分析が壊れる）。 */
+          (it.outcome ? '' : '<button type="button" class="rbtn" data-act="reschedule" data-rid="'+rid+'">🗓 日時を変更</button>') +
           '<button type="button" class="rbtn danger" data-act="cancel" data-rid="'+rid+'">❌ キャンセル</button>' +
           '</div>';
         return '<div class="rcard" data-uid="'+esc(it.uid)+'" data-rid="'+rid+'">' +
@@ -2668,7 +2669,7 @@ document.getElementById('resvBoard').addEventListener('click', function(e){
    問診リマインド：set_status(reminded) ＋ LINE push（Edge Function）／
    来店済み：set_outcome(visited)／無断：set_outcome(no_show)／キャンセル：staff_cancel_reservation */
 /* ===== 日時変更（リスケジュール）=====
-   ★2026-08-28 新設。発端＝小倉店・山中様の日時変更希望（翌日予約でお客様は自己キャンセル不可）。
+   ★2026-08-28 新設。発端＝小倉店のお客様の日時変更希望（翌日予約でお客様は自己キャンセル不可）。
    設計書 docs/reschedule-design.md。DB側は reschedule_reservation（同じ予約の日時を書き換える）。
    キャンセル→取り直しと違い、同意書・問診票・予約番号・カレンダーの予定がそのまま残る。 */
 var RESCHED_ERR = {
@@ -2681,7 +2682,8 @@ var RESCHED_ERR = {
   forbidden_store:        '他店舗の予約は変更できません。',
   artist_not_in_store:    'その担当者はこの店舗に登録されていません。',
   artist_menu_not_allowed:'その担当者はこのメニューを担当できません。',
-  start_required:         '変更後の日時を入力してください。'
+  start_required:         '変更後の日時を入力してください。',
+  outcome_fixed:          'この予約は来店済み／無断キャンセルとして記録済みのため、日時を変更できません。'
 };
 function reschedMsg(err){
   var raw = (err && err.message) ? String(err.message) : String(err || '');
@@ -2733,10 +2735,10 @@ function openReschedule(rid){
         if (!window.confirm(q)) return;
         msg.style.color = '#5a6b73'; msg.textContent = '変更しています…';
         box.querySelector('.rs-ok').disabled = true;
-        /* ローカル時刻として送る（お客様・スタッフの体感時刻＝JST）。 */
+        /* ★常にJSTとして解釈する（+09:00明示）。端末のタイムゾーン設定が海外でもズレない。 */
         sbRpc('reschedule_reservation', {
           p_resv: rid,
-          p_start: new Date(dv+'T'+tv+':00').toISOString(),
+          p_start: new Date(dv+'T'+tv+':00+09:00').toISOString(),
           p_artist: null,
           p_notify: notify
         }).then(function(){ box.remove(); loadBoard(); })
@@ -4958,7 +4960,6 @@ function setLoadArtists(){
         +   '<label>資格</label><input type="text" id="set-aqual-'+aid+'" value="'+esc(a.qualification||'')+'">'
         +   '<label>得意・専門</label><input type="text" id="set-aspec-'+aid+'" value="'+esc(a.specialty||'')+'">'
         +   '<label>経歴</label><input type="text" id="set-acareer-'+aid+'" value="'+esc(a.career||'')+'">'
-        +   '<div class="set-hint" style="margin:2px 0 8px">この担当者を指名するお客様が追加で払う料金です（不要なら空欄でOK）。</div>'
         +   '<div class="set-acts">'
         +     '<button type="button" class="set-btn set-primary" data-act="asave" data-aid="'+aid+'">💾 保存</button>'
         +     '<button type="button" class="set-btn set-ghost" data-act="acancel" data-aid="'+aid+'">やめる</button>'
