@@ -2692,10 +2692,26 @@ function reschedMsg(err){
 }
 /* 予約カードの下に変更フォームを出す（別画面に飛ばさない＝現場が迷わない）。 */
 function openReschedule(rid){
-  var card = document.querySelector('.rcard[data-rid="'+rid+'"]');
-  if (!card) return;
-  var exist = card.querySelector('.rs-form');
-  if (exist){ exist.remove(); return; }          // 2度押しで閉じる
+  /* ★2026-08-28 作り直し（現場報告2件目への対応）：
+     旧実装はフォームを予約カードの中に挿入していたが、カードは「ボタン以外のタップ＝顧客カルテへ
+     移動」の領域なので、伝播止めを入れても旧キャッシュや僅かなタップずれで事故が再発した。
+     画面中央のモーダル（body直下・背景オーバーレイ付き）に変更＝カルテ領域の外なので
+     構造的に誤遷移が起きない。開いたことが一目で分かり、新旧バージョンの見分けにもなる。 */
+  var old = document.getElementById('rsModal');
+  if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'rsModal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,26,31,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  var dlg = document.createElement('div');
+  dlg.style.cssText = 'background:#fff;border-radius:10px;max-width:420px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.25)';
+  dlg.innerHTML = '<div style="font-weight:700;font-size:16px;margin-bottom:10px">🗓 日時を変更</div>'
+    + '<div class="rs-body" style="font-size:14px;color:#5a6b73">読み込み中…</div>';
+  ov.appendChild(dlg);
+  document.body.appendChild(ov);
+  /* モーダル内のクリックは外へ出さない。背景（暗い部分）タップで閉じる。 */
+  dlg.addEventListener('click', function(e){ e.stopPropagation(); });
+  ov.addEventListener('click', function(e){ e.stopPropagation(); if (e.target === ov) ov.remove(); });
+
   sbGet('reservations?select=start_at,end_at,customer_name&id=eq.'+encodeURIComponent(rid)+'&limit=1')
     .then(function(rows){
       var r = (rows && rows[0]) || {};
@@ -2703,57 +2719,51 @@ function openReschedule(rid){
       var pad = function(n){ return ('0'+n).slice(-2); };
       var curDate = d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
       var curTime = pad(d.getHours())+':'+pad(d.getMinutes());
-      var box = document.createElement('div');
-      box.className = 'rs-form';
-      box.style.cssText = 'grid-column:1/-1;margin-top:10px;padding:14px;border:1px solid #d8e2e6;border-radius:6px;background:#f7fafb;display:flex;flex-direction:column;gap:10px';
-      box.innerHTML =
-        '<div style="font-weight:700;font-size:14px">🗓 日時を変更</div>' +
-        '<div style="font-size:13px;color:#5a6b73">いまの予約：'+esc(curDate)+' '+esc(curTime)+'〜</div>' +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
-          '<label style="font-size:13px">変更後の日付 <input type="date" class="rs-d" value="'+esc(curDate)+'" style="padding:6px"></label>' +
-          '<label style="font-size:13px">時刻 <input type="time" class="rs-t" value="'+esc(curTime)+'" step="900" style="padding:6px"></label>' +
-        '</div>' +
-        '<label style="font-size:13px;display:flex;gap:6px;align-items:center">' +
-          '<input type="checkbox" class="rs-n" checked> お客様とスタッフグループへ変更のお知らせをLINEで送る' +
-        '</label>' +
-        '<div style="font-size:12px;color:#7b8a91">チェックを外すと1通も送りません（電話でお伝え済みのときに使ってください）。</div>' +
-        '<div style="display:flex;gap:8px">' +
-          '<button type="button" class="rbtn rs-ok">この日時に変更する</button>' +
-          '<button type="button" class="rbtn rs-no">やめる</button>' +
-        '</div>' +
-        '<div class="rs-msg" style="font-size:13px;color:#a3231a"></div>';
-      card.appendChild(box);
-      /* ★UI事故対策（2026-08-28 ゆきねさん報告）：カードは「ボタン以外をタップ＝顧客カルテへ移動」の
-         作りのため、フォーム内のクリック（日付欄・チェック・余白）が親に伝わるとカルテへ飛んでしまう。
-         フォーム内のクリックはここで止める（stopPropagation）。 */
-      box.addEventListener('click', function(e){ e.stopPropagation(); });
-      box.querySelector('.rs-no').onclick = function(){ box.remove(); };
-      box.querySelector('.rs-ok').onclick = function(){
-        var dv = box.querySelector('.rs-d').value, tv = box.querySelector('.rs-t').value;
-        var msg = box.querySelector('.rs-msg');
+      var body = dlg.querySelector('.rs-body');
+      body.style.cssText = 'display:flex;flex-direction:column;gap:12px';
+      body.innerHTML =
+        '<div style="font-size:13.5px;color:#5a6b73">'+esc(r.customer_name||'')+' 様<br>いまの予約：'+esc(curDate)+' '+esc(curTime)+'〜</div>'
+        + '<label style="font-size:13.5px;display:flex;flex-direction:column;gap:4px">変更後の日付'
+        +   '<input type="date" class="rs-d" value="'+esc(curDate)+'" style="padding:10px;font-size:16px;border:1px solid #cdd9de;border-radius:6px"></label>'
+        + '<label style="font-size:13.5px;display:flex;flex-direction:column;gap:4px">変更後の時刻'
+        +   '<input type="time" class="rs-t" value="'+esc(curTime)+'" step="900" style="padding:10px;font-size:16px;border:1px solid #cdd9de;border-radius:6px"></label>'
+        + '<label style="font-size:13.5px;display:flex;gap:8px;align-items:flex-start;line-height:1.5">'
+        +   '<input type="checkbox" class="rs-n" checked style="margin-top:3px">'
+        +   '<span>お客様とスタッフグループへ変更のお知らせをLINEで送る<br><span style="color:#7b8a91;font-size:12px">電話でお伝え済みのときはチェックを外してください（1通も送りません）</span></span></label>'
+        + '<div style="display:flex;gap:8px;margin-top:4px">'
+        +   '<button type="button" class="rs-ok" style="flex:1;padding:12px;font-size:15px;font-weight:700;background:#0b6e77;color:#fff;border:none;border-radius:6px">この日時に変更する</button>'
+        +   '<button type="button" class="rs-no" style="padding:12px 16px;font-size:15px;background:#eef3f5;border:1px solid #cdd9de;border-radius:6px">やめる</button>'
+        + '</div>'
+        + '<div class="rs-msg" style="font-size:13px;color:#a3231a"></div>';
+      body.querySelector('.rs-no').onclick = function(){ ov.remove(); };
+      body.querySelector('.rs-ok').onclick = function(){
+        var dv = body.querySelector('.rs-d').value, tv = body.querySelector('.rs-t').value;
+        var msg = body.querySelector('.rs-msg');
         if (!dv || !tv){ msg.textContent = '日付と時刻の両方を入力してください。'; return; }
-        var notify = box.querySelector('.rs-n').checked;
-        /* 送信前に必ず「変更前 → 変更後」を見せて確認する（誤操作でお客様に誤通知しないため）。 */
+        var notify = body.querySelector('.rs-n').checked;
         var q = 'この予約の日時を変更します。\n\n変更前：'+curDate+' '+curTime+'\n変更後：'+dv+' '+tv+
                 '\n\nお客様へのLINE：'+(notify ? '送る' : '送らない');
         if (!window.confirm(q)) return;
         msg.style.color = '#5a6b73'; msg.textContent = '変更しています…';
-        box.querySelector('.rs-ok').disabled = true;
+        body.querySelector('.rs-ok').disabled = true;
         /* ★常にJSTとして解釈する（+09:00明示）。端末のタイムゾーン設定が海外でもズレない。 */
         sbRpc('reschedule_reservation', {
           p_resv: rid,
           p_start: new Date(dv+'T'+tv+':00+09:00').toISOString(),
           p_artist: null,
           p_notify: notify
-        }).then(function(){ box.remove(); loadBoard(); })
+        }).then(function(){ ov.remove(); loadBoard(); })
           .catch(function(err){
             msg.style.color = '#a3231a';
             msg.textContent = reschedMsg(err);
-            box.querySelector('.rs-ok').disabled = false;
+            body.querySelector('.rs-ok').disabled = false;
           });
       };
     })
-    .catch(function(){ window.alert('予約の情報を読み込めませんでした。画面を再読み込みしてください。'); });
+    .catch(function(){
+      var body = dlg.querySelector('.rs-body');
+      body.textContent = '予約の情報を読み込めませんでした。画面を再読み込みしてください。';
+    });
 }
 
 function handleBoardAction(act, rid){
