@@ -212,10 +212,12 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 
 .crm-placeholder{display:grid;place-items:center;min-height:40vh;color:#9ca3af;font-size:14px;text-align:center;padding:24px;line-height:1.6}
 
-/* スマホ：一覧を先に、タップでカルテ。PCは縦並びでも崩れない単カラム構成 */
-@media (max-width:860px){
-  .crm-detail.crm-detail-show ~ .crm-listwrap{display:none}
-}
+/* 一覧⇔カルテの切替型UI（2026-08-28 修正）：
+   旧実装は「.crm-detail-show ~ .crm-listwrap」で一覧を隠す意図だったが、CSSの「~」は
+   後続の兄弟しか選べず、一覧(前)は永遠に隠れない＝死にセレクタだった。そのため
+   カルテが常に一覧の全員分の下に表示され「最下部までスクロールしないと見えない」状態に。
+   JS(crmShowDetailPane/crmBackToList)が .crm-hide を付け外しする方式へ変更。全画面幅で統一。 */
+.crm-listwrap.crm-hide{display:none}
 
 /* ===== dashboard タブ CSS ===== */
 /* ===== 経営ダッシュボード（dash- 接頭辞・既存 .tab/.rcard/.mb-/.rtab と非衝突） ===== */
@@ -3340,12 +3342,17 @@ function crmBackToList(){
   var d = document.getElementById('crmDetail');
   d.classList.remove('crm-detail-show');
   document.getElementById('crmBack').classList.remove('crm-show');
+  var lw = document.querySelector('.crm-listwrap');
+  if (lw) lw.classList.remove('crm-hide');   // 一覧を戻す
+  window.scrollTo({ top:0, behavior:'smooth' });
 }
 
-/* 詳細パネルを「表示状態」にする（共通）。 */
+/* 詳細パネルを「表示状態」にする（共通）。一覧は隠してカルテだけ見せる（切替型）。 */
 function crmShowDetailPane(){
   document.getElementById('crmDetail').classList.add('crm-detail-show');
   document.getElementById('crmBack').classList.add('crm-show');
+  var lw = document.querySelector('.crm-listwrap');
+  if (lw) lw.classList.add('crm-hide');
   window.scrollTo({ top:0, behavior:'smooth' });
 }
 
