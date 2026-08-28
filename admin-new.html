@@ -2723,6 +2723,10 @@ function openReschedule(rid){
         '</div>' +
         '<div class="rs-msg" style="font-size:13px;color:#a3231a"></div>';
       card.appendChild(box);
+      /* ★UI事故対策（2026-08-28 ゆきねさん報告）：カードは「ボタン以外をタップ＝顧客カルテへ移動」の
+         作りのため、フォーム内のクリック（日付欄・チェック・余白）が親に伝わるとカルテへ飛んでしまう。
+         フォーム内のクリックはここで止める（stopPropagation）。 */
+      box.addEventListener('click', function(e){ e.stopPropagation(); });
       box.querySelector('.rs-no').onclick = function(){ box.remove(); };
       box.querySelector('.rs-ok').onclick = function(){
         var dv = box.querySelector('.rs-d').value, tv = box.querySelector('.rs-t').value;
