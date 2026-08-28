@@ -2601,6 +2601,8 @@ function renderBoard(rows){
           (manual ? '' : '<button type="button" class="rbtn" data-act="consent" data-rid="'+rid+'">📝 同意書を送る</button>') +
           '<button type="button" class="rbtn" data-act="visited" data-rid="'+rid+'">✅ 来店済み</button>' +
           '<button type="button" class="rbtn" data-act="noshow" data-rid="'+rid+'">⚠️ 無断</button>' +
+          /* ★2026-08-28：日時変更。キャンセル→取り直しが不要になる（設計書 docs/reschedule-design.md）。 */
+          '<button type="button" class="rbtn" data-act="reschedule" data-rid="'+rid+'">🗓 日時を変更</button>' +
           '<button type="button" class="rbtn danger" data-act="cancel" data-rid="'+rid+'">❌ キャンセル</button>' +
           '</div>';
         return '<div class="rcard" data-uid="'+esc(it.uid)+'" data-rid="'+rid+'">' +
@@ -2665,8 +2667,92 @@ document.getElementById('resvBoard').addEventListener('click', function(e){
 /* ===== 予約カードの操作（GAS の各 admin* を RPC に置換） =====
    問診リマインド：set_status(reminded) ＋ LINE push（Edge Function）／
    来店済み：set_outcome(visited)／無断：set_outcome(no_show)／キャンセル：staff_cancel_reservation */
+/* ===== 日時変更（リスケジュール）=====
+   ★2026-08-28 新設。発端＝小倉店・山中様の日時変更希望（翌日予約でお客様は自己キャンセル不可）。
+   設計書 docs/reschedule-design.md。DB側は reschedule_reservation（同じ予約の日時を書き換える）。
+   キャンセル→取り直しと違い、同意書・問診票・予約番号・カレンダーの予定がそのまま残る。 */
+var RESCHED_ERR = {
+  artist_busy:            'その担当者は、その時間に別のご予約が入っています。別の時間を選んでください。',
+  no_overlap_per_artist:  'その担当者は、その時間に別のご予約が入っています。別の時間を選んでください。',
+  seat_full:              'その時間は席が空いていません。別の時間を選んでください。',
+  past_datetime:          '過去の日時には変更できません。',
+  already_cancelled:      'この予約はキャンセル済みのため変更できません。',
+  reservation_not_found:  'この予約が見つかりませんでした。画面を再読み込みしてください。',
+  forbidden_store:        '他店舗の予約は変更できません。',
+  artist_not_in_store:    'その担当者はこの店舗に登録されていません。',
+  artist_menu_not_allowed:'その担当者はこのメニューを担当できません。',
+  start_required:         '変更後の日時を入力してください。'
+};
+function reschedMsg(err){
+  var raw = (err && err.message) ? String(err.message) : String(err || '');
+  for (var k in RESCHED_ERR){ if (raw.indexOf(k) >= 0) return RESCHED_ERR[k]; }
+  return '変更できませんでした：' + raw;
+}
+/* 予約カードの下に変更フォームを出す（別画面に飛ばさない＝現場が迷わない）。 */
+function openReschedule(rid){
+  var card = document.querySelector('.rcard[data-rid="'+rid+'"]');
+  if (!card) return;
+  var exist = card.querySelector('.rs-form');
+  if (exist){ exist.remove(); return; }          // 2度押しで閉じる
+  sbGet('reservations?select=start_at,end_at,customer_name&id=eq.'+encodeURIComponent(rid)+'&limit=1')
+    .then(function(rows){
+      var r = (rows && rows[0]) || {};
+      var d = r.start_at ? new Date(r.start_at) : new Date();
+      var pad = function(n){ return ('0'+n).slice(-2); };
+      var curDate = d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+      var curTime = pad(d.getHours())+':'+pad(d.getMinutes());
+      var box = document.createElement('div');
+      box.className = 'rs-form';
+      box.style.cssText = 'grid-column:1/-1;margin-top:10px;padding:14px;border:1px solid #d8e2e6;border-radius:6px;background:#f7fafb;display:flex;flex-direction:column;gap:10px';
+      box.innerHTML =
+        '<div style="font-weight:700;font-size:14px">🗓 日時を変更</div>' +
+        '<div style="font-size:13px;color:#5a6b73">いまの予約：'+esc(curDate)+' '+esc(curTime)+'〜</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<label style="font-size:13px">変更後の日付 <input type="date" class="rs-d" value="'+esc(curDate)+'" style="padding:6px"></label>' +
+          '<label style="font-size:13px">時刻 <input type="time" class="rs-t" value="'+esc(curTime)+'" step="900" style="padding:6px"></label>' +
+        '</div>' +
+        '<label style="font-size:13px;display:flex;gap:6px;align-items:center">' +
+          '<input type="checkbox" class="rs-n" checked> お客様とスタッフグループへ変更のお知らせをLINEで送る' +
+        '</label>' +
+        '<div style="font-size:12px;color:#7b8a91">チェックを外すと1通も送りません（電話でお伝え済みのときに使ってください）。</div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button type="button" class="rbtn rs-ok">この日時に変更する</button>' +
+          '<button type="button" class="rbtn rs-no">やめる</button>' +
+        '</div>' +
+        '<div class="rs-msg" style="font-size:13px;color:#a3231a"></div>';
+      card.appendChild(box);
+      box.querySelector('.rs-no').onclick = function(){ box.remove(); };
+      box.querySelector('.rs-ok').onclick = function(){
+        var dv = box.querySelector('.rs-d').value, tv = box.querySelector('.rs-t').value;
+        var msg = box.querySelector('.rs-msg');
+        if (!dv || !tv){ msg.textContent = '日付と時刻の両方を入力してください。'; return; }
+        var notify = box.querySelector('.rs-n').checked;
+        /* 送信前に必ず「変更前 → 変更後」を見せて確認する（誤操作でお客様に誤通知しないため）。 */
+        var q = 'この予約の日時を変更します。\n\n変更前：'+curDate+' '+curTime+'\n変更後：'+dv+' '+tv+
+                '\n\nお客様へのLINE：'+(notify ? '送る' : '送らない');
+        if (!window.confirm(q)) return;
+        msg.style.color = '#5a6b73'; msg.textContent = '変更しています…';
+        box.querySelector('.rs-ok').disabled = true;
+        /* ローカル時刻として送る（お客様・スタッフの体感時刻＝JST）。 */
+        sbRpc('reschedule_reservation', {
+          p_resv: rid,
+          p_start: new Date(dv+'T'+tv+':00').toISOString(),
+          p_artist: null,
+          p_notify: notify
+        }).then(function(){ box.remove(); loadBoard(); })
+          .catch(function(err){
+            msg.style.color = '#a3231a';
+            msg.textContent = reschedMsg(err);
+            box.querySelector('.rs-ok').disabled = false;
+          });
+      };
+    })
+    .catch(function(){ window.alert('予約の情報を読み込めませんでした。画面を再読み込みしてください。'); });
+}
+
 function handleBoardAction(act, rid){
   if (!rid) return;
+  if (act === 'reschedule'){ openReschedule(rid); return; }   /* 確認は専用フォーム内で行う */
   var plan = {
     remind:  { q:'このお客様に「問診リマインド」をLINEで送信しますか？',
                run:function(){ return pushQuestionnaireReminder(rid)
@@ -4611,7 +4697,8 @@ function setLoadInfo(){
   // 件数は個別にcatch（1つ失敗しても画面全体は落とさない。失敗はnull＝「—」表示）。
   function cnt(path){ return sbGet(path).then(function(r){ return (r&&r.length!=null)?r.length:0; }).catch(function(){ return null; }); }
   ensureStoreMap().then(function(){
-    var storesPath = 'stores?select=id,name,code,liff_id,business_hours_start,business_hours_end,slot_interval_min,seat_count,closed_days,google_calendar_id,accept_outside_business_hours&order=name';
+    /* ★2026-08-05：closed_days / accept_outside_business_hours の取得をやめた（表示を撤去したため）。 */
+    var storesPath = 'stores?select=id,name,code,liff_id,business_hours_start,business_hours_end,slot_interval_min,seat_count,google_calendar_id&order=name';
     return Promise.all([
       sbGet(storesPath).catch(function(){ return []; }),
       cnt('menus?select=id'), cnt('artists?select=id'), cnt('reviews?select=id'),
@@ -4648,8 +4735,14 @@ function setLoadInfo(){
         + row('受付開始 〜 施術終了', esc(s.business_hours_start||'—')+' 〜 '+esc(s.business_hours_end||'—'))
         + row('予約の刻み', esc(s.slot_interval_min||'—')+'分ごと')
         + row('席数', s.seat_count>0 ? ('<b>'+esc(s.seat_count)+'</b>席') : '制限なし')
-        + row('定休日', esc(s.closed_days||'—'))
-        + row('営業時間外の受付', okb(s.accept_outside_business_hours,'許可','不可'))
+        /* ★2026-08-05：「定休日」「営業時間外の受付」の表示を撤去。
+           どちらも編集する入力欄が無く、予約可否の判定にも使われていない（表示だけの飾りだった）。
+           ・定休日(closed_days)：お客様の予約ページでは除外するが、予約作成のサーバ側は見ていない。
+             休みは「メニューとアーティスト → 🗓シフト」で管理する（担当者ごと・時間帯まで指定でき、
+             2026-08-04 からサーバ側でも守られる＝上位互換）。
+           ・営業時間外の受付(accept_outside_business_hours)：どこからも参照されていない。
+           列自体はDBに残す（消すのは不可逆なため）。将来「店舗単位の休業日」が必要になったら、
+           サーバ側の判定込みで作り直す。 */
         + row('カレンダー連携', okb(!!s.google_calendar_id));
     }).join('') : '<div class="set-row"><span class="set-v">店舗が登録されていません</span></div>') + '</div>';
 
@@ -4790,7 +4883,10 @@ function setDeleteMenu(mid){
 
 /* ============================================================================
    3) アーティスト
-   artists（name, qualification, specialty, career, nomination_fee, is_active）一覧→編集／停止トグル。
+   artists（name, qualification, specialty, career, is_active）一覧→編集／停止トグル。
+   ★2026-08-05：指名料(nomination_fee)は画面から撤去。予約金額の計算・通知・AI応答のどこにも
+     反映されておらず、画面だけが「通常料金に上乗せされる」と説明していた（仁義さん判断で不使用）。
+     DBの列は残す（消すのは不可逆なため）。使うことになったら、料金計算への反映込みで作り直す。
    ※店舗フィルタは付けず RLS に委ねる（manager=全店／staff=自店＋全店共通）。
    ============================================================================ */
 function setLoadArtists(){
@@ -4802,7 +4898,7 @@ function setLoadArtists(){
   var menuTenantFilter = TENANT_ID ? '&tenant_id=eq.'+encodeURIComponent(TENANT_ID) : '';
   ensureStoreMap().then(function(){
     return Promise.all([
-      sbGet('artists?select=id,name,qualification,specialty,career,nomination_fee,is_active,store_id,profile_photo_url&order=name'),
+      sbGet('artists?select=id,name,qualification,specialty,career,is_active,store_id,profile_photo_url&order=name'),
       sbGet('menus?select=id,name&is_active=eq.true&order=name'+menuTenantFilter).catch(function(){ return []; }),
       sbGet('artist_menus?select=artist_id,menu_id,is_certified,duration_new_min,duration_retouch_min').catch(function(){ return []; })
     ]);
@@ -4824,8 +4920,6 @@ function setLoadArtists(){
       +   '<label>得意・専門</label><input type="text" id="set-aaspec" placeholder="例）眉・リップ">'
       +   '<div class="set-hint" style="margin:2px 0 8px">この人が得意な施術。お客様が担当を選ぶときの参考になります。</div>'
       +   '<label>経歴</label><input type="text" id="set-aacareer" placeholder="">'
-      +   '<label>指名料（この担当を指名したときの追加料金・円）</label><input type="number" inputmode="numeric" id="set-aafee" placeholder="">'
-      +   '<div class="set-hint" style="margin:2px 0 8px">この担当を指名すると通常料金に上乗せされる金額です。指名料が無い場合は空欄にしてください。</div>'
       +   '<div class="set-acts">'
       +     '<button type="button" class="set-btn set-primary" data-act="aaddsave">💾 追加する</button>'
       +     '<button type="button" class="set-btn set-ghost" data-act="aaddcancel">やめる</button>'
@@ -4841,7 +4935,7 @@ function setLoadArtists(){
         +   (photoUrl ? '<img src="'+esc(photoUrl)+'" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">' : '')
         +   esc(a.name)+(a.is_active?'':' <span class="set-tag set-tagng">停止中</span>')+'</div>'
         + '<div class="set-meta"><span>'+esc(a.qualification||'—')+'</span><span>得意：'+esc(a.specialty||'—')+'</span>'
-        +   '<span>指名料 '+(a.nomination_fee?setYen(a.nomination_fee):'—')+'</span></div>'
+        +   '</div>'
         + '<div class="set-id">ID：'+aid+'</div>'
         + '<div class="set-acts">'
         +   '<button type="button" class="set-btn set-ghost" data-act="aedit" data-aid="'+aid+'">✏️ 編集</button>'
@@ -4864,7 +4958,6 @@ function setLoadArtists(){
         +   '<label>資格</label><input type="text" id="set-aqual-'+aid+'" value="'+esc(a.qualification||'')+'">'
         +   '<label>得意・専門</label><input type="text" id="set-aspec-'+aid+'" value="'+esc(a.specialty||'')+'">'
         +   '<label>経歴</label><input type="text" id="set-acareer-'+aid+'" value="'+esc(a.career||'')+'">'
-        +   '<label>指名料（この担当を指名したときの追加料金・円）</label><input type="number" inputmode="numeric" id="set-afee-'+aid+'" value="'+esc(a.nomination_fee==null?'':a.nomination_fee)+'">'
         +   '<div class="set-hint" style="margin:2px 0 8px">この担当者を指名するお客様が追加で払う料金です（不要なら空欄でOK）。</div>'
         +   '<div class="set-acts">'
         +     '<button type="button" class="set-btn set-primary" data-act="asave" data-aid="'+aid+'">💾 保存</button>'
@@ -4886,15 +4979,11 @@ function setLoadArtists(){
 function setSaveArtist(aid){
   var name = ((document.getElementById('set-aname-'+aid)||{}).value||'').trim();
   if (!name){ setMsg('set-artistMsg','名前を入力してください。', false); return; }
-  var feeRaw = (document.getElementById('set-afee-'+aid)||{}).value;
-  var fee = (feeRaw==='' || feeRaw==null) ? null : parseInt(feeRaw,10);
-  if (fee!==null && (isNaN(fee)||fee<0)){ setMsg('set-artistMsg','指名料は0以上の半角数字で入力してください。', false); return; }
   var patch = {
     name: name,
     qualification: ((document.getElementById('set-aqual-'+aid)||{}).value||'').trim() || null,
     specialty:     ((document.getElementById('set-aspec-'+aid)||{}).value||'').trim() || null,
     career:        ((document.getElementById('set-acareer-'+aid)||{}).value||'').trim() || null,
-    nomination_fee: fee
   };
   sbUpdate('artists','id=eq.'+encodeURIComponent(aid), patch)
     .then(function(){ setMsg('set-artistMsg','✅ 保存しました。', true); setLoadArtists(); })
@@ -5217,9 +5306,6 @@ function setToggleArtist(aid, to){
 function setAddArtist(){
   var name = (((document.getElementById('set-aaname')||{}).value)||'').trim();
   if (!name){ setMsg('set-artistMsg','名前を入力してください。', false); return; }
-  var fee = (document.getElementById('set-aafee')||{}).value;
-  var nFee = (fee==='') ? null : parseInt(fee,10);
-  if (nFee!=null && (isNaN(nFee)||nFee<0)){ setMsg('set-artistMsg','指名料は0以上の半角数字で入力してください。', false); return; }
   // 店舗を解決する前に一覧を読み込む。設定タブを先に開いた直後は STORE_MAP が未読込のことがあり、
   // そのままだと 1店テナントでも store_id が NULL になって予約ページに担当者が出なくなる。
   ensureStoreMap().then(function(){
@@ -5234,7 +5320,7 @@ function setAddArtist(){
       qualification: (((document.getElementById('set-aaqual')||{}).value)||'').trim() || null,
       specialty:     (((document.getElementById('set-aaspec')||{}).value)||'').trim() || null,
       career:        (((document.getElementById('set-aacareer')||{}).value)||'').trim() || null,
-      nomination_fee: nFee, is_active: true
+      is_active: true
     };
     return sbInsert('artists', row);
   })
