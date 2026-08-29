@@ -659,6 +659,60 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .usr-rowmsg{font-size:12px;margin-top:8px;min-height:14px}
 .usr-rowmsg.ng{color:#c2410c}
 .usr-rowmsg.ok{color:#15803d}
+
+/* ===== CS3A参照 + CS3B既読・対応開始 ===== */
+#chatView{max-width:1040px;margin:0 auto;padding:12px}
+.chat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.chat-title{font-size:18px;font-weight:800;color:#0b5c55}
+.chat-readonly{font-size:12px;color:#64748b;line-height:1.5;margin-top:3px}
+.chat-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.chat-toolbar select,.chat-btn{border:1px solid #cfe0dd;background:#fff;color:#0b5c55;border-radius:9px;padding:8px 10px;font:inherit;font-size:12.5px;font-weight:700}
+.chat-btn{cursor:pointer}.chat-btn:disabled{opacity:.55;cursor:default}
+.chat-shell{display:grid;grid-template-columns:minmax(250px,340px) minmax(0,1fr);gap:10px;align-items:start}
+.chat-pane{background:#fff;border:1px solid #e1e9e7;border-radius:13px;min-width:0;overflow:hidden}
+.chat-pane-head{padding:10px 12px;border-bottom:1px solid #edf1f0;font-size:12px;color:#64748b;min-height:38px}
+.chat-list{display:flex;flex-direction:column;max-height:68vh;overflow:auto}
+.chat-list-item{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #edf1f0;background:#fff;padding:11px 12px;cursor:pointer;color:#1f2937}
+.chat-list-item:hover,.chat-list-item.chat-selected{background:#f0faf8}
+.chat-list-top{display:flex;align-items:center;gap:6px;min-width:0}
+.chat-list-name{font-size:14px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.chat-list-meta{font-size:11.5px;color:#64748b;margin-top:5px;display:flex;justify-content:space-between;gap:8px}
+.chat-badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.chat-badge{display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 7px;background:#eef2f1;color:#557}
+.chat-badge.chat-unread{background:#dbeafe;color:#1d4ed8}
+.chat-badge.chat-needs{background:#ffedd5;color:#c2410c}
+.chat-badge.chat-progress{background:#fef3c7;color:#92400e}
+.chat-badge.chat-fail{background:#fee2e2;color:#b91c1c}
+.chat-more-wrap{padding:9px;text-align:center}
+.chat-detail{min-height:360px;max-height:68vh;overflow:auto;padding:12px}
+.chat-detail-title{font-size:17px;font-weight:800;color:#1f2937}
+.chat-detail-meta{font-size:11.5px;color:#64748b;margin-top:4px;padding-bottom:10px;border-bottom:1px solid #edf1f0}
+.chat-workflow{margin:10px 0;padding:10px;border:1px solid #dbe7e5;border-radius:10px;background:#f8fbfa}
+.chat-workflow-note{font-size:12px;line-height:1.55;color:#475569}
+.chat-workflow-note.chat-workflow-warn{color:#b45309;font-weight:700}
+.chat-workflow-note.chat-workflow-ok{color:#15803d;font-weight:700}
+.chat-workflow .chat-btn{margin-top:8px;background:#0b5c55;color:#fff;border-color:#0b5c55}
+.chat-message{max-width:84%;border-radius:12px;padding:9px 11px;margin:10px 0;background:#f1f5f9;color:#1f2937}
+.chat-message.chat-role-user{margin-right:auto;background:#ecfdf5}
+.chat-message.chat-role-ai{margin-left:auto;background:#eef2ff}
+.chat-message.chat-role-staff{margin-left:auto;background:#e6f6f3}
+.chat-message-role{font-size:10.5px;font-weight:800;color:#64748b;margin-bottom:3px}
+.chat-message-body{font-size:13.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-message-foot{font-size:10.5px;color:#64748b;margin-top:5px;display:flex;gap:7px;flex-wrap:wrap}
+.chat-delivery-fail{color:#b91c1c;font-weight:800}
+.chat-compose{margin:12px 0 4px;padding:11px;border:1px solid #cfe0dd;border-radius:11px;background:#f8fbfa}
+.chat-compose-title{font-size:12px;font-weight:800;color:#0b5c55;margin-bottom:6px}
+.chat-compose textarea{display:block;width:100%;min-height:92px;resize:vertical;border:1px solid #cbd8d6;border-radius:9px;padding:9px 10px;font:inherit;font-size:13.5px;line-height:1.5;background:#fff;color:#1f2937}
+.chat-compose-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:7px}
+.chat-compose-count{font-size:11px;color:#64748b}
+.chat-compose-msg{font-size:12px;line-height:1.5;margin-top:7px;color:#b45309}
+.chat-compose-msg.ok{color:#15803d;font-weight:700}
+.chat-retry-btn{border:0;background:transparent;color:#b45309;text-decoration:underline;font:inherit;font-size:10.5px;font-weight:800;cursor:pointer;padding:0}
+.chat-empty{padding:28px 14px;color:#94a3b8;text-align:center;font-size:13px;line-height:1.6}
+@media(max-width:650px){
+  .chat-head{display:block}.chat-toolbar{justify-content:flex-start;margin-top:8px}
+  .chat-shell{grid-template-columns:1fr}.chat-list,.chat-detail{max-height:none}
+}
 </style>
 </head>
 <body>
@@ -732,6 +786,34 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 
   <!-- ===== 🏠 ホーム（STEP4・入口画面。中身は loadHome() がJSで生成）===== -->
   <div id="homeView" style="display:none"><div class="home-wrap" id="homeBody"></div></div>
+
+  <!-- CS3A CHAT INBOX UI START -->
+  <div id="chatView" style="display:none">
+    <div class="chat-head">
+      <div>
+        <div class="chat-title">💬 受信箱</div>
+        <div class="chat-readonly" id="chatModeNote">閲覧専用です。会話を開いても既読や担当状態は変わりません。</div>
+      </div>
+      <div class="chat-toolbar">
+        <label for="chatStoreFilter">店舗</label>
+        <select id="chatStoreFilter"><option value="">全店舗</option></select>
+        <button type="button" class="chat-btn" id="chatReload">更新</button>
+      </div>
+    </div>
+    <div class="chat-shell">
+      <section class="chat-pane" aria-label="会話一覧">
+        <div class="chat-pane-head" id="chatListMsg" aria-live="polite">読み込み前</div>
+        <div class="chat-list" id="chatList"></div>
+        <div class="chat-more-wrap"><button type="button" class="chat-btn" id="chatMore" style="display:none">さらに読み込む</button></div>
+      </section>
+      <section class="chat-pane" aria-label="会話詳細">
+        <div class="chat-pane-head" id="chatDetailMsg" aria-live="polite">会話を選んでください</div>
+        <div class="chat-detail" id="chatDetail"></div>
+        <div class="chat-more-wrap"><button type="button" class="chat-btn" id="chatOlder" style="display:none">過去のメッセージを読み込む</button></div>
+      </section>
+    </div>
+  </div>
+  <!-- CS3A CHAT INBOX UI END -->
 
   <!-- ===== 予約管理 ===== -->
 <!-- ============================================================================
@@ -1198,7 +1280,7 @@ function sbUpsert(table, rows){
 }
 
 // ===== ビュー切替（全タブ共通）=====
-function hideAllViews(){ ["homeView","resvView","custView","dashView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
+function hideAllViews(){ ["homeView","chatView","resvView","custView","dashView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
 // 小タブ(#subnav)の中で「いま表示中」をハイライト。el が無い（プログラム呼び出し）ときは現状維持。
 function setActiveNav(el){ if(!el) return; var bs=document.querySelectorAll("#subnav button"); for(var i=0;i<bs.length;i++) bs[i].classList.toggle("active", bs[i]===el); }
 
@@ -1211,6 +1293,7 @@ function setActiveNav(el){ if(!el) return; var bs=document.querySelectorAll("#su
    ============================================================================ */
 var NAV_GROUPS = [
   { key:'home', label:'🏠 ホーム', mgr:false, direct:'showHome' },   // 小タブ無し＝押すと直接ホーム表示
+  { key:'chat', label:'💬 受信箱', mgr:false, direct:'showChatInbox' },
   { key:'resv', label:'📋 予約・顧客', mgr:false, tabs:[
       { label:'📋 予約管理', fn:'showReservations' },
       { label:'🗂 顧客カルテ', fn:'showCustomers' },
@@ -1297,6 +1380,665 @@ function showHome(el){
   loadHome();
   window.scrollTo({top:0,behavior:'smooth'});
 }
+
+/* CS3A CHAT INBOX SCRIPT START */
+// CS4は対応中の会話だけに1対1返信を追加する。宛先・送信者・チャネルはサーバー側で確定する。
+var CHAT_STATE = null;
+
+function chatNewState(){
+  return {
+    tenantId: TENANT_ID || '', items: [], listCursor: null, listHasMore: false,
+    selectedCustomerId: null, detail: null, messages: [], detailCursor: null,
+    detailHasMore: false, loadingList: false, loadingDetail: false,
+    workflowBusy: null, workflowMessage: '', workflowNeedsReload: false,
+    sendBusy: false, sendMessage: '', draftBody: '', draftId: null
+  };
+}
+
+function chatResetState(){
+  CHAT_STATE = chatNewState();
+  var list = document.getElementById('chatList'); if(list) chatClear(list);
+  var detail = document.getElementById('chatDetail'); if(detail) chatClear(detail);
+  chatSetText('chatListMsg', '読み込み前');
+  chatSetText('chatDetailMsg', '会話を選んでください');
+  chatSetText('chatModeNote', '閲覧専用です。会話を開いても既読や担当状態は変わりません。');
+  var more = document.getElementById('chatMore'); if(more) more.style.display = 'none';
+  var older = document.getElementById('chatOlder'); if(older) older.style.display = 'none';
+}
+
+function chatClear(el){ while(el && el.firstChild) el.removeChild(el.firstChild); }
+function chatSetText(id, value){ var el=document.getElementById(id); if(el) el.textContent=value || ''; }
+function chatElement(tag, className, value){
+  var el=document.createElement(tag);
+  if(className) el.className=className;
+  if(value !== undefined && value !== null) el.textContent=String(value);
+  return el;
+}
+
+function chatFormatTime(value){
+  if(!value) return '時刻なし';
+  var d=new Date(value); if(Number.isNaN(d.getTime())) return '時刻なし';
+  return d.toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+function chatStatusLabel(status){
+  if(status==='needs_reply') return '要返信';
+  if(status==='in_progress') return '対応中';
+  if(status==='done') return '完了';
+  return '状態不明';
+}
+function chatRoleLabel(role){
+  if(role==='user' || role==='user_image') return 'お客様';
+  if(role==='ai') return 'AI';
+  if(role==='staff') return 'スタッフ';
+  return 'システム';
+}
+function chatDeliveryLabel(status){
+  if(status==='pending') return '送信処理中';
+  if(status==='sent') return 'LINE受付済み';
+  if(status==='retryable') return '再試行待ち';
+  if(status==='failed') return '送信失敗';
+  if(status==='unknown') return '送信結果要確認';
+  return '';
+}
+function chatResolutionLabel(resolution){
+  if(resolution==='reply_not_needed') return '返信不要として確認済み';
+  if(resolution==='replied_outside_system') return '別経路で返信済み';
+  if(resolution==='superseded_by_sent') return '正常送信で置換済み';
+  return '';
+}
+function chatStoreName(storeId){
+  if(!storeId) return '店舗未確定';
+  if(STORE_MAP){
+    var keys=Object.keys(STORE_MAP);
+    for(var i=0;i<keys.length;i++){
+      var row=STORE_MAP[keys[i]];
+      if(row && row.id===storeId) return row.name || keys[i];
+    }
+  }
+  return '店舗';
+}
+function chatReason(code){
+  var messages={
+    invalid_token:'もう一度ログインしてください。', unauthorized:'もう一度ログインしてください。',
+    forbidden:'この受信箱を閲覧する権限がありません。', not_found:'会話が見つかりません。',
+    chat_inbox_disabled:'この店舗では受信箱がまだ有効ではありません。',
+    chat_workflow_disabled:'この店舗では既読・対応開始はまだ有効ではありません。',
+    chat_ai_resume_disabled:'この店舗では対応完了によるAI再開はまだ有効ではありません。',
+    chat_send_disabled:'この店舗では管理画面返信がまだ有効ではありません。',
+    line_uid_missing:'このお客様はLINE送信先を確認できません。',
+    channel_not_resolved:'送信チャネルを一意に確認できません。設定を確認してください。',
+    daily_limit_missing:'日次送信上限が未設定です。管理者へ連絡してください。',
+    daily_send_limit_reached:'本日の管理画面返信上限に達しました。LINE公式アプリで確認してください。',
+    idempotency_conflict:'同じ送信IDに別の本文が使われました。会話を開き直してください。',
+    attempt_in_progress:'同じ返信を送信処理中です。少し待って会話を更新してください。',
+    failed_delivery_not_found:'対象の送信失敗が見つかりません。会話を開き直してください。',
+    delivery_already_resolved:'この送信失敗はすでに別の理由で確認済みです。',
+    replacement_message_not_sent:'置換先の正常送信を確認できません。',
+    invalid_delivery_resolution:'送信失敗の確認理由が不正です。',
+    medical_confirmation_required:'医療上の危険表現を確認してから送信してください。',
+    version_conflict:'別のスタッフ更新または新着があります。会話を開き直してください。',
+    inbound_conflict:'新着があります。会話を開き直してから確認してください。',
+    conversation_not_open:'この会話はすでに対応状態が変わっています。',
+    unresolved_delivery:'未解決または送信失敗のスタッフ返信があります。確認後に会話を開き直してください。',
+    invalid_read_time:'既読時刻を更新できませんでした。会話を開き直してください。',
+    read_failed:'会話を読み込めませんでした。', invalid_response:'会話を読み込めませんでした。'
+  };
+  return messages[code] || '会話を読み込めませんでした。';
+}
+
+function chatCall(action, params){
+  if(!TOKEN){ var authError=new Error('chat_auth_required'); authError.code='invalid_token'; return Promise.reject(authError); }
+  var payload=Object.assign({ action:action, tenant_id:TENANT_ID }, params || {});
+  return fetch(SB_URL + '/functions/v1/manage-chat', {
+    method:'POST',
+    headers:Object.assign({ 'Content-Type':'application/json' }, hdr()),
+    body:JSON.stringify(payload)
+  }).then(function(res){
+    return res.text().then(function(raw){
+      var body=null; try{ body=raw ? JSON.parse(raw) : null; }catch(e){}
+      return { ok:res.ok, status:res.status, body:body };
+    });
+  }).then(function(result){
+    if(!result.ok || !result.body || result.body.ok!==true){
+      var error=new Error('chat_read_failed');
+      error.code=(result.body && result.body.reason) || (result.status===401 ? 'invalid_token' : 'read_failed');
+      error.warningCodes=(result.body && Array.isArray(result.body.warning_codes)) ? result.body.warning_codes : [];
+      throw error;
+    }
+    return result.body.data;
+  });
+}
+
+function chatPopulateStoreFilter(){
+  var select=document.getElementById('chatStoreFilter');
+  if(!select || typeof ensureStoreMap!=='function') return Promise.resolve();
+  var keep=select.value;
+  return ensureStoreMap().then(function(map){
+    chatClear(select);
+    var all=chatElement('option', '', '全店舗'); all.value=''; select.appendChild(all);
+    Object.keys(map || {}).sort().forEach(function(key){
+      var row=map[key]; if(!row || !row.id) return;
+      var option=chatElement('option', '', row.name || key); option.value=row.id; select.appendChild(option);
+    });
+    if(keep && Array.prototype.some.call(select.options, function(o){ return o.value===keep; })) select.value=keep;
+  });
+}
+
+function chatBadge(label, className){ return chatElement('span', 'chat-badge '+className, label); }
+function chatCanWorkflow(detail){ return !!(detail && detail.workflow_enabled === true); }
+function chatCanSend(detail){
+  return !!(detail && detail.send_enabled === true && detail.status==='in_progress');
+}
+function chatCanComplete(detail){
+  return !!(detail && detail.workflow_enabled === true && detail.ai_resume_enabled === true && detail.status==='in_progress');
+}
+function chatIsUnread(detail){
+  if(!detail || !detail.last_inbound_at) return false;
+  if(!detail.last_read_at) return true;
+  var inbound=new Date(detail.last_inbound_at).getTime();
+  var read=new Date(detail.last_read_at).getTime();
+  return !Number.isFinite(inbound) || !Number.isFinite(read) || read < inbound;
+}
+function chatUpdateModeNote(detail){
+  var note='閲覧専用です。会話を開いても既読や担当状態は変わりません。';
+  if(chatCanWorkflow(detail)){
+    var sendNote=detail.send_enabled===true ? '管理画面返信が有効です。' : '管理画面返信はまだ無効です。';
+    note=detail.ai_resume_enabled===true
+      ? '共有既読・対応開始・「対応完了（AI再開）」が有効です。'+sendNote
+      : '共有既読と「対応を始める」が有効です。対応完了によるAI再開はまだ無効です。'+sendNote;
+  }
+  chatSetText('chatModeNote',note);
+}
+function chatSyncListFromDetail(){
+  if(!CHAT_STATE || !CHAT_STATE.detail) return;
+  for(var i=0;i<CHAT_STATE.items.length;i++){
+    var item=CHAT_STATE.items[i];
+    if(!item || item.customer_id!==CHAT_STATE.detail.customer_id) continue;
+    item.version=CHAT_STATE.detail.version;
+    item.status=CHAT_STATE.detail.status;
+    item.assigned_staff_id=CHAT_STATE.detail.assigned_staff_id;
+    item.assigned_staff_name=CHAT_STATE.detail.assigned_staff_name;
+    item.unread=chatIsUnread(CHAT_STATE.detail);
+    break;
+  }
+}
+
+function chatRenderList(){
+  var host=document.getElementById('chatList'); if(!host || !CHAT_STATE) return;
+  chatClear(host);
+  if(!CHAT_STATE.items.length){ host.appendChild(chatElement('div','chat-empty','表示できる会話はありません。')); }
+  CHAT_STATE.items.forEach(function(item){
+    var button=chatElement('button','chat-list-item'); button.type='button';
+    if(item.customer_id===CHAT_STATE.selectedCustomerId) button.classList.add('chat-selected');
+    var top=chatElement('div','chat-list-top');
+    var name=item.display_name || (item.ticket_no ? 'お客様 #'+item.ticket_no : '名前未設定のお客様');
+    top.appendChild(chatElement('div','chat-list-name',name)); button.appendChild(top);
+    var badges=chatElement('div','chat-badges');
+    if(item.unread) badges.appendChild(chatBadge('未読','chat-unread'));
+    if(item.status==='needs_reply') badges.appendChild(chatBadge('要返信','chat-needs'));
+    if(item.status==='in_progress'){
+      var handler=item.assigned_staff_name ? item.assigned_staff_name+'さん対応中' : '担当者対応中';
+      badges.appendChild(chatBadge(handler,'chat-progress'));
+    }
+    if(item.send_failure) badges.appendChild(chatBadge('送信失敗','chat-fail'));
+    if(badges.childNodes.length) button.appendChild(badges);
+    var meta=chatElement('div','chat-list-meta');
+    meta.appendChild(chatElement('span','',chatStoreName(item.store_id)));
+    meta.appendChild(chatElement('span','',chatFormatTime(item.last_inbound_at)));
+    button.appendChild(meta);
+    button.addEventListener('click', function(){ chatLoadDetail(item.customer_id, true); });
+    host.appendChild(button);
+  });
+  chatSetText('chatListMsg', CHAT_STATE.items.length+'件を表示');
+  var more=document.getElementById('chatMore');
+  if(more){ more.style.display=CHAT_STATE.listHasMore ? '' : 'none'; more.disabled=CHAT_STATE.loadingList; }
+}
+
+function chatLoadList(reset){
+  if(!CHAT_STATE || CHAT_STATE.tenantId!==TENANT_ID) chatResetState();
+  if(CHAT_STATE.loadingList) return;
+  var requestTenant=TENANT_ID;
+  var params={ limit:50 };
+  var store=document.getElementById('chatStoreFilter'); if(store && store.value) params.store_id=store.value;
+  if(!reset && CHAT_STATE.listCursor){
+    params.before_at=CHAT_STATE.listCursor.before_at;
+    params.before_id=CHAT_STATE.listCursor.before_id;
+  }
+  if(reset){
+    CHAT_STATE.items=[]; CHAT_STATE.listCursor=null; CHAT_STATE.listHasMore=false;
+    CHAT_STATE.selectedCustomerId=null; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
+    CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false;
+    CHAT_STATE.sendBusy=false; CHAT_STATE.sendMessage=''; CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null; chatUpdateModeNote(null);
+    chatSetText('chatDetailMsg','会話を選んでください');
+    var detail=document.getElementById('chatDetail'); if(detail) chatClear(detail);
+  }
+  CHAT_STATE.loadingList=true; chatSetText('chatListMsg','読み込み中…');
+  var more=document.getElementById('chatMore'); if(more) more.disabled=true;
+  chatCall('list_conversations', params).then(function(data){
+    if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.tenantId!==requestTenant) return;
+    var rows=Array.isArray(data) ? data : [];
+    var seen=Object.create(null);
+    CHAT_STATE.items.forEach(function(row){ if(row && row.customer_id) seen[row.customer_id]=true; });
+    rows.forEach(function(row){ if(row && row.customer_id && !seen[row.customer_id]){ seen[row.customer_id]=true; CHAT_STATE.items.push(row); } });
+    var last=rows.length ? rows[rows.length-1] : null;
+    CHAT_STATE.listCursor=(last && last.last_inbound_at && last.cursor_id)
+      ? { before_at:last.last_inbound_at, before_id:last.cursor_id } : null;
+    CHAT_STATE.listHasMore=rows.length===50 && !!CHAT_STATE.listCursor;
+    chatRenderList();
+  }).catch(function(error){
+    if(requestTenant!==TENANT_ID) return;
+    chatSetText('chatListMsg',chatReason(error && error.code));
+    if(!CHAT_STATE.items.length){ var host=document.getElementById('chatList'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','受信箱を表示できませんでした。')); } }
+  }).finally(function(){
+    if(requestTenant!==TENANT_ID || !CHAT_STATE) return;
+    CHAT_STATE.loadingList=false; var button=document.getElementById('chatMore'); if(button) button.disabled=false;
+  });
+}
+
+function chatRenderDetail(){
+  var host=document.getElementById('chatDetail'); if(!host || !CHAT_STATE || !CHAT_STATE.detail) return;
+  chatClear(host);
+  var detail=CHAT_STATE.detail;
+  var name=detail.display_name || (detail.ticket_no ? 'お客様 #'+detail.ticket_no : '名前未設定のお客様');
+  host.appendChild(chatElement('div','chat-detail-title',name));
+  var assigned=(detail.status==='in_progress')
+    ? ' ・ '+(detail.assigned_staff_name ? detail.assigned_staff_name+'さん対応中' : '担当者対応中') : '';
+  var meta=chatElement('div','chat-detail-meta',chatStoreName(detail.store_id)+' ・ '+chatStatusLabel(detail.status)+assigned);
+  host.appendChild(meta);
+  chatRenderWorkflow(host, detail);
+  if(!CHAT_STATE.messages.length){ host.appendChild(chatElement('div','chat-empty','メッセージはありません。')); }
+  CHAT_STATE.messages.forEach(function(message){
+    var roleClass=(message.role==='staff') ? 'chat-role-staff' : (message.role==='ai' ? 'chat-role-ai' : 'chat-role-user');
+    var bubble=chatElement('article','chat-message '+roleClass);
+    bubble.appendChild(chatElement('div','chat-message-role',chatRoleLabel(message.role)));
+    var body=message.body;
+    if(!body && message.role==='user_image') body='画像メッセージ（画像はこの閲覧画面では開きません）';
+    if(!body) body='（本文なし）';
+    bubble.appendChild(chatElement('div','chat-message-body',body));
+    var foot=chatElement('div','chat-message-foot');
+    foot.appendChild(chatElement('span','',chatFormatTime(message.created_at)));
+    var delivery=chatDeliveryLabel(message.delivery_status);
+    if(delivery){
+      var failClass=(message.delivery_status==='retryable' || message.delivery_status==='failed' || message.delivery_status==='unknown') ? 'chat-delivery-fail' : '';
+      foot.appendChild(chatElement('span',failClass,delivery));
+    }
+    var resolution=chatResolutionLabel(message.delivery_resolution);
+    if(resolution) foot.appendChild(chatElement('span','',resolution));
+    if(message.role==='staff' && (message.delivery_status==='pending' || message.delivery_status==='retryable') && message.client_message_id){
+      var retryLabel=message.delivery_status==='pending' ? '同じ送信IDで状態を復旧' : '同じ送信IDで再試行';
+      var retry=chatElement('button','chat-retry-btn',retryLabel); retry.type='button';
+      retry.disabled=CHAT_STATE.sendBusy;
+      retry.addEventListener('click',function(){ chatRetryMessage(message); });
+      foot.appendChild(retry);
+    }
+    if(message.role==='staff' && message.delivery_status==='failed' && !message.delivery_resolution && message.client_message_id){
+      var noReply=chatElement('button','chat-retry-btn','返信不要として解決'); noReply.type='button';
+      noReply.disabled=CHAT_STATE.sendBusy || !!CHAT_STATE.workflowBusy;
+      noReply.addEventListener('click',function(){ chatResolveFailedDelivery(message,'reply_not_needed'); });
+      foot.appendChild(noReply);
+      var outside=chatElement('button','chat-retry-btn','別経路で返信済み'); outside.type='button';
+      outside.disabled=CHAT_STATE.sendBusy || !!CHAT_STATE.workflowBusy;
+      outside.addEventListener('click',function(){ chatResolveFailedDelivery(message,'replied_outside_system'); });
+      foot.appendChild(outside);
+    }
+    bubble.appendChild(foot); host.appendChild(bubble);
+  });
+  chatRenderComposer(host,detail);
+  chatSetText('chatDetailMsg','会話履歴 '+CHAT_STATE.messages.length+'件');
+  var older=document.getElementById('chatOlder');
+  if(older){ older.style.display=CHAT_STATE.detailHasMore ? '' : 'none'; older.disabled=CHAT_STATE.loadingDetail; }
+}
+
+function chatRenderComposer(host,detail){
+  if(!chatCanSend(detail)){
+    if(detail.status==='in_progress' && detail.send_enabled!==true){
+      host.appendChild(chatElement('div','chat-workflow-note','管理画面からの返信は現在無効です。'));
+    }
+    return;
+  }
+  var box=chatElement('section','chat-compose');
+  var title='返信を書く';
+  if(detail.send_mock===true) title+='（モック・外部LINE送信なし）';
+  box.appendChild(chatElement('div','chat-compose-title',title));
+  var area=chatElement('textarea',''); area.id='chatReplyBody'; area.maxLength=4000;
+  area.value=CHAT_STATE.draftBody || ''; area.disabled=CHAT_STATE.sendBusy;
+  area.setAttribute('aria-label','返信本文'); area.setAttribute('placeholder','お客様への返信を入力してください');
+  var foot=chatElement('div','chat-compose-foot');
+  var count=chatElement('span','chat-compose-count',Array.from(area.value).length+'/4000');
+  var send=chatElement('button','chat-btn',CHAT_STATE.sendBusy ? '送信中…' : '返信を送る'); send.type='button';
+  send.disabled=CHAT_STATE.sendBusy || CHAT_STATE.workflowNeedsReload;
+  area.addEventListener('input',function(){
+    CHAT_STATE.draftBody=area.value;
+    count.textContent=Array.from(area.value).length+'/4000';
+    if(CHAT_STATE.draftId) CHAT_STATE.draftId=null;
+  });
+  send.addEventListener('click',chatSendMessage);
+  foot.appendChild(count); foot.appendChild(send); box.appendChild(area); box.appendChild(foot);
+  if(CHAT_STATE.sendMessage){
+    var ok=/LINE受付済み|モック送信完了/.test(CHAT_STATE.sendMessage);
+    box.appendChild(chatElement('div','chat-compose-msg'+(ok?' ok':''),CHAT_STATE.sendMessage));
+  }
+  host.appendChild(box);
+}
+
+function chatSendRequest(body,clientMessageId,medicalConfirmed){
+  return chatCall('send_message',{
+    customer_id:CHAT_STATE.detail.customer_id,
+    client_message_id:clientMessageId,
+    body:body,
+    medical_warning_confirmed:medicalConfirmed===true
+  });
+}
+
+function chatSubmitMessage(body,clientMessageId){
+  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanSend(CHAT_STATE.detail) || CHAT_STATE.sendBusy) return;
+  var customerId=CHAT_STATE.detail.customer_id;
+  CHAT_STATE.sendBusy=true; CHAT_STATE.sendMessage='送信処理を開始しています…'; chatRenderDetail();
+  function attempt(medicalConfirmed){
+    return chatSendRequest(body,clientMessageId,medicalConfirmed).catch(function(error){
+      if(error && error.code==='medical_confirmation_required' && medicalConfirmed!==true){
+        var warning='医療表現の警告があります。内容を責任者として確認し、本文を変更せず送信しますか？';
+        if(window.confirm(warning)) return chatSendRequest(body,clientMessageId,true);
+      }
+      throw error;
+    });
+  }
+  attempt(false).then(function(data){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(!data || !/^(pending|sent|retryable|failed|unknown)$/.test(String(data.deliveryStatus||''))){
+      throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
+    }
+    if(data.deliveryStatus==='sent'){
+      CHAT_STATE.sendMessage=data.mock===true
+        ? 'モック送信完了：外部LINEには送っていません。'
+        : 'LINE受付済みです。端末への到達を保証する表示ではありません。';
+      CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null;
+    }else if(data.deliveryStatus==='retryable'){
+      CHAT_STATE.sendMessage='一時的な送信失敗です。同じ送信IDでのみ再試行できます。';
+    }else if(data.deliveryStatus==='pending'){
+      CHAT_STATE.sendMessage='同じ返信を送信処理中です。更新して結果を確認してください。';
+    }else if(data.deliveryStatus==='failed'){
+      CHAT_STATE.sendMessage='LINEに受理されませんでした。本文または設定を確認してください。';
+      CHAT_STATE.draftId=null;
+    }else{
+      CHAT_STATE.sendMessage='送信結果を自動判定できません。LINE公式画面で確認してください。';
+    }
+  }).catch(function(error){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    CHAT_STATE.sendMessage=chatReason(error && error.code);
+    if(error && error.code==='chat_send_disabled' && CHAT_STATE.detail) CHAT_STATE.detail.send_enabled=false;
+  }).finally(function(){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    CHAT_STATE.sendBusy=false; chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+    chatLoadDetail(customerId,true);
+  });
+}
+
+function chatSendMessage(){
+  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanSend(CHAT_STATE.detail) || CHAT_STATE.sendBusy) return;
+  var body=String(CHAT_STATE.draftBody || '');
+  var count=Array.from(body).length;
+  if(!body.trim()){ CHAT_STATE.sendMessage='返信本文を入力してください。'; chatRenderDetail(); return; }
+  if(count>4000){ CHAT_STATE.sendMessage='返信は4,000文字以内にしてください。'; chatRenderDetail(); return; }
+  if(!CHAT_STATE.draftId){
+    if(!window.crypto || typeof window.crypto.randomUUID!=='function'){
+      CHAT_STATE.sendMessage='安全な送信IDを作れません。ブラウザを更新してください。'; chatRenderDetail(); return;
+    }
+    CHAT_STATE.draftId=window.crypto.randomUUID();
+  }
+  var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
+  var confirmText='宛先：'+name+'\n\n返信本文：\n'+body+'\n\nこの内容をLINEへ送信しますか？';
+  if(!window.confirm(confirmText)) return;
+  chatSubmitMessage(body,CHAT_STATE.draftId);
+}
+
+function chatRetryMessage(message){
+  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanSend(CHAT_STATE.detail) || CHAT_STATE.sendBusy) return;
+  if(!message || (message.delivery_status!=='pending' && message.delivery_status!=='retryable') || !message.client_message_id || !message.body) return;
+  var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
+  var retryAction=message.delivery_status==='pending' ? '送信状態を復旧' : '再試行';
+  if(!window.confirm('宛先：'+name+'\n\n同じ送信ID・同じ本文で'+retryAction+'しますか？\n\n'+message.body)) return;
+  CHAT_STATE.draftBody=message.body; CHAT_STATE.draftId=message.client_message_id;
+  chatSubmitMessage(message.body,message.client_message_id);
+}
+
+function chatResolveFailedDelivery(message,resolution){
+  if(!CHAT_STATE || !CHAT_STATE.detail || CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy) return;
+  if(!message || message.delivery_status!=='failed' || message.delivery_resolution || !message.client_message_id) return;
+  if(resolution!=='reply_not_needed' && resolution!=='replied_outside_system') return;
+  var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
+  var reasonLabel=resolution==='reply_not_needed' ? '返信不要' : '別経路で返信済み';
+  var prompt='宛先：'+name+'\n\nこの送信失敗を「'+reasonLabel+'」として記録しますか？\n担当者と時刻が監査記録に残ります。';
+  if(!window.confirm(prompt)) return;
+  var customerId=CHAT_STATE.detail.customer_id;
+  CHAT_STATE.workflowBusy='resolve_failed_delivery';
+  CHAT_STATE.workflowMessage='送信失敗を確認中…';
+  chatRenderDetail();
+  chatCall('resolve_failed_delivery',{
+    customer_id:customerId,
+    client_message_id:message.client_message_id,
+    resolution:resolution
+  }).then(function(data){
+    if(!data || data.resolution!==resolution){
+      throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
+    }
+    CHAT_STATE.workflowMessage='送信失敗を「'+reasonLabel+'」として記録しました。';
+  }).catch(function(error){
+    CHAT_STATE.workflowMessage=chatReason(error && error.code);
+  }).finally(function(){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    CHAT_STATE.workflowBusy=null;
+    chatRenderDetail();
+    chatLoadDetail(customerId,true);
+  });
+}
+
+function chatRenderWorkflow(host, detail){
+  var panel=chatElement('div','chat-workflow');
+  if(!chatCanWorkflow(detail)){
+    panel.appendChild(chatElement('div','chat-workflow-note','この会話は閲覧専用です。'));
+    host.appendChild(panel); return;
+  }
+  if(CHAT_STATE.workflowMessage){
+    var kind=/しました|有効です/.test(CHAT_STATE.workflowMessage) ? ' chat-workflow-ok' : ' chat-workflow-warn';
+    panel.appendChild(chatElement('div','chat-workflow-note'+kind,CHAT_STATE.workflowMessage));
+  }
+  if(detail.status==='needs_reply'){
+    var start=chatElement('button','chat-btn','対応を始める'); start.type='button';
+    start.disabled=!!CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload;
+    start.addEventListener('click',chatStartHandling); panel.appendChild(start);
+  }else if(detail.status==='in_progress'){
+    var who=detail.assigned_staff_name ? detail.assigned_staff_name+'さんが対応中です。' : '担当者が対応中です。';
+    panel.appendChild(chatElement('div','chat-workflow-note',who+' 他のスタッフも会話は閲覧できます。'));
+    if(chatCanComplete(detail)){
+      var complete=chatElement('button','chat-btn','対応完了（AI再開）'); complete.type='button';
+      complete.disabled=!!CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy;
+      complete.addEventListener('click',chatCompleteHandling); panel.appendChild(complete);
+    }else if(detail.ai_resume_enabled!==true){
+      panel.appendChild(chatElement('div','chat-workflow-note','対応完了によるAI再開は現在無効です。'));
+    }
+  }else{
+    panel.appendChild(chatElement('div','chat-workflow-note','現在は対応完了の状態です。'));
+  }
+  host.appendChild(panel);
+}
+
+function chatMaybeMarkRead(detail){
+  if(!CHAT_STATE || !chatCanWorkflow(detail) || !chatIsUnread(detail) || CHAT_STATE.workflowBusy) return;
+  if(!Number.isSafeInteger(detail.version) || !detail.last_inbound_at) return;
+  var customerId=detail.customer_id;
+  var expectedVersion=detail.version;
+  var expectedInbound=detail.last_inbound_at;
+  CHAT_STATE.workflowBusy='mark_read'; CHAT_STATE.workflowMessage='既読にしています…'; chatRenderDetail();
+  chatCall('mark_read', {
+    customer_id:customerId,
+    expected_version:expectedVersion,
+    expected_last_inbound_at:expectedInbound
+  }).then(function(data){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(CHAT_STATE.detail.version!==expectedVersion || CHAT_STATE.detail.last_inbound_at!==expectedInbound) return;
+    if(!data || !Number.isSafeInteger(data.version) || !data.last_read_at){
+      throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
+    }
+    CHAT_STATE.detail.version=data.version;
+    CHAT_STATE.detail.last_read_at=data.last_read_at;
+    CHAT_STATE.workflowNeedsReload=false;
+    CHAT_STATE.workflowMessage='共有既読にしました。';
+    chatSyncListFromDetail(); chatRenderList();
+  }).catch(function(error){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    var code=error && error.code;
+    if(code==='chat_workflow_disabled') CHAT_STATE.detail.workflow_enabled=false;
+    if(code==='version_conflict' || code==='inbound_conflict') CHAT_STATE.workflowNeedsReload=true;
+    CHAT_STATE.workflowMessage=chatReason(code);
+  }).finally(function(){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    CHAT_STATE.workflowBusy=null; chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+  });
+}
+
+function chatStartHandling(){
+  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanWorkflow(CHAT_STATE.detail)) return;
+  if(CHAT_STATE.detail.status!=='needs_reply' || CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload) return;
+  var customerId=CHAT_STATE.detail.customer_id;
+  var expectedVersion=CHAT_STATE.detail.version;
+  if(!Number.isSafeInteger(expectedVersion)) return;
+  CHAT_STATE.workflowBusy='start_handling'; CHAT_STATE.workflowMessage='対応開始を記録しています…'; chatRenderDetail();
+  chatCall('start_handling', {
+    customer_id:customerId,
+    expected_version:expectedVersion
+  }).then(function(data){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(CHAT_STATE.detail.version!==expectedVersion) return;
+    if(!data || data.status!=='in_progress' || !Number.isSafeInteger(data.version)){
+      throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
+    }
+    CHAT_STATE.detail.status=data.status;
+    CHAT_STATE.detail.version=data.version;
+    CHAT_STATE.detail.assigned_staff_id=data.assigned_staff_id || null;
+    CHAT_STATE.detail.assigned_staff_name=data.assigned_staff_name || null;
+    CHAT_STATE.workflowNeedsReload=false;
+    CHAT_STATE.workflowMessage='対応中として記録しました。';
+    chatSyncListFromDetail(); chatRenderList();
+  }).catch(function(error){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    var code=error && error.code;
+    if(code==='chat_workflow_disabled') CHAT_STATE.detail.workflow_enabled=false;
+    if(code==='version_conflict' || code==='inbound_conflict' || code==='conversation_not_open') CHAT_STATE.workflowNeedsReload=true;
+    CHAT_STATE.workflowMessage=chatReason(code);
+  }).finally(function(){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    CHAT_STATE.workflowBusy=null; chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+  });
+}
+
+function chatCompleteHandling(){
+  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanComplete(CHAT_STATE.detail)) return;
+  if(CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload) return;
+  var customerId=CHAT_STATE.detail.customer_id;
+  var expectedVersion=CHAT_STATE.detail.version;
+  var expectedInbound=CHAT_STATE.detail.last_inbound_at;
+  if(!Number.isSafeInteger(expectedVersion) || typeof expectedInbound!=='string' || !expectedInbound) return;
+  if(!window.confirm('対応を完了すると、次回のお客様メッセージからAI対応を再開します。対応完了にしますか？')) return;
+  CHAT_STATE.workflowBusy='complete_handling'; CHAT_STATE.workflowMessage='対応完了を記録しています…'; chatRenderDetail();
+  chatCall('complete_handling', {
+    customer_id:customerId,
+    expected_version:expectedVersion,
+    expected_last_inbound_at:expectedInbound
+  }).then(function(data){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(CHAT_STATE.detail.version!==expectedVersion || CHAT_STATE.detail.last_inbound_at!==expectedInbound) return;
+    if(!data || data.status!=='done' || !Number.isSafeInteger(data.version) || !data.completed_at){
+      throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
+    }
+    CHAT_STATE.detail.status=data.status;
+    CHAT_STATE.detail.version=data.version;
+    CHAT_STATE.detail.assigned_staff_id=null;
+    CHAT_STATE.detail.assigned_staff_name=null;
+    CHAT_STATE.workflowNeedsReload=false;
+    CHAT_STATE.workflowMessage='対応完了として記録し、AI再開条件を有効にしました。';
+    chatSyncListFromDetail(); chatRenderList();
+  }).catch(function(error){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    var code=error && error.code;
+    if(code==='chat_workflow_disabled') CHAT_STATE.detail.workflow_enabled=false;
+    if(code==='chat_ai_resume_disabled') CHAT_STATE.detail.ai_resume_enabled=false;
+    if(code==='version_conflict' || code==='inbound_conflict' || code==='conversation_not_open' || code==='unresolved_delivery') CHAT_STATE.workflowNeedsReload=true;
+    CHAT_STATE.workflowMessage=chatReason(code);
+  }).finally(function(){
+    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    CHAT_STATE.workflowBusy=null; chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+  });
+}
+
+function chatLoadDetail(customerId, reset){
+  if(!customerId || !CHAT_STATE || CHAT_STATE.loadingDetail) return;
+  var requestTenant=TENANT_ID;
+  if(reset){
+    var changingCustomer=!!CHAT_STATE.selectedCustomerId && CHAT_STATE.selectedCustomerId!==customerId;
+    if(changingCustomer){
+      CHAT_STATE.sendBusy=false; CHAT_STATE.sendMessage=''; CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null;
+    }
+    CHAT_STATE.selectedCustomerId=customerId; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
+    CHAT_STATE.detailCursor=null; CHAT_STATE.detailHasMore=false;
+    CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false; chatUpdateModeNote(null);
+    chatRenderList(); chatSetText('chatDetailMsg','読み込み中…');
+    var host=document.getElementById('chatDetail'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','会話を読み込んでいます…')); }
+  }
+  var params={ customer_id:customerId, limit:100 };
+  if(!reset && CHAT_STATE.detailCursor){
+    params.before_at=CHAT_STATE.detailCursor.before_at;
+    params.before_id=CHAT_STATE.detailCursor.before_id;
+  }
+  CHAT_STATE.loadingDetail=true; var older=document.getElementById('chatOlder'); if(older) older.disabled=true;
+  chatCall('get_conversation', params).then(function(data){
+    if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    if(!data || typeof data!=='object' || !Array.isArray(data.messages)) throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
+    var incoming=data.messages;
+    var combined=reset ? incoming : incoming.concat(CHAT_STATE.messages);
+    var seen=Object.create(null);
+    CHAT_STATE.messages=combined.filter(function(message){
+      if(!message || !message.id || seen[message.id]) return false;
+      seen[message.id]=true; return true;
+    });
+    CHAT_STATE.detail=data;
+    var first=incoming.length ? incoming[0] : null;
+    CHAT_STATE.detailCursor=(first && first.created_at && first.id)
+      ? { before_at:first.created_at, before_id:first.id } : null;
+    CHAT_STATE.detailHasMore=incoming.length===100 && !!CHAT_STATE.detailCursor;
+    chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+    if(reset) chatMaybeMarkRead(CHAT_STATE.detail);
+  }).catch(function(error){
+    if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    var reason=chatReason(error && error.code);
+    if(reset){
+      chatSetText('chatDetailMsg',reason);
+      var host=document.getElementById('chatDetail'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','会話を表示できませんでした。')); }
+    } else if(CHAT_STATE.detail) chatRenderDetail();
+    if(!reset) chatSetText('chatDetailMsg','過去の会話を読み込めませんでした。 '+reason);
+  }).finally(function(){
+    if(requestTenant!==TENANT_ID || !CHAT_STATE) return;
+    CHAT_STATE.loadingDetail=false; var button=document.getElementById('chatOlder'); if(button) button.disabled=false;
+  });
+}
+
+function chatRefresh(){ chatLoadList(true); }
+function showChatInbox(el){
+  if(typeof hideAllViews==='function') hideAllViews();
+  if(el && typeof setActiveNav==='function') setActiveNav(el);
+  var view=document.getElementById('chatView'); if(view) view.style.display='';
+  if(!CHAT_STATE || CHAT_STATE.tenantId!==TENANT_ID) chatResetState();
+  chatPopulateStoreFilter().catch(function(){ return null; }).then(function(){ chatLoadList(true); });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+(function bindChatInbox(){
+  var reload=document.getElementById('chatReload'); if(reload) reload.addEventListener('click',chatRefresh);
+  var store=document.getElementById('chatStoreFilter'); if(store) store.addEventListener('change',chatRefresh);
+  var more=document.getElementById('chatMore'); if(more) more.addEventListener('click',function(){ chatLoadList(false); });
+  var older=document.getElementById('chatOlder'); if(older) older.addEventListener('click',function(){ if(CHAT_STATE && CHAT_STATE.selectedCustomerId) chatLoadDetail(CHAT_STATE.selectedCustomerId,false); });
+})();
+/* CS3A CHAT INBOX SCRIPT END */
 
 function loadHome(){
   var body=document.getElementById('homeBody'); if(!body) return;
@@ -2111,6 +2853,7 @@ function login(){
 function resetTenantScopedCaches(){
   STORE_MAP = null;
   STORE_MAP_TENANT = null;
+  if (typeof chatResetState === 'function') chatResetState();
   if (typeof CRM_MENU_MAP   !== 'undefined') CRM_MENU_MAP = null;
   if (typeof CRM_ARTIST_MAP !== 'undefined') CRM_ARTIST_MAP = null;
   if (typeof CRM_PEOPLE     !== 'undefined') CRM_PEOPLE = [];
@@ -3059,8 +3802,8 @@ function crmMenuName(id){ return (id && CRM_MENU_MAP && CRM_MENU_MAP[id]) ? CRM_
 function crmArtistName(id){ return (id && CRM_ARTIST_MAP && CRM_ARTIST_MAP[id]) ? CRM_ARTIST_MAP[id] : ''; }
 
 /* 有人対応ステータスの語彙（AI側 chat-webhook/_pure.ts の HUMAN_STATUS と同一に保つ）。
-   保存は必ずこの新語彙で行う。旧語彙 'open'/'done' はDBに残っている可能性があるため「読み取りだけ」互換。
-   「要対応」＝AIの自動返信が停止（スタッフ対応中） / 「対応完了」＝AI再開（スタッフの「完了 N」コマンドと同じ語彙）。 */
+   旧カルテでは表示だけに使い、状態変更は受信箱のguarded RPCへ一本化する。
+   旧語彙 'open'/'done' はDBに残っている可能性があるため「読み取りだけ」互換。 */
 var HUMAN_STATUS_ATT  = '要対応';
 var HUMAN_STATUS_DONE = '対応完了';
 /* 対応が「締まっている」値か（空・旧done・対応完了・返信済み）。
@@ -3679,15 +4422,15 @@ function crmFooterHtml(uid, curType, curHuman, hasUid, c){
     return '<div class="crm-foot"><div class="crm-memo" style="text-align:center;color:#889">' +
       'この全店共通のお客様は、オーナー／管理者のみ編集できます。</div></div>';
   }
-  function opt(val, label, cur){ return '<option value="'+esc(val)+'"'+(cur===val?' selected':'')+'>'+esc(label)+'</option>'; }
-  // 有人対応：空＝対応不要、「要対応」＝AI停止中、「対応完了」＝AI再開（human_done_at をセット）。
+  function opt(val, label, cur, disabled){ return '<option value="'+esc(val)+'"'+(cur===val?' selected':'')+(disabled?' disabled':'')+'>'+esc(label)+'</option>'; }
+  // 有人対応：空＝対応不要、「要対応」＝AI停止中、「対応完了」＝AI再開。旧カルテでは表示のみ。
   // 旧語彙（open/done/返信済み）がDBに残っていても、新語彙のどちらかに読み替えて表示する。
   var humanCur = humanIsClosed(curHuman) ? (curHuman ? HUMAN_STATUS_DONE : '') : HUMAN_STATUS_ATT;
   var typeCur = curType || '';
   return '<div class="crm-foot">' +
     '<div class="crm-edit">' +
       '<h3>✏️ メモ・区分・有人対応の更新</h3>' +
-      '<div class="help-hint">💡 <b>有人対応を「対応完了」に変えて保存すると、AIの自動返信が再開します。</b>「要対応」の間はAIが止まったままなので、対応が終わったら必ずその日のうちに切り替えてください。</div>' +
+      '<div class="help-hint">💡 <b>有人対応の開始・完了は受信箱から行います。</b>この画面ではメモ、区分、対応中の理由だけを更新できます。</div>' +
       '<label class="crm-el">背景メモに追記</label>' +
       '<textarea id="crmMemoAdd" rows="2" placeholder="このお客様への申し送り・対応メモを追記…"></textarea>' +
       '<div class="crm-row2">' +
@@ -3705,9 +4448,9 @@ function crmFooterHtml(uid, curType, curHuman, hasUid, c){
         '<div>' +
           '<label class="crm-el">有人対応</label>' +
           '<select id="crmHumanSel">' +
-            opt('', '対応不要', humanCur) +
-            opt(HUMAN_STATUS_ATT, '要対応（AI停止・スタッフ対応中）', humanCur) +
-            opt(HUMAN_STATUS_DONE, '対応完了（AI再開）', humanCur) +
+            opt('', '対応不要', humanCur, humanCur !== '') +
+            opt(HUMAN_STATUS_ATT, '要対応（AI停止・スタッフ対応中）', humanCur, humanCur !== HUMAN_STATUS_ATT) +
+            opt(HUMAN_STATUS_DONE, '対応完了（AI再開・受信箱から）', humanCur, humanCur !== HUMAN_STATUS_DONE) +
           '</select>' +
         '</div>' +
       '</div>' +
@@ -3728,8 +4471,8 @@ function crmEditMsg(t, ok){
 
 /* フッタ：customers を line_uid で更新（自店・authenticated）。失敗時は日本語で理由表示。
    ・メモは「追記」（既存 background_memo の末尾に日付つきで足す）。
-   ・有人対応「対応完了」のときは human_done_at=now、「要対応」のときは null、対応不要は status/理由クリア。
-   ・保存はAI側(chat-webhook)と同じ新語彙のみ（旧 open/done はもう書かない）。 */
+   ・有人状態は表示のみ。旧カルテから変更せず、受信箱のguarded RPCへ一本化する。
+   ・要対応中は理由だけ編集できる。 */
 function crmSaveEdits(uid){
   if (!uid) return;
   var card = CRM_CARDS[uid] || {};
@@ -3739,6 +4482,16 @@ function crmSaveEdits(uid){
   var typeVal = document.getElementById('crmTypeSel').value;       // '' / new / repeat / vip ...
   var humanSel = document.getElementById('crmHumanSel').value;     // '' / 要対応 / 対応完了
   var reasonVal = (document.getElementById('crmHumanReason').value || '').trim();
+
+  // CS3C: 有人状態の開始・解除はconversation_stateと同時に更新する受信箱だけにする。
+  // disabled optionを書き換えられても、旧カルテから直接customersを更新しない。
+  var expectedHuman = humanNeedsAttention(cust.human_status)
+    ? HUMAN_STATUS_ATT
+    : (cust.human_status ? HUMAN_STATUS_DONE : '');
+  if (humanSel !== expectedHuman) {
+    crmEditMsg('有人対応の開始・完了は受信箱で会話を確認してから行ってください。');
+    return;
+  }
 
   var patch = {};
 
@@ -3752,15 +4505,8 @@ function crmSaveEdits(uid){
     patch.background_memo = (prev ? prev + '\n' : '') + '[' + stamp + '] ' + memoAdd;
   }
 
-  // 有人対応（語彙はAI側 HUMAN_STATUS と統一。「要対応」=AI停止 / 「対応完了」=AI再開）
-  if (humanSel === ''){                          // 対応不要：クリア
-    patch.human_status = null; patch.human_reason = null; patch.human_done_at = null;
-  } else if (humanSel === HUMAN_STATUS_ATT){     // 要対応（AI停止・スタッフ対応中）
-    patch.human_status = HUMAN_STATUS_ATT; patch.human_reason = reasonVal || null; patch.human_done_at = null;
-  } else if (humanSel === HUMAN_STATUS_DONE){    // 対応完了（AI再開）
-    patch.human_status = HUMAN_STATUS_DONE; patch.human_reason = reasonVal || null;
-    patch.human_done_at = new Date().toISOString();
-  }
+  // 有人状態は一切送らない。要対応中だけ申し送り理由を編集できる。
+  if (expectedHuman === HUMAN_STATUS_ATT) patch.human_reason = reasonVal || null;
 
   var btn = document.getElementById('crmSaveBtn');
   if (btn){ btn.disabled = true; btn.textContent = '更新中…'; }
