@@ -472,7 +472,9 @@ function go(n){ st.step=n; render(); }
 // ===== STEP 1: アーティスト＆コース（アコーディオン） =====
 var AC=['#b98a74','#a8705c','#8c5547','#c5a572']; // 写真未設定時の頭文字アイコン背景（テーマ暖色系・2026-06-12）
 
-// コースの並び順：①眉セット ②眉通常価格 ③眉他院修正 ④眉リタッチ再来 ⑤リップセット ⑥リップ通常価格。
+// コースの並び順：管理画面の「表示順」(sort_order・小さいほど上)を最優先する。
+// 表示順が未設定(null)のメニューだけ、従来の名前キーワード規則へ落とす：
+// ①眉セット ②眉通常価格 ③眉他院修正 ④眉リタッチ再来 ⑤リップセット ⑥リップ通常価格。
 // 各グループ内は安い順（再来だけは「2回目→3回目」の回数順）。
 function sortCourses(menus){
   function info(m){
@@ -486,6 +488,9 @@ function sortCourses(menus){
     return { base:base, sub:sub };
   }
   return menus.slice().sort(function(a,b){
+    var sa=(a.sort_order==null)?Infinity:a.sort_order;
+    var sb=(b.sort_order==null)?Infinity:b.sort_order;
+    if(sa!==sb) return sa-sb;
     var ia=info(a), ib=info(b);
     return ia.base!==ib.base ? ia.base-ib.base : ia.sub-ib.sub;
   });
@@ -1579,7 +1584,7 @@ function loadOptions(){
     });
     var menusC=menus.map(function(m){
       return { menu_id:m.id, menu_name:m.name, normal_price:m.price_normal, monitor_price:m.price_monitor,
-               _dnew:m.duration_new_min, _dret:m.duration_retouch_min };
+               sort_order:m.sort_order, _dnew:m.duration_new_min, _dret:m.duration_retouch_min };
     });
     var certified=am.map(function(p){
       // artist_menus に duration が無ければ menus 側を使う。
