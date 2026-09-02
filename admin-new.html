@@ -709,9 +709,14 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-compose-msg.ok{color:#15803d;font-weight:700}
 .chat-retry-btn{border:0;background:transparent;color:#b45309;text-decoration:underline;font:inherit;font-size:10.5px;font-weight:800;cursor:pointer;padding:0}
 .chat-empty{padding:28px 14px;color:#94a3b8;text-align:center;font-size:13px;line-height:1.6}
+/* スマホ用フォーカスモード：会話を開いたら一覧を隠し、そのトークだけを表示する。
+   戻るボタンは既定で隠し、スマホ幅のフォーカス中だけ出す。PCは2ペインのまま。 */
+.chat-back-wrap{display:none;padding:9px 10px 0}
 @media(max-width:650px){
   .chat-head{display:block}.chat-toolbar{justify-content:flex-start;margin-top:8px}
   .chat-shell{grid-template-columns:1fr}.chat-list,.chat-detail{max-height:none}
+  .chat-shell.chat-focus .chat-pane-list{display:none}
+  .chat-shell.chat-focus .chat-back-wrap{display:block}
 }
 </style>
 </head>
@@ -800,13 +805,14 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
         <button type="button" class="chat-btn" id="chatReload">更新</button>
       </div>
     </div>
-    <div class="chat-shell">
-      <section class="chat-pane" aria-label="会話一覧">
+    <div class="chat-shell" id="chatShell">
+      <section class="chat-pane chat-pane-list" aria-label="会話一覧">
         <div class="chat-pane-head" id="chatListMsg" aria-live="polite">読み込み前</div>
         <div class="chat-list" id="chatList"></div>
         <div class="chat-more-wrap"><button type="button" class="chat-btn" id="chatMore" style="display:none">さらに読み込む</button></div>
       </section>
-      <section class="chat-pane" aria-label="会話詳細">
+      <section class="chat-pane chat-pane-detail" aria-label="会話詳細">
+        <div class="chat-back-wrap"><button type="button" class="chat-btn" id="chatBack">← 一覧へ戻る</button></div>
         <div class="chat-pane-head" id="chatDetailMsg" aria-live="polite">会話を選んでください</div>
         <div class="chat-detail" id="chatDetail"></div>
         <div class="chat-more-wrap"><button type="button" class="chat-btn" id="chatOlder" style="display:none">過去のメッセージを読み込む</button></div>
@@ -1609,6 +1615,7 @@ function chatLoadList(reset){
     CHAT_STATE.selectedCustomerId=null; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
     CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false;
     CHAT_STATE.sendBusy=false; CHAT_STATE.sendMessage=''; CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null; chatUpdateModeNote(null);
+    chatSetFocus(false);
     chatSetText('chatDetailMsg','会話を選んでください');
     var detail=document.getElementById('chatDetail'); if(detail) chatClear(detail);
   }
@@ -1982,6 +1989,7 @@ function chatLoadDetail(customerId, reset){
     CHAT_STATE.selectedCustomerId=customerId; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
     CHAT_STATE.detailCursor=null; CHAT_STATE.detailHasMore=false;
     CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false; chatUpdateModeNote(null);
+    chatSetFocus(true);
     chatRenderList(); chatSetText('chatDetailMsg','読み込み中…');
     var host=document.getElementById('chatDetail'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','会話を読み込んでいます…')); }
   }
@@ -2007,6 +2015,7 @@ function chatLoadDetail(customerId, reset){
       ? { before_at:first.created_at, before_id:first.id } : null;
     CHAT_STATE.detailHasMore=incoming.length===100 && !!CHAT_STATE.detailCursor;
     chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+    if(reset) chatScrollToLatest();
     if(reset) chatMaybeMarkRead(CHAT_STATE.detail);
   }).catch(function(error){
     if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
@@ -2020,6 +2029,23 @@ function chatLoadDetail(customerId, reset){
     if(requestTenant!==TENANT_ID || !CHAT_STATE) return;
     CHAT_STATE.loadingDetail=false; var button=document.getElementById('chatOlder'); if(button) button.disabled=false;
   });
+}
+
+/* スマホ用フォーカスモードの切替（chat-focusはスマホ幅のCSSにしか効かない＝PCは無変化）。 */
+function chatSetFocus(on){
+  var shell=document.getElementById('chatShell'); if(!shell) return;
+  if(on) shell.classList.add('chat-focus'); else shell.classList.remove('chat-focus');
+}
+/* 会話を開いた直後、最新メッセージと返信欄まで自動で移動する（下まで手動スクロール不要に）。 */
+function chatScrollToLatest(){
+  var host=document.getElementById('chatDetail'); if(!host) return;
+  var mobile=window.matchMedia && window.matchMedia('(max-width:650px)').matches;
+  if(mobile){
+    var target=host.querySelector('.chat-compose')||host.lastElementChild;
+    if(target && target.scrollIntoView) target.scrollIntoView({block:'end'});
+  } else {
+    host.scrollTop=host.scrollHeight;
+  }
 }
 
 function chatRefresh(){ chatLoadList(true); }
@@ -2037,6 +2063,7 @@ function showChatInbox(el){
   var store=document.getElementById('chatStoreFilter'); if(store) store.addEventListener('change',chatRefresh);
   var more=document.getElementById('chatMore'); if(more) more.addEventListener('click',function(){ chatLoadList(false); });
   var older=document.getElementById('chatOlder'); if(older) older.addEventListener('click',function(){ if(CHAT_STATE && CHAT_STATE.selectedCustomerId) chatLoadDetail(CHAT_STATE.selectedCustomerId,false); });
+  var back=document.getElementById('chatBack'); if(back) back.addEventListener('click',function(){ chatSetFocus(false); window.scrollTo({top:0,behavior:'smooth'}); });
 })();
 /* CS3A CHAT INBOX SCRIPT END */
 
