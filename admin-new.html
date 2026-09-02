@@ -5578,7 +5578,7 @@ function setLoadInfo(){
 function setLoadMenus(){
   var body = document.getElementById('setBody');
   body.innerHTML = '<div class="set-ph">読み込み中…</div>';
-  sbGet('menus?select=id,name,price_normal,price_monitor,is_active&order=name')
+  sbGet('menus?select=id,name,price_normal,price_monitor,is_active,sort_order&order=sort_order.asc.nullslast,name.asc')
     .then(function(rows){
       rows = rows || [];
       var h = '';
@@ -5601,13 +5601,14 @@ function setLoadMenus(){
         var mid = esc(m.id);
         h += '<div class="set-card'+(m.is_active?'':' set-off')+'" data-mid="'+mid+'">'
           + '<div class="set-name">'+esc(m.name)+(m.is_active?'':' <span class="set-tag set-tagng">停止中</span>')+'</div>'
-          + '<div class="set-meta"><span>モニター <b>'+setYen(m.price_monitor)+'</b></span><span>通常 <b>'+setYen(m.price_normal)+'</b></span></div>'
+          + '<div class="set-meta"><span>モニター <b>'+setYen(m.price_monitor)+'</b></span><span>通常 <b>'+setYen(m.price_normal)+'</b></span><span>表示順 <b>'+(m.sort_order==null?'未設定(最後)':esc(m.sort_order))+'</b></span></div>'
           + '<div class="set-id">ID：'+mid+'</div>'
           + '<div class="set-acts"><button type="button" class="set-btn set-ghost" data-act="medit" data-mid="'+mid+'">✏️ 編集</button></div>'
           + '<div class="set-edit" id="set-medit-'+mid+'">'
           +   '<label>メニュー名（必須）</label><input type="text" id="set-mn-'+mid+'" value="'+esc(m.name||'')+'">'
           +   '<label>モニター価格（円）</label><input type="number" inputmode="numeric" id="set-mm-'+mid+'" value="'+esc(m.price_monitor==null?'':m.price_monitor)+'">'
           +   '<label>通常価格（円）</label><input type="number" inputmode="numeric" id="set-mp-'+mid+'" value="'+esc(m.price_normal==null?'':m.price_normal)+'">'
+          +   '<label>表示順（小さい数字ほど上に表示・空欄は最後）</label><input type="number" inputmode="numeric" id="set-mo-'+mid+'" value="'+esc(m.sort_order==null?'':m.sort_order)+'" placeholder="例）1">'
           +   '<label class="set-chk"><input type="checkbox" id="set-mact-'+mid+'"'+(m.is_active?' checked':'')+'>このメニューを予約ページに表示する（有効）</label>'
           +   '<div class="set-acts">'
           +     '<button type="button" class="set-btn set-primary" data-act="msave" data-mid="'+mid+'">💾 保存</button>'
@@ -5629,13 +5630,20 @@ function setSaveMenu(mid){
   var nm  = (((document.getElementById('set-mn-'+mid)||{}).value)||'').trim();
   var mon = (document.getElementById('set-mm-'+mid)||{}).value;
   var nor = (document.getElementById('set-mp-'+mid)||{}).value;
+  var ord = (document.getElementById('set-mo-'+mid)||{}).value;
   var act = !!(document.getElementById('set-mact-'+mid)||{}).checked;
   var nMon = parseInt(mon,10), nNor = parseInt(nor,10);
   if (!nm){ setMsg('set-menuMsg','メニュー名を入力してください。', false); return; }
   if (mon===''||nor===''||isNaN(nMon)||isNaN(nNor)||nMon<0||nNor<0){
     setMsg('set-menuMsg','料金は0以上の半角数字で入力してください。', false); return;
   }
-  var patch = { name:nm, price_normal:nNor, price_monitor:nMon, is_active:act };
+  // 表示順: 空欄=null（最後尾）。数字なら0以上の整数のみ受ける。
+  var nOrd = null;
+  if (String(ord).trim()!==''){
+    nOrd = parseInt(ord,10);
+    if (isNaN(nOrd)||nOrd<0){ setMsg('set-menuMsg','表示順は0以上の半角数字で入力してください（空欄=最後）。', false); return; }
+  }
+  var patch = { name:nm, price_normal:nNor, price_monitor:nMon, is_active:act, sort_order:nOrd };
   sbUpdate('menus','id=eq.'+encodeURIComponent(mid), patch)
     .then(function(){ setMsg('set-menuMsg','✅ 保存しました。', true); setLoadMenus(); })
     .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-menuMsg', setReason(err), false); });
