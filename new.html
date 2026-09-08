@@ -457,17 +457,18 @@ function hmToMin(v, fb){
 }
 
 // ===== プログレスバー =====
-var SN = ['アーティスト・コース','日付','時間','お客様情報','確認・同意'];
+var SN = ['アーティスト・コース','日時','お客様情報','確認・同意'];
 function renderProg(){
-  var h=''; for(var i=1;i<=5;i++) h+='<div class="prog-dot'+(i<st.step?' done':i===st.step?' act':'')+'"></div>';
+  var current=st.step>=4?st.step-1:st.step;
+  var h=''; for(var i=1;i<=4;i++) h+='<div class="prog-dot'+(i<current?' done':i===current?' act':'')+'"></div>';
   document.getElementById('progDots').innerHTML=h;
-  document.getElementById('progLbl').textContent='STEP '+st.step+' / 5　'+SN[st.step-1];
+  document.getElementById('progLbl').textContent='STEP '+current+' / 4　'+SN[current-1];
 }
 
 // ===== メインレンダラ =====
-// STEP 1=アーティスト＆コース(s1), 2=日付(s3), 3=時間(s4), 4=お客様情報(s5), 5=確認(s6)
-function render(){ renderProg(); window.scrollTo(0,0); [null,s1,s3,s4,s5,s6][st.step](); }
-function go(n){ st.step=n; render(); }
+// 内部番号4/5は維持。旧時間画面(3)への復帰も日時画面(2)へ集約する。
+function render(){ renderProg(); window.scrollTo(0,0); [null,s1,s3,s3,s5,s6][st.step](); }
+function go(n){ st.step=n===3?2:n; render(); }
 
 // ===== STEP 1: アーティスト＆コース（アコーディオン） =====
 var AC=['#b98a74','#a8705c','#8c5547','#c5a572']; // 写真未設定時の頭文字アイコン背景（テーマ暖色系・2026-06-12）
@@ -497,8 +498,9 @@ function sortCourses(menus){
 }
 function s1(){
   var ns=(st.options.nurses||[]).filter(function(n){return isT(n.is_active);});
-  var h='<div class="s-title">アーティストを選んでください</div>';
-  h+='<div class="s-sub">お名前をタップすると、コースと料金が表示されます。</div>';
+  var single=ns.length===1;
+  var h='<div class="s-title">'+(single?'コースを選んでください':'アーティストを選んでください')+'</div>';
+  h+='<div class="s-sub">'+(single?'ご希望のコースを選ぶと、日付の選択に進みます。':'お名前をタップすると、コースと料金が表示されます。')+'</div>';
   h+='<div class="art-acc">';
   ns.forEach(function(n,i){
     // このアーティストが対応できるメニュー（認定済み）
@@ -560,17 +562,21 @@ function s1(){
   });
   h+='</div>';
   document.getElementById('sc').innerHTML=h;
-  document.getElementById('sn').innerHTML='<div class="s1-hint">アーティストとコースをお選びください</div>';
+  document.getElementById('sn').innerHTML='<div class="s1-hint">'+(single?'コースをお選びください':'アーティストとコースをお選びください')+'</div>';
 }
 function applyInitialArtist(){
-  if(!INIT_ARTIST || st.openArtist || !st.options) return;
+  if(st.openArtist || !st.options) return;
   var ns=st.options.nurses||[];
   for(var i=0;i<ns.length;i++){
-    if(isT(ns[i].is_active) && String(ns[i].nurse_id)===String(INIT_ARTIST)){
+    if(INIT_ARTIST && isT(ns[i].is_active) && String(ns[i].nurse_id)===String(INIT_ARTIST)){
       st.openArtist=INIT_ARTIST;
       return;
     }
   }
+  // 有効な担当者が1人なら、名前を押さなくてもコースを見せる。
+  // コース自体は選択しない。複数人の店舗と既存の指名リンクは従来どおり。
+  var active=ns.filter(function(n){ return isT(n.is_active); });
+  if(active.length===1) st.openArtist=active[0].nurse_id;
 }
 // アコーディオンの開閉（同時に開くのは1人だけ）
 function toggleArt(id){
@@ -586,6 +592,7 @@ function pickCourse(nid,nname,mid,mname,price,dur,priceMonitor){
   st.openArtist=nid;
   st.date=null; st.time=null; st.availDates=null; st.slots=null; st.adErr=false; st.slErr=false;
   st.slCache={};
+  slotVersion++;
   go(2);
 }
 
@@ -641,7 +648,7 @@ function s3(){
   // 翌月以降に候補日が無ければ「次へ」を止める（45日上限）。
   var nextFirst=new Date(st.calYear,st.calMonth,1);
   var canNext=(nextFirst<=MAX_DATE);
-  var h='<div class="s-title">日付を選んでください</div>';
+  var h='<div class="s-title">日時を選んでください</div>';
   h+='<div class="cal-nav">';
   h+='<button class="cal-btn" onclick="calMv(-1)" '+(canPrev?'':'disabled')+'>&#8249;</button>';
   h+='<div class="cal-mo">'+st.calYear+'年'+st.calMonth+'月</div>';
@@ -671,13 +678,15 @@ function s3(){
   }else if(st.availDates.size===0){
     h+='<div class="cal-info">今月は空き枠がありません。'+(canNext?'翌月をご確認ください。':'別の条件をご確認ください。')+'</div>';
   }
+  h+=renderTimeChoices();
   document.getElementById('sc').innerHTML=h;
-  document.getElementById('sn').innerHTML='<button class="btn btn-bk" onclick="go(1)">戻る</button><button class="btn btn-p" onclick="st.date&&go(3)" '+(st.date?'':'disabled')+'>次へ</button>';
+  document.getElementById('sn').innerHTML='<button class="btn btn-bk" style="flex:1" onclick="go(1)">コースへ戻る</button>';
 }
 function calMv(dir){
   st.calMonth+=dir;
   if(st.calMonth>12){st.calMonth=1;st.calYear++;}
   if(st.calMonth<1){st.calMonth=12;st.calYear--;}
+  st.date=null; st.time=null; st.slots=null; st.slErr=false; slotVersion++;
   st.availDates=null; st.adErr=false; s3();
 }
 
@@ -729,7 +738,12 @@ function jstDateKey(iso){
 }
 // 「再試行」ボタン：エラー状態を解除して空き情報を取り直す。
 function retryAD(){ st.adErr=false; st.availDates=null; s3(); }
-function pickD(ds){ st.date=ds; st.time=null; st.slots=null; st.slErr=false; s3(); prefetchSl(); }
+function pickD(ds){
+  if(!st.availDates||!st.availDates.has(ds))return;
+  st.date=ds; st.time=null; st.slots=null; st.slErr=false; slotVersion++;
+  s3();
+  document.getElementById('inlineTimes').scrollIntoView({block:'nearest'});
+}
 
 // ===== 空き枠計算（GAS版 loadSlots と同じ考え方） =====
 // 店舗営業時間内を interval 刻みで作り、施術時間ぶん収まり、busy（予約済み）と重ならない枠だけ available=true。
@@ -748,11 +762,15 @@ function computeSlots(dateStr, busy){
   return out;
 }
 
-// ===== STEP 4: 時間選択 =====
-function s4(){
+// ===== 同じ画面で時間選択 =====
+var slotVersion=0;
+var pendingSlots=new Set();
+function renderTimeChoices(){
+  var h='<section id="inlineTimes" style="margin-top:20px;border-top:1px solid var(--line);padding-top:18px">';
+  if(!st.date)return h+'<div class="cal-info">日付を選ぶと、空いている時間が表示されます。</div></section>';
   var pts=st.date.split('-'), dd=new Date(+pts[0],+pts[1]-1,+pts[2]);
   var dl=+pts[1]+'月'+parseInt(pts[2])+'日（'+DOW[dd.getDay()]+'）';
-  var h='<div class="s-title">時間を選んでください</div><div class="dt-lbl">'+dl+'</div>';
+  h+='<div class="dt-lbl">'+esc(dl)+'の空き時間</div>';
   if(st.slErr){
     h+='<div class="msg-err">空き枠を取得できませんでした。電波の良い場所で、もう一度お試しください。<div style="margin-top:10px"><button class="btn-retry" onclick="retrySl()">再試行</button></div></div>';
   }else if(st.slots===null){
@@ -761,60 +779,58 @@ function s4(){
   }else{
     var anyA=st.slots.some(function(s){return s.available;});
     if(!anyA){
-      h+='<div class="msg-err">この日は空き枠がありません。前の画面から別の日をお選びください。</div>';
+      h+='<div class="msg-err">この日は空き枠がありません。上のカレンダーで別の日をお選びください。</div>';
     }else{
       h+='<div class="slot-grid">';
       st.slots.forEach(function(s){
         if(s.available){
           var sel=s.time===st.time?' sel':'';
-          h+='<div class="slot-a'+sel+'" onclick="pickT(\''+s.time+'\')">'+s.time+'</div>';
-        }else{
-          h+='<div class="slot-x">—</div>';
+          h+='<button type="button" class="slot-a'+sel+'" data-slot-time="'+esc(s.time)+'">'+esc(s.time)+'</button>';
         }
       });
-      h+='</div>';
+      h+='</div><p class="s-sub" style="margin-top:10px">時間を選ぶと、お客様情報の入力へ進みます。</p>';
     }
   }
-  document.getElementById('sc').innerHTML=h;
-  document.getElementById('sn').innerHTML='<button class="btn btn-bk" onclick="go(2)">戻る</button><button class="btn btn-p" onclick="st.time&&go(4)" '+(st.time?'':'disabled')+'>次へ</button>';
+  return h+'</section>';
 }
 function loadSl(){
+  if(!st.date||st.step!==2)return;
   // セッション内キャッシュを優先。
   var ck=st.nurseId+'|'+st.menuId+'|'+st.date;
-  if(st.slCache[ck]){ st.slots=st.slCache[ck]; st.slErr=false; if(st.step===3)s4(); return; }
+  if(st.slCache[ck]){ st.slots=st.slCache[ck]; st.slErr=false; s3(); return; }
+  var version=slotVersion, requestKey=version+'|'+ck;
+  if(pendingSlots.has(requestKey))return;
+  pendingSlots.add(requestKey);
   var reqN=st.nurseId, reqMn=st.menuId, reqD=st.date;
   var pFrom=reqD+'T00:00:00+09:00', pTo=reqD+'T23:59:59+09:00';
   sbRpc('busy_ranges',{ p_artist:reqN, p_from:pFrom, p_to:pTo, p_store:STORE_ID }).then(function(r){
-    var same=(String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD));
-    if(!r.ok){ if(same){ st.slErr=true; if(st.step===3)s4(); } return; }
+    var same=(slotVersion===version&&String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD));
+    if(!same)return;
+    if(!r.ok){ st.slErr=true; if(st.step===2)s3(); return; }
     var busy=(r.data||[]).map(function(x){ return [new Date(x.start_at).getTime(), new Date(x.end_at).getTime()]; });
     var arr=computeSlots(reqD, busy);
     st.slCache[reqN+'|'+reqMn+'|'+reqD]=arr;
-    if(same){ st.slots=arr; st.slErr=false; if(st.step===3)s4(); }
+    st.slots=arr; st.slErr=false; if(st.step===2)s3();
   }).catch(function(){
-    if(String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD)){
-      st.slErr=true; if(st.step===3)s4();
+    if(slotVersion===version&&String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD)){
+      st.slErr=true; if(st.step===2)s3();
     }
-  });
+  }).finally(function(){pendingSlots.delete(requestKey);});
 }
 // 「再試行」ボタン：エラー状態を解除して空き枠を取り直す。
-function retrySl(){ st.slErr=false; st.slots=null; s4(); }
-// 日付タップ時に裏で空き枠を先読みしておく（「次へ」を押す頃には表示済みにする）。
-function prefetchSl(){
-  if(!st.date) return;
-  var ck=st.nurseId+'|'+st.menuId+'|'+st.date;
-  if(st.slCache[ck]) return;  // 取得済みなら何もしない
-  var reqN=st.nurseId, reqMn=st.menuId, reqD=st.date;
-  var pFrom=reqD+'T00:00:00+09:00', pTo=reqD+'T23:59:59+09:00';
-  sbRpc('busy_ranges',{ p_artist:reqN, p_from:pFrom, p_to:pTo, p_store:STORE_ID }).then(function(r){
-    if(!r.ok) return;
-    var busy=(r.data||[]).map(function(x){ return [new Date(x.start_at).getTime(), new Date(x.end_at).getTime()]; });
-    var arr=computeSlots(reqD, busy);
-    st.slCache[reqN+'|'+reqMn+'|'+reqD]=arr;
-    if(String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD)&&st.slots===null&&st.step===3){ st.slots=arr; s4(); }
-  }).catch(function(){});
+function retrySl(){
+  if(!st.date)return;
+  delete st.slCache[st.nurseId+'|'+st.menuId+'|'+st.date];
+  st.slErr=false; st.slots=null; slotVersion++; s3();
 }
-function pickT(t){ st.time=t; s4(); }
+function pickT(t){
+  if(st.step!==2||!st.slots||!st.slots.some(function(s){return s.available&&s.time===t;}))return;
+  st.time=t; go(4);
+}
+document.addEventListener('click',function(e){
+  var button=e.target.closest('button[data-slot-time]');
+  if(button)pickT(button.getAttribute('data-slot-time'));
+});
 
 // ===== STEP 5: お客様情報 =====
 function s5(){
@@ -960,6 +976,7 @@ function doSub(){
       newIdemKey();
       delete st.slCache[st.nurseId+'|'+st.menuId+'|'+st.date];
       st.slots=null; st.availDates=null; st.time=null;
+      slotVersion++;
       setTimeout(function(){ go(3); }, 1500);   // ★時間選択へ戻して再取得（null時間での再送を防ぐ）
     }else{
       subFail(btn, errR(code,msg));
