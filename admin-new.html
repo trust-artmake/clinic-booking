@@ -3377,6 +3377,7 @@ function renderBoard(rows){
           /* ★2026-08-28：日時変更。キャンセル→取り直しが不要になる（設計書 docs/reschedule-design.md）。
              来店済み/無断が確定した予約は出さない（動かすと「未来の予約が来店済み」になり分析が壊れる）。 */
           (it.outcome ? '' : '<button type="button" class="rbtn" data-act="reschedule" data-rid="'+rid+'">🗓 日時を変更</button>') +
+          (it.outcome === 'no_show' ? '' : '<button type="button" class="rbtn" data-act="course" data-rid="'+rid+'">✏️ コース・金額変更</button>') +
           '<button type="button" class="rbtn danger" data-act="cancel" data-rid="'+rid+'">❌ キャンセル</button>' +
           '</div>';
         return '<div class="rcard" data-uid="'+esc(it.uid)+'" data-rid="'+rid+'">' +
@@ -3539,8 +3540,73 @@ function openReschedule(rid){
     });
 }
 
+/* 同じ予約のコース・予約金額を変更。予約日時と入金記録は変更しない。 */
+function openCourseChange(rid){
+  var old=document.getElementById('courseModal'); if(old) old.remove();
+  var ov=document.createElement('div'); ov.id='courseModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,26,31,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  var dlg=document.createElement('div');
+  dlg.setAttribute('role','dialog'); dlg.setAttribute('aria-modal','true'); dlg.setAttribute('aria-label','コース・金額変更');
+  dlg.style.cssText='background:white;border-radius:12px;max-width:440px;width:100%;max-height:90vh;overflow:auto;padding:20px';
+  dlg.innerHTML='<h3 style="margin-top:0">コース・金額変更</h3><div class="cc-body">読み込み中…</div><button type="button" class="cc-close" style="margin-top:12px;padding:10px">閉じる</button>';
+  ov.appendChild(dlg); document.body.appendChild(ov);
+  var busy=false, body=dlg.querySelector('.cc-body'), close=dlg.querySelector('.cc-close');
+  close.onclick=function(){if(!busy)ov.remove();};
+  ov.onclick=function(e){if(e.target===ov&&!busy)ov.remove();};
+  dlg.onkeydown=function(e){if(e.key==='Escape'&&!busy)ov.remove();};
+  function failure(err){
+    var raw=String(err&&err.message||err||'');
+    var codes={course_conflict:'別の変更がありました。閉じて予約を再読み込みしてからやり直してください。',
+      forbidden_store:'この予約を変更する権限がありません。',course_not_editable:'キャンセル・無断キャンセルの予約は変更できません。',
+      course_bad_price:'金額は0〜10,000,000円の整数で入力してください。',course_reason_required:'変更理由を500文字以内で入力してください。',
+      course_menu_not_allowed:'この担当者が対応できるコースを選んでください。',course_duration_exceeds_slot:'予約の時間枠に収まらないコースです。先に日時・枠を確認してください。',
+      course_sync_unavailable:'カレンダー連携の確認が必要です。変更は保存されていません。管理者へ連絡してください。'};
+    for(var k in codes){if(raw.indexOf(k)>=0)return codes[k];}
+    return '保存結果を確認できませんでした。予約を再読み込みして内容を確認してください。';
+  }
+  sbRpc('reservation_course_options',{p_resv:rid}).then(function(r){
+    if(!ov.isConnected)return;
+    var choices=r.choices||[];
+    var yen=function(n){return n==null?'未設定':Number(n).toLocaleString('ja-JP')+'円';};
+    body.innerHTML='<p>'+esc(r.name||'')+' 様<br>変更前：'+esc(r.menu_name||'')+' ／ '+esc(yen(r.price))+'</p>'
+      +'<label style="display:block">変更後のコース<select class="cc-menu" style="display:block;width:100%;padding:12px;font-size:16px;margin:6px 0 14px"><option value="">選んでください</option>'
+      +choices.map(function(m){return '<option value="'+esc(m.id)+'">'+esc(m.name)+' ／ '+esc(yen(m.price))+'</option>';}).join('')+'</select></label>'
+      +'<label style="display:block">変更後の予約金額（円）<input class="cc-price" type="number" min="0" max="10000000" step="1" inputmode="numeric" style="display:block;width:100%;box-sizing:border-box;padding:12px;font-size:16px;margin:6px 0 14px"></label>'
+      +'<label style="display:block">変更理由<textarea class="cc-reason" maxlength="500" placeholder="例：当日、1回から2回コースへ変更" style="display:block;width:100%;box-sizing:border-box;padding:10px;font-size:16px;margin:6px 0 12px"></textarea></label>'
+      +'<p style="font-size:13px;line-height:1.6">予約金額は入金額とは別です。日時・問診・同意書・来店記録はそのまま残ります。LINE通知は送りません。<br>2回コースの2回目は、日程が決まったら別途予約してください。</p>'
+      +'<button type="button" class="cc-save" style="width:100%;padding:14px;border:0;border-radius:8px;background:#0b6e77;color:white;font-weight:bold;font-size:16px">変更内容を確認する</button>'
+      +'<p class="cc-msg" role="status" style="color:#a3231a"></p>';
+    var menu=body.querySelector('.cc-menu'),price=body.querySelector('.cc-price'),reason=body.querySelector('.cc-reason'),save=body.querySelector('.cc-save'),msg=body.querySelector('.cc-msg');
+    menu.value=r.menu_id; price.value=r.price==null?'':r.price;
+    menu.onchange=function(){var m=choices.find(function(x){return x.id===menu.value;});price.value=m&&m.price!=null?m.price:'';};
+    save.onclick=function(){
+      var m=choices.find(function(x){return x.id===menu.value;});
+      if(!m){msg.textContent='変更後のコースを選んでください。';return;}
+      if(!/^\d+$/.test(price.value)||Number(price.value)>10000000){msg.textContent='金額を0円以上の整数で入力してください。';return;}
+      if(!reason.value.trim()){msg.textContent='変更理由を入力してください。';return;}
+      if(!window.confirm('コースと予約金額を変更します。\n\n変更前：'+r.menu_name+' ／ '+yen(r.price)+'\n変更後：'+m.name+' ／ '+yen(price.value)+'\n理由：'+reason.value.trim()+'\n\nLINE通知：送らない'))return;
+      busy=true; save.disabled=true; close.disabled=true; menu.disabled=true; price.disabled=true; reason.disabled=true;
+      msg.textContent='保存しています…';
+      sbRpc('change_reservation_course',{p_resv:rid,p_menu:m.id,p_price:Number(price.value),p_reason:reason.value.trim(),p_version:r.version})
+        .then(function(result){busy=false;close.disabled=false;close.textContent='閉じる';
+          body.textContent=result.changed?'コース・予約金額を変更しました。':'変更前と同じ内容です。';
+          if(result.calendar_queued)body.appendChild(document.createTextNode(' カレンダーは反映待ちです。'));
+          if(typeof CRM_CARDS !== 'undefined') CRM_CARDS={};
+          loadBoard();
+        }).catch(function(err){busy=false;close.disabled=false;msg.textContent=failure(err);
+          if(typeof CRM_CARDS !== 'undefined') CRM_CARDS={};
+          // 応答喪失でも同じ情報の連打はさせず、再取得して現在の値を確認する。
+          save.textContent='閉じて再読み込みしてください';
+        });
+    };
+    reason.oninput=price.oninput=function(){msg.textContent='';};
+    menu.focus();
+  }).catch(function(){body.textContent='コース変更を読み込めませんでした。画面を再読み込みし、改善しない場合は管理者へ連絡してください。';});
+}
+
 function handleBoardAction(act, rid){
   if (!rid) return;
+  if (act === 'course'){ openCourseChange(rid); return; }
   if (act === 'reschedule'){ openReschedule(rid); return; }   /* 確認は専用フォーム内で行う */
   var plan = {
     remind:  { q:'このお客様に「問診リマインド」をLINEで送信しますか？',
