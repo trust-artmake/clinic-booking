@@ -4718,9 +4718,13 @@ function loadDash(){
     var r = dashRangeFor(DASH_PERIOD);
     document.getElementById('dashPeriod').textContent = r.label + ' の集計';
     var storeId = storeIdForSlug(currentStoreSlug()); // 'all'→null（owner/adminのみRLS許可）
-    return sbRpc('dashboard_stats', { p_store: storeId, p_from: r.from, p_to: r.to, p_tenant: TENANT_ID });
-  }).then(function(s){
-    renderDash(s || {});
+    return Promise.all([
+      sbRpc('dashboard_stats', { p_store: storeId, p_from: r.from, p_to: r.to, p_tenant: TENANT_ID }),
+      // ★2026-09-14：記録の付け忘れ（終了時刻を過ぎて来店済み/無断が未記入）を同じ期間・店で読む。失敗しても集計は出す。
+      dashFetchUnrecorded(r, storeId).catch(function(){ return null; })
+    ]);
+  }).then(function(res){
+    renderDash(res[0] || {}, res[1]);
   }).catch(function(err){
     if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
     var msg = String((err && err.message) || err || '');
@@ -4824,15 +4828,52 @@ document.addEventListener('click', function(e){
   downloadVisitedCsv(b);
 });
 
-/* dashboard_stats の戻りjsonb（存在キーのみ）を描画。 */
-function renderDash(s){
+/* ===== 来店記録の付け忘れ（2026-09-14） =====
+   終了時刻を過ぎたのに「来店済み」「無断キャンセル」のどちらも付いていない有効予約。
+   売上・来店数は記録が付いた予約だけで作るので、ここが残っていると数字が実際より少ない。
+   純粋ロジックは poc/admin_visited_csv_pure.mjs の pickUnrecorded と同じ（通知側 notify-reservation とも同条件）。 */
+function dashPickUnrecorded(rows, nowIso){
+  var now = Date.parse(String(nowIso || ''));
+  return (Array.isArray(rows) ? rows : [])
+    .filter(function(r){ return r && r.status !== 'cancelled' && !String(r.outcome || '').trim(); })
+    .filter(function(r){ var e = Date.parse(String(r.end_at || '')); return isFinite(e) && e < now; })
+    .sort(function(a, b){ return String(a.start_at || '').localeCompare(String(b.start_at || '')); });
+}
+function dashFetchUnrecorded(r, storeId){
+  var nowIso = new Date().toISOString();
+  var q = 'reservations?select=id,start_at,end_at,customer_name,status,outcome,menus(name),artists(name)'
+        + '&start_at=gte.' + encodeURIComponent(r.from) + '&start_at=lt.' + encodeURIComponent(r.to)
+        + '&status=neq.cancelled&end_at=lt.' + encodeURIComponent(nowIso)
+        + (storeId ? '&store_id=eq.' + encodeURIComponent(storeId) : '')
+        + '&order=start_at.asc&limit=2000';
+  return sbGet(q).then(function(rows){ return dashPickUnrecorded(rows, nowIso); });
+}
+/* 未記入一覧の「来店済み」「無断キャンセル」ボタン（RPC set_outcome 経由・予約管理タブと同じ関所） */
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('[data-act="dash-mark-visited"],[data-act="dash-mark-noshow"]') : null;
+  if (!b) return;
+  var view = document.getElementById('dashView');
+  if (!view || !view.contains(b)) return;
+  var rid = b.getAttribute('data-rid'); if (!rid) return;
+  var outcome = b.getAttribute('data-act') === 'dash-mark-visited' ? 'visited' : 'no_show';
+  var label = outcome === 'visited' ? '来店済み' : '無断キャンセル';
+  if (!window.confirm((b.getAttribute('data-who') || 'この予約') + ' を「' + label + '」として記録しますか？')) return;
+  b.disabled = true;
+  sbRpc('set_outcome', { p_resv: rid, p_outcome: outcome })
+    .then(function(){ loadDash(); })
+    .catch(function(err){ b.disabled = false; window.alert('記録できませんでした（' + ((err && err.message) || err) + '）。'); });
+});
+
+/* dashboard_stats の戻りjsonb（存在キーのみ）を描画。unrecorded＝記録の付け忘れ一覧（null＝取得失敗）。 */
+function renderDash(s, unrecorded){
   var body = document.getElementById('dashBody');
+  var un = Array.isArray(unrecorded) ? unrecorded : [];
 
   // KPIカード（GAS版の体裁・色・KPI名を踏襲。存在キーのみ）
   var num = function(v){ return Number(v) || 0; };
   var kpis = [
     { l:'売上',     v: dashYen(s.sales),               c:'dash-kpi-main' },
-    { l:'来店数',   v: num(s.visited) + '件' },
+    { l:'来店数' + (un.length ? '（未記入 ' + un.length + '件）' : ''), v: num(s.visited) + '件', c:(un.length ? 'dash-kpi-warn' : '') },
     { l:'予約数',   v: num(s.reservations) + '件' },
     { l:'平均単価', v: dashYen(s.avgSpend) },
     { l:'キャンセル', v: num(s.cancelled) + '件',       c:(num(s.cancelled) > 0 ? 'dash-kpi-warn' : '') },
@@ -4845,6 +4886,25 @@ function renderDash(s){
              '<div class="dash-kpi-l">' + esc(x.l) + '</div>' +
            '</div>';
   }).join('') + '</div>';
+
+  // ★記録の付け忘れ一覧（あるときだけ）。その場で「来店済み」「無断キャンセル」を押せる。
+  if (un.length){
+    html += '<div class="dash-sect"><h3>📝 来店記録が未記入（' + esc(un.length) + '件）</h3>'
+          + '<div class="dash-empty" style="text-align:left">終了時刻を過ぎているのに記録が付いていない予約です。記録が付くまで売上・来店数には入りません。</div>';
+    html += un.map(function(r){
+      var st = dashCsvToJst(r.start_at);
+      var who = (r.customer_name ? String(r.customer_name) : 'お名前未入力') + '様';
+      return '<div class="dash-row" style="flex-wrap:wrap;gap:6px">'
+           +   '<div class="dash-row-l" style="min-width:12em">' + esc(st.date + ' ' + st.time) + '</div>'
+           +   '<div style="flex:1">' + esc(who) + ' <span class="dash-row-sub">' + esc((r.menus && r.menus.name) || '') + (r.artists && r.artists.name ? '／' + esc(r.artists.name) : '') + '</span></div>'
+           +   '<div><button type="button" class="dash-tab" data-act="dash-mark-visited" data-rid="' + esc(r.id) + '" data-who="' + esc(who) + '">✅ 来店済み</button> '
+           +        '<button type="button" class="dash-tab" data-act="dash-mark-noshow" data-rid="' + esc(r.id) + '" data-who="' + esc(who) + '">⚠️ 無断キャンセル</button></div>'
+           + '</div>';
+    }).join('');
+    html += '</div>';
+  } else if (unrecorded === null){
+    html += '<div class="dash-sect"><div class="dash-empty">（記録の付け忘れチェックは読み込めませんでした）</div></div>';
+  }
 
   // アーティスト別（売上降順）。
   // ★修正：RPC側の order by x->>'sales' desc は文字列比較で並びが崩れうるため、
@@ -5124,7 +5184,6 @@ function aiFaqErrorMessage(err){
   }
   return '（' + raw + '）';
 }
-
 
 function loadAiReport(){
   var body = document.getElementById('aiBody');
