@@ -945,6 +945,8 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <span class="dash-tab" data-dp="last_month">先月</span>
     <span class="dash-tab" data-dp="this_year">今年</span>
     <span class="dash-tab" data-dp="last_6m">直近6ヶ月</span>
+    <!-- ★2026-09-14：選択中の期間の「来店済み」予約をCSVで落とす（画面の売上・来店数と同じ母集団） -->
+    <button type="button" class="dash-tab" data-act="dash-visited-csv" title="この期間に来店したお客様の一覧（日付・メニュー・担当・金額）をCSVで保存します" style="margin-left:auto;cursor:pointer;border:1px solid #0b5c55;background:#fff;color:#0b5c55">📥 来店一覧CSV</button>
   </div>
   <div class="dash-period" id="dashPeriod"></div>
   <div id="dashBody"><div class="dash-placeholder">読み込み中…</div></div>
@@ -4731,6 +4733,97 @@ function loadDash(){
   });
 }
 
+/* ===== 来店一覧CSV（2026-09-14） =====
+   純粋ロジックは poc/admin_visited_csv_pure.mjs と二重定義（テスト側の真実は .mjs）。
+   ・母集団は画面の「売上」「来店数」と同じ＝来店済み（outcome='visited'）かつ取消でない予約。
+   ・日付・時刻は日本時間（DBの start_at はUTCで来るので変換する）。
+   ・先頭にBOM（\uFEFF）を付けてExcelで日本語が化けないようにし、改行はCRLF。
+   ・読み取りだけ。DBは変えない。お客様への通知も無い。 */
+var DASH_CSV_HEADER = ['施術日','開始','終了','お客様名','メニュー','担当','価格区分','金額'];
+function dashCsvToJst(iso){
+  var t = Date.parse(String(iso || ''));
+  if (!isFinite(t)) return { date:'', time:'' };
+  var d = new Date(t + 9 * 60 * 60 * 1000);
+  var p2 = function(n){ return ('0' + n).slice(-2); };
+  return { date: d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()),
+           time: p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) };
+}
+function dashCsvPickVisited(rows){
+  return (Array.isArray(rows) ? rows : []).filter(function(r){ return r && r.outcome === 'visited' && r.status !== 'cancelled'; });
+}
+function dashCsvCell(v){
+  if (v == null) return '';
+  if (typeof v === 'number') return isFinite(v) ? String(v) : '';
+  var s = String(v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function dashCsvPriceType(t){ return t === 'monitor' ? 'モニター' : t === 'normal' ? '通常' : ''; }
+function dashCsvRow(r){
+  var s = dashCsvToJst(r.start_at), e = dashCsvToJst(r.end_at);
+  var price = Number(r.price);
+  return [ s.date, s.time, e.time,
+           r.customer_name == null ? '' : String(r.customer_name),
+           (r.menus && r.menus.name) || '',
+           (r.artists && r.artists.name) || '',
+           dashCsvPriceType(r.reservation_type),
+           isFinite(price) ? price : 0 ];
+}
+function dashBuildVisitedCsv(rows){
+  var visited = dashCsvPickVisited(rows).slice().sort(function(a, b){ return String(a.start_at || '').localeCompare(String(b.start_at || '')); });
+  var lines = [ DASH_CSV_HEADER.map(dashCsvCell).join(',') ];
+  var total = 0;
+  visited.forEach(function(r){ var c = dashCsvRow(r); total += c[7]; lines.push(c.map(dashCsvCell).join(',')); });
+  lines.push([ '合計', '', '', visited.length + '件', '', '', '', total ].map(dashCsvCell).join(','));
+  return '\uFEFF' + lines.join('\r\n') + '\r\n';
+}
+function dashCsvFilename(storeName, periodLabel){
+  var clean = function(s){ return String(s || '').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim(); };
+  return '来店一覧_' + (clean(storeName) || '店舗') + '_' + (clean(periodLabel) || '期間') + '.csv';
+}
+/* 表示中の店名（全店なら店（テナント）名） */
+function dashCsvStoreName(){
+  var slug = currentStoreSlug();
+  if (slug && slug !== 'all' && STORE_MAP && STORE_MAP[slug]) return STORE_MAP[slug].name || slug;
+  for (var i = 0; i < MY_TENANTS.length; i++){ if (MY_TENANTS[i].tenant_id === TENANT_ID) return MY_TENANTS[i].tenant_name || ''; }
+  return '';
+}
+/* ボタン押下：選択中の期間・店の来店済み予約を読んでCSVを落とす（最大5,000件） */
+function downloadVisitedCsv(btn){
+  if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
+  if (btn) btn.disabled = true;
+  ensureStoreMap().then(function(){
+    var r = dashRangeFor(DASH_PERIOD);
+    var storeId = storeIdForSlug(currentStoreSlug());
+    var q = 'reservations?select=start_at,end_at,customer_name,price,reservation_type,status,outcome,menus(name),artists(name)'
+          + '&start_at=gte.' + encodeURIComponent(r.from) + '&start_at=lt.' + encodeURIComponent(r.to)
+          + '&outcome=eq.visited&status=neq.cancelled'
+          + (storeId ? '&store_id=eq.' + encodeURIComponent(storeId) : '')
+          + '&order=start_at.asc&limit=5000';
+    return sbGet(q).then(function(rows){
+      var csv = dashBuildVisitedCsv(rows);
+      var name = dashCsvFilename(dashCsvStoreName(), r.label);
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+      var n = dashCsvPickVisited(rows).length;
+      var body = document.getElementById('dashPeriod');
+      if (body) body.textContent = r.label + ' の集計（来店一覧CSV ' + n + '件を保存しました）';
+    });
+  }).catch(function(err){
+    var msg = String((err && err.message) || err || '');
+    if (/forbidden|permission|denied/i.test(msg)) window.alert('権限がありません（この店舗のCSVは出せません）。');
+    else window.alert('CSVを作れませんでした（' + msg + '）。');
+  }).then(function(){ if (btn) btn.disabled = false; });
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('[data-act="dash-visited-csv"]') : null;
+  if (!b) return;
+  var view = document.getElementById('dashView');
+  if (!view || !view.contains(b)) return;
+  downloadVisitedCsv(b);
+});
+
 /* dashboard_stats の戻りjsonb（存在キーのみ）を描画。 */
 function renderDash(s){
   var body = document.getElementById('dashBody');
@@ -4969,11 +5062,17 @@ function bindAiCandidateActions(){
       var ta = document.getElementById('aicand-text-' + cid);
       var newText = ta ? String(ta.value || '').trim() : '';
       if (!newText){ window.alert('提案文が空です。内容を入力してください。'); return; }
+      // ★2026-09-14 FAQガード：本番はFAQを全文（1,000字まで）で検証し、超えると店ごとAIが止まる。
+      //   保存側で黙って切らず、ここで知らせて止める（DB側 update_text も faq_too_long で拒否する）。
+      if (newText.length > 1000){
+        window.alert('提案文が1,000文字を超えています（' + newText.length + '文字）。FAQは1,000文字以内にしてください。切り詰めずに保存を止めました。');
+        return;
+      }
       if (!window.confirm('この提案文を保存しますか？\n（承認済み・有効の候補は、内容を変えて保存すると「承認待ち」に戻り、もう一度承認・反映が必要になります）')) return;
       btn.disabled = true;
       sbRpc('ai_reply_improvement_candidate_update_text', { p_id: Number(cid), p_proposed_text: newText, p_tenant: TENANT_ID })
         .then(function(){ loadAiReport(); })
-        .catch(function(err){ btn.disabled = false; window.alert('提案文の保存に失敗しました（' + ((err && err.message) || err) + '）。'); });
+        .catch(function(err){ btn.disabled = false; window.alert('提案文の保存に失敗しました。' + aiFaqErrorMessage(err)); });
       return;
     }
     var statusMap = { approve: 'approved', reject: 'rejected', apply: 'active', rollback: 'rolled_back' };
@@ -5001,9 +5100,31 @@ function bindAiCandidateActions(){
     btn.disabled = true;
     sbRpc('ai_reply_improvement_candidate_set_status', { p_id: Number(cid), p_status: ns, p_tenant: TENANT_ID })
       .then(function(){ loadAiReport(); })
-      .catch(function(err){ btn.disabled = false; window.alert('変更に失敗しました（' + ((err && err.message) || err) + '）。'); });
+      .catch(function(err){ btn.disabled = false; window.alert('変更に失敗しました。' + aiFaqErrorMessage(err)); });
   });
 }
+
+// ★2026-09-14 FAQガード：DB側RPC（承認/反映・提案文保存）が返す短いエラーコードを日本語の説明に置き換える。
+//   本番のAI返信は有効化済みFAQを全文検証し、1件でも規格外なら店ごと有人対応へ倒れる。
+//   だからDBの入口で弾き（migrations/20260914120000）、ここでは「なぜ弾かれたか・どう直すか」だけを伝える。
+function aiFaqErrorMessage(err){
+  var raw = String((err && err.message) || err || '');
+  var map = {
+    faq_draft: '提案文がひな型（下書き）のままです。具体的な内容に書き換えて保存してから、承認・反映してください。',
+    faq_too_long: '提案文が1,000文字を超えています。FAQは1,000文字以内にしてください（本番は全文で検証するため、超えると店のAI返信が止まります）。',
+    faq_count_exceeded: '有効化できるFAQは30件までです。使っていないFAQを「戻す」で外してから反映してください。',
+    faq_total_exceeded: '有効化済みFAQの合計が30,000文字を超えます。長いFAQを短くするか、使っていないFAQを「戻す」で外してください。',
+    empty_text: '提案文が空です。内容を入力してください。',
+    bad_transition: 'この状態からその操作はできません（承認→反映の順に進めてください）。',
+    forbidden: '権限がありません（この店舗の候補は操作できません）。',
+    not_found: '対象の候補が見つかりません。画面を再読み込みしてください。'
+  };
+  for (var code in map){
+    if (map.hasOwnProperty(code) && raw.indexOf(code) !== -1) return map[code];
+  }
+  return '（' + raw + '）';
+}
+
 
 function loadAiReport(){
   var body = document.getElementById('aiBody');
