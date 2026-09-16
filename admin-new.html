@@ -2159,7 +2159,23 @@ function loadHomeReservations(){
 // 要対応の人数（顧客カルテの「要対応」バッジと同条件＝humanNeedsAttention）。
 // サーバ側では粗く絞り（空とdone以外）、語彙の最終判定はクライアントの humanNeedsAttention に一元化
 // （AI側が書く「対応完了」「返信済み」を要対応として数え続けるバグを防ぐ）。
+/* 送信前の検査役が自動停止（影モードへ戻った）していれば、ホームに一行出す（2026-09-17）。
+   通知1回だけに頼らない＝8/23「監視の共倒れ」の再発防止。取れなければ何も出さない。 */
+function loadHomeJudgeWarn(){
+  if (typeof sbRpc !== 'function' || !TENANT_ID) return;
+  var to = new Date(), from = new Date(to.getTime() - 24*3600*1000);
+  sbRpc('ai_judge_stats', { p_tenant: TENANT_ID, p_from: from.toISOString(), p_to: to.toISOString() }).then(function(j){
+    var host = document.getElementById('home-attn'); var card = host ? host.closest('.home-metric') || host.parentElement : null;
+    var old = document.getElementById('home-judge-warn'); if (old) old.remove();
+    if (!j || !j.trippedAt || !card || !card.parentElement) return;
+    var el = document.createElement('div'); el.id = 'home-judge-warn'; el.className = 'help-hint';
+    el.textContent = '⚠️ AI返信の検査役が自動停止中（影モードへ戻っています）。AIの自動返信は動いています。再開は 設定 → 🤖 AI向け情報 → 検査役。';
+    card.parentElement.insertAdjacentElement('afterend', el);
+  }).catch(function(){});
+}
+
 function loadHomeAttention(){
+  loadHomeJudgeWarn();
   if(typeof sbGet!=='function') return;
   sbGet('customers?select=id,human_status&human_status=not.in.("",done)').then(function(rows){
     var n = Array.isArray(rows) ? rows.filter(function(r){ return humanNeedsAttention(r && r.human_status); }).length : 0;
@@ -5240,11 +5256,14 @@ function loadAiReport(){
   }).catch(function(err){
     return { _error: String((err && err.message) || err || '') };
   });
+  // 送信前の検査役（2026-09-17）：数字だけ（判定分布・有人率・モード）。取れなくても本体は描く。
+  var judgeReq = sbRpc('ai_judge_stats', { p_tenant: TENANT_ID, p_from: r.from, p_to: r.to }).catch(function(){ return null; });
   Promise.all([
     sbRpc('ai_report_stats', { p_from: r.from, p_to: r.to, p_tenant: TENANT_ID }),
-    candidatesReq
+    candidatesReq,
+    judgeReq
   ])
-    .then(function(res){ renderAiReport(res[0] || {}, res[1] || []); })
+    .then(function(res){ renderAiReport(res[0] || {}, res[1] || [], res[2] || null); })
     .catch(function(err){
       if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
       var msg = String((err && err.message) || err || '');
@@ -5382,7 +5401,38 @@ function renderAiImprovementCandidates(items){
 }
 
 /* ai_report_stats の戻りjsonb（存在キーのみ）を描画。 */
-function renderAiReport(s, improvementCandidates){
+/* 送信前の検査役（2026-09-17）の区画。数字だけ。理由の自由文は出さない（伏せ字の効きを影モードで確認してから）。 */
+function judgeModeLabel(m){
+  m = String(m || 'off');
+  return m === 'enforce' ? '本番ON（おかしい返信は有人へ）' : m === 'shadow' ? '影モード（判定を記録するだけ）' : 'オフ';
+}
+function renderAiJudgeSection(j){
+  if (!j || typeof j !== 'object') return '';
+  var mode = String(j.mode || 'off');
+  var total = Number(j.total) || 0, human = Number(j.human) || 0, err = Number(j.error) || 0, acted = Number(j.acted) || 0;
+  var tripped = !!j.trippedAt;
+  function card(label, val, warn, note){
+    return '<div class="ai-card' + (warn ? ' ai-warn' : '') + '"><div class="ai-num">' + val + '</div><div class="ai-lbl">' + label + '</div>'
+         + (note ? '<div class="ai-formula">' + note + '</div>' : '') + '</div>';
+  }
+  var html = '<div class="ai-sect-h">🔍 送信前の検査役</div>';
+  if (tripped){
+    html += '<div class="ai-health ai-health-warning"><div class="ai-health-top"><div class="ai-health-title">検査役：自動停止中</div>'
+          + '<div class="ai-health-badge">影モードへ戻っています</div></div>'
+          + '<ul class="ai-health-reasons"><li>直近の判定で有人に回るお客様が多かったため、判定だけ記録するモードに自動で戻しました（' + esc(crmDate(j.trippedAt)) + '）。AIの自動返信は従来どおり動いています。再開は「設定 → 🤖 AI向け情報 → 検査役」から。</li></ul></div>';
+  }
+  html += '<div class="ai-grid">';
+  html += card('モード', esc(judgeModeLabel(mode)), mode === 'off' ? false : false);
+  html += card('判定した返信', esc(String(total)) + ' 件');
+  html += card('有人へ（判定）', esc(String(human)) + ' 件', false, mode === 'shadow' ? '影モード中は記録だけで、実際には送っています' : '');
+  html += card('実際に止めた', esc(String(acted)) + ' 件');
+  html += card('有人率', esc(String(Number(j.humanRate) || 0)) + ' %', false, '有人へ ÷ 判定した返信 ×100');
+  html += card('検査役の失敗', esc(String(err)) + ' 件', err > 0, '失敗時はそのまま送っています（止めない）');
+  html += '</div>';
+  return html;
+}
+
+function renderAiReport(s, improvementCandidates, judgeStats){
   var body = document.getElementById('aiBody');
   var hours = Math.round((Number(s.savedMinutes) || 0) / 60 * 10) / 10;
   var open = Number(s.openHuman) || 0;
@@ -5439,6 +5489,7 @@ function renderAiReport(s, improvementCandidates){
                '直近24時間の件数。止まれば自動で0に戻ります');
   html += card('未対応の最古', minLabel(oldestOpenMinutes), open > 0 && Number.isFinite(oldestOpenMinutes) && oldestOpenMinutes >= 60);
   html += '</div>';
+  html += renderAiJudgeSection(judgeStats);
 
   var actions = [];
   if (staffNotifyFailed > 0) actions.push('スタッフ通知失敗を最優先で確認してください。');
@@ -6595,8 +6646,20 @@ function setLoadAiContext(){
           }).join('')
         + '</select></div>';
     }
+    // 送信前の検査役（2026-09-17）：モード切替はオーナー（platform_admin）だけ。RPC ai_judge_set_mode 経由。
+    var judgeCard = '';
+    if (window.IS_PLATFORM_ADMIN){
+      judgeCard = '<div class="set-card set-aictx" id="set-judge-card"><div class="set-name">🔍 送信前の検査役（AIの返信案を送る前に検査）</div>'
+        + '<div class="help-hint">オフ＝呼ばない（今まで通り）／影モード＝判定を記録するだけで送信は変えない／本番ON＝おかしい返信は送らず有人へ。まず影モードで2週間見てから本番ONにします。</div>'
+        + '<label>モード</label><select id="set-judge-mode">'
+        + '<option value="off">オフ</option><option value="shadow">影モード（記録だけ）</option><option value="enforce">本番ON（有人へ回す）</option>'
+        + '</select>'
+        + '<div id="set-judge-cur" class="set-ph">現在：読み込み中…</div>'
+        + '<button type="button" class="set-save" id="set-judge-save">検査役のモードを保存</button>'
+        + '<div class="crm-emsg" id="set-judge-msg"></div></div>';
+    }
     // 店舗情報3フィールド＋リッチメニュー編集枠
-    var h = picker
+    var h = picker + judgeCard
       + '<div class="set-card set-aictx">'
       +   '<div class="set-name">📍 店舗情報（AIがお客様に伝える内容）</div>'
       +   '<div class="set-hint" style="margin:2px 0 8px">お客様から「場所どこ？」「アクセスは？」と聞かれたときに AI が答える情報です。</div>'
@@ -6620,6 +6683,28 @@ function setLoadAiContext(){
       + '</div>';
     body.innerHTML = h;
     // 店舗セレクタの切替
+    // 検査役：現在のモードを表示し、保存でRPCを呼ぶ
+    (function(){
+      var msel = document.getElementById('set-judge-mode'); if (!msel) return;
+      var cur = document.getElementById('set-judge-cur'), msg = document.getElementById('set-judge-msg');
+      var to = new Date(), from = new Date(to.getTime() - 24*3600*1000);
+      sbRpc('ai_judge_stats', { p_tenant: TENANT_ID, p_from: from.toISOString(), p_to: to.toISOString() }).then(function(j){
+        var m = (j && j.mode) || 'off'; msel.value = m;
+        if (cur) cur.textContent = '現在：' + judgeModeLabel(m) + (j && j.trippedAt ? '（自動停止中：' + crmDate(j.trippedAt) + ' に影モードへ戻りました）' : '');
+      }).catch(function(){ if (cur) cur.textContent = '現在：取得できませんでした'; });
+      document.getElementById('set-judge-save').onclick = function(){
+        var m = msel.value;
+        if (m === 'enforce' && !window.confirm('本番ONにすると、検査役が「おかしい」と判定した返信はお客様に送らず有人対応に回ります。影モードで確認済みですか？')) return;
+        if (msg){ msg.textContent = '保存中…'; msg.className = 'crm-emsg crm-ok'; }
+        sbRpc('ai_judge_set_mode', { p_tenant: TENANT_ID, p_mode: m }).then(function(){
+          if (msg){ msg.textContent = '✅ 保存しました：' + judgeModeLabel(m); msg.className = 'crm-emsg crm-ok'; }
+          if (cur) cur.textContent = '現在：' + judgeModeLabel(m);
+        }).catch(function(err){
+          var e = String(err && err.message || err || '');
+          if (msg){ msg.textContent = /forbidden|permission|denied|42501/i.test(e) ? 'オーナーのみ変更できます。' : /does not exist|PGRST202/i.test(e) ? 'この機能はまだ反映されていません。' : '保存できませんでした：' + e; msg.className = 'crm-emsg crm-ng'; }
+        });
+      };
+    })();
     var sel = document.getElementById('set-aictx-storesel');
     if (sel){
       sel.addEventListener('change', function(){
