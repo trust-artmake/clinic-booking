@@ -4518,14 +4518,15 @@ function crmFooterHtml(uid, curType, curHuman, hasUid, c){
       'この全店共通のお客様は、オーナー／管理者のみ編集できます。</div></div>';
   }
   function opt(val, label, cur, disabled){ return '<option value="'+esc(val)+'"'+(cur===val?' selected':'')+(disabled?' disabled':'')+'>'+esc(label)+'</option>'; }
-  // 有人対応：空＝対応不要、「要対応」＝AI停止中、「対応完了」＝AI再開。旧カルテでは表示のみ。
+  // 有人対応：空＝対応不要、「要対応」＝AI停止中、「対応完了」＝AI再開。
+  // 切替は customers を直接書かず、正式な口（line_crm_karte_start/complete_handling RPC）だけを呼ぶ（2026-09-17 復活）。
   // 旧語彙（open/done/返信済み）がDBに残っていても、新語彙のどちらかに読み替えて表示する。
   var humanCur = humanIsClosed(curHuman) ? (curHuman ? HUMAN_STATUS_DONE : '') : HUMAN_STATUS_ATT;
   var typeCur = curType || '';
   return '<div class="crm-foot">' +
     '<div class="crm-edit">' +
       '<h3>✏️ メモ・区分・有人対応の更新</h3>' +
-      '<div class="help-hint">💡 <b>有人対応の開始・完了は受信箱から行います。</b>この画面ではメモ、区分、対応中の理由だけを更新できます。</div>' +
+      '<div class="help-hint">💡 有人対応を<b>「要対応」にして更新するとAIの自動返信が止まります</b>（その間は公式LINEから返信してください）。終わったら<b>「対応完了」にして更新するとAIが再開</b>します。止めたままにしないよう、その日のうちに戻してください。</div>' +
       '<label class="crm-el">背景メモに追記</label>' +
       '<textarea id="crmMemoAdd" rows="2" placeholder="このお客様への申し送り・対応メモを追記…"></textarea>' +
       '<div class="crm-row2">' +
@@ -4544,8 +4545,8 @@ function crmFooterHtml(uid, curType, curHuman, hasUid, c){
           '<label class="crm-el">有人対応</label>' +
           '<select id="crmHumanSel">' +
             opt('', '対応不要', humanCur, humanCur !== '') +
-            opt(HUMAN_STATUS_ATT, '要対応（AI停止・スタッフ対応中）', humanCur, humanCur !== HUMAN_STATUS_ATT) +
-            opt(HUMAN_STATUS_DONE, '対応完了（AI再開・受信箱から）', humanCur, humanCur !== HUMAN_STATUS_DONE) +
+            opt(HUMAN_STATUS_ATT, '要対応（AI停止・スタッフ対応中）', humanCur, false) +
+            opt(HUMAN_STATUS_DONE, '対応完了（AI再開）', humanCur, humanCur !== HUMAN_STATUS_ATT && humanCur !== HUMAN_STATUS_DONE) +
           '</select>' +
         '</div>' +
       '</div>' +
@@ -4564,9 +4565,23 @@ function crmEditMsg(t, ok){
   el.className = 'crm-emsg' + (t ? (ok ? ' crm-ok' : ' crm-ng') : '');
 }
 
+/* 有人対応RPCのエラーコード → 日本語。値はそのまま画面に出さない（コードだけを見る）。 */
+function crmHumanRpcError(err){
+  var msg = String(err && err.message || err || '');
+  if (/legacy_completion_disabled/.test(msg)) return 'この店舗はAI再開を受信箱に移行済みです。受信箱の「対応完了（AI再開）」から行ってください。';
+  if (/unresolved_delivery/.test(msg)) return '受信箱に送信中・失敗の返信が残っています。受信箱で確認してから対応完了にしてください。';
+  if (/conversation_not_open/.test(msg)) return 'このお客様は今「要対応」ではないため、対応完了にできません（画面を再読込してください）。';
+  if (/line_not_linked/.test(msg)) return 'LINE未連携のお客様は有人対応に切り替えられません（AIは元々返信しません）。';
+  if (/conversation_not_found|unauthorized|permission|denied|42501|forbidden/i.test(msg)) return '権限がありません（この店舗のお客様は編集できません。ログインもご確認ください）。';
+  if (/function .*does not exist|PGRST202/i.test(msg)) return 'この機能はまだ反映されていません（管理者に連絡してください）。';
+  return '有人対応を切り替えられませんでした：' + esc(msg);
+}
+
 /* フッタ：customers を line_uid で更新（自店・authenticated）。失敗時は日本語で理由表示。
    ・メモは「追記」（既存 background_memo の末尾に日付つきで足す）。
-   ・有人状態は表示のみ。旧カルテから変更せず、受信箱のguarded RPCへ一本化する。
+   ・有人状態の開始・完了は customers を直接書かず、正式な口（RPC）だけを呼ぶ（G9の門番を通す）。
+     要対応へ＝line_crm_karte_start_handling／対応完了へ＝line_crm_karte_complete_handling（LINE「完了 N」と同じ経路）。
+   ・要対応→対応不要（AI再開を経ない戻し）は受け付けない。
    ・要対応中は理由だけ編集できる。 */
 function crmSaveEdits(uid){
   if (!uid) return;
@@ -4578,14 +4593,26 @@ function crmSaveEdits(uid){
   var humanSel = document.getElementById('crmHumanSel').value;     // '' / 要対応 / 対応完了
   var reasonVal = (document.getElementById('crmHumanReason').value || '').trim();
 
-  // CS3C: 有人状態の開始・解除はconversation_stateと同時に更新する受信箱だけにする。
-  // disabled optionを書き換えられても、旧カルテから直接customersを更新しない。
   var expectedHuman = humanNeedsAttention(cust.human_status)
     ? HUMAN_STATUS_ATT
     : (cust.human_status ? HUMAN_STATUS_DONE : '');
+
+  // 有人状態の切替は RPC。切替が要らないときは null。
+  var humanRpc = null;
   if (humanSel !== expectedHuman) {
-    crmEditMsg('有人対応の開始・完了は受信箱で会話を確認してから行ってください。');
-    return;
+    if (!cust.id) {
+      crmEditMsg('このお客様は顧客台帳に登録がないため、有人対応を切り替えられません。');
+      return;
+    }
+    if (humanSel === HUMAN_STATUS_ATT) {
+      humanRpc = function(){ return sbRpc('line_crm_karte_start_handling', { p_tenant: TENANT_ID, p_customer: cust.id, p_reason: reasonVal || null }); };
+    } else if (humanSel === HUMAN_STATUS_DONE && expectedHuman === HUMAN_STATUS_ATT) {
+      if (!window.confirm('対応完了にすると、次のお客様メッセージからAIの自動返信が再開します。対応完了にしますか？')) return;
+      humanRpc = function(){ return sbRpc('line_crm_karte_complete_handling', { p_tenant: TENANT_ID, p_customer: cust.id }); };
+    } else {
+      crmEditMsg('「対応不要」には戻せません。AIを再開するときは「対応完了」を選んでください。');
+      return;
+    }
   }
 
   var patch = {};
@@ -4600,8 +4627,8 @@ function crmSaveEdits(uid){
     patch.background_memo = (prev ? prev + '\n' : '') + '[' + stamp + '] ' + memoAdd;
   }
 
-  // 有人状態は一切送らない。要対応中だけ申し送り理由を編集できる。
-  if (expectedHuman === HUMAN_STATUS_ATT) patch.human_reason = reasonVal || null;
+  // 有人状態そのものは一切送らない（RPC経由のみ）。要対応中（＝切替なしで理由だけ直す時）は理由を編集できる。
+  if (!humanRpc && expectedHuman === HUMAN_STATUS_ATT) patch.human_reason = reasonVal || null;
 
   var btn = document.getElementById('crmSaveBtn');
   if (btn){ btn.disabled = true; btn.textContent = '更新中…'; }
@@ -4612,19 +4639,25 @@ function crmSaveEdits(uid){
   //   別店の同一 line_uid 行まで巻き込んで上書きしないよう、選択中テナントを必ず重ねる。
   //   一般スタッフは TENANT_ID=自店＝RLSと同じ条件の無害な重ね掛け。
   var filter = 'line_uid=eq.' + encodeURIComponent(uid) + '&tenant_id=eq.' + encodeURIComponent(TENANT_ID);
-  sbUpdate('customers', filter, patch).then(function(rows){
+  var humanFailed = false;
+  // 順番：先に有人状態の切替（失敗したらメモ・区分も送らない）→ 次にメモ・区分。
+  (humanRpc ? humanRpc().catch(function(err){ humanFailed = true; throw err; }) : Promise.resolve(null))
+  .then(function(){ return sbUpdate('customers', filter, patch); })
+  .then(function(rows){
     if (btn){ btn.disabled = false; btn.textContent = 'この内容で更新する'; }
     // 更新が0件＝権限が無い/該当無し（RLSで弾かれた可能性）。representation が空配列なら失敗扱い。
     if (Array.isArray(rows) && rows.length === 0){
-      crmEditMsg('更新できませんでした（権限がありません。担当店舗・ログインをご確認ください）。');
+      crmEditMsg(humanRpc ? '有人対応は切り替えましたが、メモ・区分は更新できませんでした（権限をご確認ください）。' : '更新できませんでした（権限がありません。担当店舗・ログインをご確認ください）。');
+      if (humanRpc){ delete CRM_CARDS[uid]; selectCustomer(uid); crmLoadList(); }
       return;
     }
-    crmEditMsg('✅ 更新しました。', true);
+    crmEditMsg(humanRpc ? (humanSel === HUMAN_STATUS_ATT ? '✅ 有人対応にしました。AIの自動返信は止まっています。' : '✅ 対応完了にしました。AIの自動返信が再開します。') : '✅ 更新しました。', true);
     delete CRM_CARDS[uid];          // キャッシュ破棄
     selectCustomer(uid);            // カルテ再読込
     crmLoadList();                  // 一覧のステータス・区分も更新
   }).catch(function(err){
     if (btn){ btn.disabled = false; btn.textContent = 'この内容で更新する'; }
+    if (humanFailed){ crmEditMsg(crmHumanRpcError(err)); return; }
     var msg = String(err && err.message || err || '');
     if (/permission|denied|rls|forbidden|42501/i.test(msg)){
       crmEditMsg('権限がありません（この店舗のお客様は編集できません）。');
