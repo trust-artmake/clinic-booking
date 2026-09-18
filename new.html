@@ -1215,18 +1215,50 @@ function qLoad(){
   body.innerHTML=h;
   // 本名（予約の手入力名）を一度だけ取得し、お名前欄を本名でプリフィル（同意書と同じ出どころに統一）。
   // 取得できなければLINE名のまま。お客様が手で書き換え始めていたら上書きしない。
+  // ★2026-09-18：同じ取得結果で「未記入の予約が無く、記入済みの予約だけ」なら ✅受付済み を出す（フォームを出さない）。
+  //   記入済みのお客様が再送すると サーバは no_reservation で弾く＝「送信できません」が毎回出て何度も試してしまう事案の根治。
   if (st.bookingName === undefined){
     st.bookingName = '';
+    st.qState = 'none';
     sbEdge('list',{}).then(function(r){
       if (r && r.ok && Array.isArray(r.data)){
+        st.qState = questionnaireState(r.data);
         for (var i=0;i<r.data.length;i++){
           if (r.data[i] && r.data[i].customer_name){ st.bookingName = String(r.data[i].customer_name); break; }
         }
       }
+      if (st.qState === 'done'){ qAlreadyDone(); return; }
       var el = document.getElementById('q_name');
       if (el && st.bookingName && (!el.value || el.value === (st.displayName||''))) el.value = st.bookingName;
     }).catch(function(){});
   }
+}
+// 事前問診ページの状態判定（poc/_pure.mjs の questionnaireState と同一）。
+function questionnaireState(list){
+  var arr = Array.isArray(list) ? list : [];
+  var pending = false, done = false;
+  for (var i=0;i<arr.length;i++){
+    var s = String((arr[i] && arr[i].status) || '');
+    if (s === 'pending_questionnaire' || s === 'questionnaire_reminded') pending = true;
+    else if (s === 'questionnaire_done') done = true;
+  }
+  if (pending) return 'pending';
+  if (done) return 'done';
+  return 'none';
+}
+// 送信が弾かれた時の案内文（poc/_pure.mjs の questionnaireErrMsg と同一）。
+function qErrMsg(msg, state){
+  var m = String(msg == null ? '' : msg);
+  if (/no_reservation/.test(m)){
+    if (state === 'done') return 'この問診票はすでに受け付けています。再送は不要です。内容の修正が必要な場合は、公式LINEのトークにお知らせください。';
+    return 'ご予約が確認できませんでした。先にご予約のうえ、ご来店時にスタッフへお声がけください。';
+  }
+  if (/no_uid/.test(m)) return 'お客様の確認ができませんでした。公式LINEのトーク画面から開き直してお試しください。';
+  return '送信できませんでした。お手数ですが時間をおいて再度お試しください。';
+}
+function qAlreadyDone(){
+  var body=document.getElementById('qBody'); if(!body) return;
+  body.innerHTML='<div class="soon-box"><div class="done-icon">✅</div><div class="done-title">問診票は受付済みです</div><div class="done-msg">この問診票はすでに受け付けています。<br>再送は不要です。内容の修正が必要な場合は、公式LINEのトークにお知らせください。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
 }
 function qSubmit(){
   var nameEl=document.getElementById('q_name'), phoneEl=document.getElementById('q_phone'), err=document.getElementById('q_err');
@@ -1248,8 +1280,11 @@ function qSubmit(){
   var btn=document.getElementById('q_submit'); btn.disabled=true; btn.textContent='送信中…';
   sbEdge('questionnaire',{p_phone:phone,p_answers:answers}).then(function(r){
     if(r&&r.ok){ qDone(); return; }
+    var msg=(r&&r.data&&r.data.message)||'';
+    // 記入済み（未記入の予約が無い）で弾かれた＝受付済み画面へ。それ以外は理由に合わせた案内。
+    if(/no_reservation/.test(msg) && st.qState==='done'){ qAlreadyDone(); return; }
     btn.disabled=false; btn.textContent='この内容で送信する';
-    err.style.display='block'; err.textContent='送信できませんでした。お手数ですが時間をおいて再度お試しください。';
+    err.style.display='block'; err.textContent=qErrMsg(msg, st.qState);
   }).catch(function(){ btn.disabled=false; btn.textContent='この内容で送信する'; err.style.display='block'; err.textContent='通信エラーが発生しました。電波の良い場所で再度お試しください。'; });
 }
 function qDone(){
