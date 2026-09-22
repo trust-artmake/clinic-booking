@@ -3381,7 +3381,9 @@ function renderBoard(rows){
         var badge = manual
           ? '<span class="rb-rep">📞電話予約</span>'
           : (it.isNew ? '<span class="rb-new">🆕新規</span>' : '<span class="rb-rep">🔁'+esc(it.visitNo)+'回目</span>');
-        var q = manual
+        /* ★2026-09-22：電話予約でもLINEが紐づいたら問診が動く（未来の予約）。
+           紐づく前だけ「問診は来店時」と出し、紐づいた後は実際の状態を出す。 */
+        var q = (manual && !it.uid)
           ? '<span class="rb-qok">📞 電話予約（問診は来店時）</span>'
           : (it.questionnaireDone ? '<span class="rb-qok">📋問診済み</span>' : '<span class="rb-qng">⏳問診 未記入</span>');
         var out = it.outcome === 'visited' ? ' <span class="rb-visited">✅来店済み</span>'
@@ -3390,7 +3392,7 @@ function renderBoard(rows){
         var acts = '<div class="rc-acts">' +
           /* ★2026-09-22：問診は status が問診待ちの予約にしか付かない（submit_questionnaire）。
              送っても付かない予約には出さない。電話予約も、紐づけ＋問診待ちになれば出る。 */
-          ((it.uid && (it.status === 'pending_questionnaire' || it.status === 'questionnaire_reminded')) ? '<button type="button" class="rbtn" data-act="remind" data-rid="'+rid+'">📨 問診リマインド</button>' : '') +
+          ((it.uid && !it.outcome && (it.status === 'pending_questionnaire' || it.status === 'questionnaire_reminded')) ? '<button type="button" class="rbtn" data-act="remind" data-rid="'+rid+'">📨 問診リマインド</button>' : '') +
           /* ★2026-09-22：同意書が送れるかどうかは「予約の入り口（電話/LINE）」ではなく
              「この予約にLINEが紐づいているか」で決まる（送信先が line_uid のため）。
              電話予約でも紐づけ後は送れるので、判定を it.uid に変えた。 */
@@ -3696,7 +3698,7 @@ function openLinkLine(rid){
     [].forEach.call(list.querySelectorAll('.ll-pick'),function(b){
       b.onclick=function(){
         var uid=b.getAttribute('data-uid'), nm=b.getAttribute('data-name')||uid;
-        if(!window.confirm('この電話予約を「'+nm+'」さんと紐づけますか？\n\n紐づけると、この予約のまま同意書を送れるようになります。\nLINEへの送信はしません。'))return;
+        if(!window.confirm('この電話予約を「'+nm+'」さんと紐づけますか？\n\n紐づけると、この予約のまま同意書を送れるようになります。\nまだ来ていない予約なら問診票も送れます。\nこの操作でLINEへの送信はしません。'))return;
         busy=true; msg.textContent='紐づけています…'; close.disabled=true; search.disabled=true;
         [].forEach.call(list.querySelectorAll('.ll-pick'),function(x){x.disabled=true;});
         sbRpc('link_manual_reservation',{p_resv:rid,p_line_uid:uid})
