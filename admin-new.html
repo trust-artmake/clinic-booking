@@ -3388,7 +3388,9 @@ function renderBoard(rows){
                 : it.outcome === 'no_show' ? ' <span class="rb-noshow">⚠️無断キャンセル</span>' : '';
         var rid = esc(it.reservation_id);
         var acts = '<div class="rc-acts">' +
-          ((it.questionnaireDone || manual) ? '' : '<button type="button" class="rbtn" data-act="remind" data-rid="'+rid+'">📨 問診リマインド</button>') +
+          /* ★2026-09-22：問診は status が問診待ちの予約にしか付かない（submit_questionnaire）。
+             送っても付かない予約には出さない。電話予約も、紐づけ＋問診待ちになれば出る。 */
+          ((it.uid && (it.status === 'pending_questionnaire' || it.status === 'questionnaire_reminded')) ? '<button type="button" class="rbtn" data-act="remind" data-rid="'+rid+'">📨 問診リマインド</button>' : '') +
           /* ★2026-09-22：同意書が送れるかどうかは「予約の入り口（電話/LINE）」ではなく
              「この予約にLINEが紐づいているか」で決まる（送信先が line_uid のため）。
              電話予約でも紐づけ後は送れるので、判定を it.uid に変えた。 */
@@ -3428,6 +3430,7 @@ function mapRow(r){
     menu: (r.menus && r.menus.name) || '—',
     artist: (r.artists && r.artists.name) || '—',
     treatment: r.treatment_type === 'retouch' ? 'リタッチ' : (r.treatment_type === 'new' ? '新規' : ''),
+    status: r.status || '',
     questionnaireDone: r.status === 'questionnaire_done',
     outcome: r.outcome || '',
     visitNo: r._visitNo || 1,
@@ -3660,7 +3663,7 @@ function openLinkLine(rid){
   dlg.setAttribute('role','dialog'); dlg.setAttribute('aria-modal','true'); dlg.setAttribute('aria-label','LINEのお客様と紐づける');
   dlg.style.cssText='background:white;border-radius:12px;max-width:480px;width:100%;max-height:90vh;overflow:auto;padding:20px';
   dlg.innerHTML='<h3 style="margin-top:0">🔗 LINEのお客様と紐づける</h3>'
-    +'<p style="font-size:13px;line-height:1.6;margin:0 0 12px">この電話予約を、公式LINEのお客様と同じ人として結びつけます。結びつけると、この予約のまま<b>同意書</b>が送れるようになり、顧客カルテと来店回数にも正しく乗ります。<b>LINEへの送信はしません。</b>（問診票は電話予約には付きません。来店時に紙でお願いします）</p>'
+    +'<p style="font-size:13px;line-height:1.6;margin:0 0 12px">この電話予約を、公式LINEのお客様と同じ人として結びつけます。結びつけると、この予約のまま<b>同意書</b>が送れるようになり、顧客カルテと来店回数にも正しく乗ります。<b>まだ来ていない予約なら問診票も送れます</b>（施術が済んだ予約は同意書のみ）。<b>この操作でLINEへの送信はしません。</b></p>'
     +'<label style="display:block">お名前・LINEの表示名・電話番号のどれかで探す'
     +'<input class="ll-q" type="search" placeholder="例）かな／釜田／08012345678" style="display:block;width:100%;box-sizing:border-box;padding:12px;font-size:16px;margin:6px 0 10px"></label>'
     +'<button type="button" class="ll-search" style="width:100%;padding:12px;border:0;border-radius:8px;background:#0b6e77;color:white;font-weight:bold;font-size:15px">探す</button>'
@@ -3698,7 +3701,7 @@ function openLinkLine(rid){
         [].forEach.call(list.querySelectorAll('.ll-pick'),function(x){x.disabled=true;});
         sbRpc('link_manual_reservation',{p_resv:rid,p_line_uid:uid})
           .then(function(){busy=false;close.disabled=false;close.textContent='閉じる';
-            list.innerHTML='<p style="font-size:15px">✅ 「'+esc(nm)+'」さんと紐づけました。予約カードから「📝 同意書を送る」が使えます。</p>';
+            list.innerHTML='<p style="font-size:15px">✅ 「'+esc(nm)+'」さんと紐づけました。予約カードから「📝 同意書を送る」が使えます（まだ来ていない予約なら「📨 問診リマインド」も）。</p>';
             msg.textContent='';
             if(typeof CRM_CARDS !== 'undefined') CRM_CARDS={};
             loadBoard();
