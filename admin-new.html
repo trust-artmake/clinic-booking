@@ -2174,8 +2174,95 @@ function loadHomeJudgeWarn(){
   }).catch(function(){});
 }
 
+/* 自動でやっているはずの処理（本番DBの定期実行5本）が止まっていないかをホームに一行出す（2026-09-23）。
+   平常時は無音。止まったとき、そして「確認できなかった」ときだけ出す。見せるのは全体管理者（仁義さん）だけ。
+   通知にLINEを使わない＝8/23「LINE上限で監視も共倒れ」を繰り返さないため。
+   判定の正本は poc/admin_job_health_pure.mjs。ここはその写しで、tests/job_health.test.mjs が
+   両方に同じ入力を与えて結果が一致することを確認する（片側だけ直すと落ちる）。
+   ★この点呼で分かるのは「定期実行そのものが止まったか」まで。SQLは成功したのに中のLINE送信が
+     失敗している場合は分からない（pg_net は投げっぱなし）。そこは別の宿題。 */
+var JOB_HEALTH_UNAVAILABLE = '⚠️ 自動でやっているはずの処理の状態を確認できませんでした。点呼の仕組み自体が働いていない可能性があります。';
+function jobHealthSilenceText(minutes){
+  if(minutes===null||minutes===undefined) return '不明';
+  var m=Number(minutes); if(!isFinite(m)||m<0) return '不明';
+  var v=Math.floor(m);
+  if(v<1) return 'たった今';
+  if(v<60) return v+'分前';
+  if(v<1440) return Math.floor(v/60)+'時間前';
+  return Math.floor(v/1440)+'日前';
+}
+/* 最後の成功からの経過分。サーバーが出した値を優先＝閲覧PCの時計がずれても判定がぶれない。 */
+function jobHealthSilenceMinutes(row, nowMs){
+  if(!row || typeof row!=='object') return null;
+  var given=Number(row.minutes_since_success);
+  if(isFinite(given)) return given;
+  var okAt = row.last_success_at ? Date.parse(row.last_success_at) : NaN;
+  if(!isFinite(okAt)) return null;
+  return (Number(nowMs)-okAt)/60000;
+}
+function judgeJobRow(row, nowMs){
+  if(!row || typeof row!=='object') return 'unknown';
+  if(row.readable===false) return 'unknown';
+  var okAt = row.last_success_at ? Date.parse(row.last_success_at) : NaN;
+  if(!isFinite(okAt)) return 'never';
+  var max = Number(row.expected_max_silence_minutes);
+  var silence = jobHealthSilenceMinutes(row, nowMs);
+  if(isFinite(max) && silence!==null && isFinite(silence) && silence>max) return 'late';
+  if(String(row.last_status||'')==='failed') return 'failing';
+  return 'ok';
+}
+function summarizeJobHealth(rows, nowMs){
+  var list = Array.isArray(rows)?rows:[];
+  var out = { total:list.length, okCount:0, unknownCount:0, bad:[] };
+  for(var i=0;i<list.length;i++){
+    var r=list[i], state=judgeJobRow(r, nowMs);
+    if(state==='ok'){ out.okCount++; continue; }
+    if(state==='unknown'){ out.unknownCount++; continue; }
+    var mins = jobHealthSilenceMinutes(r, nowMs);
+    out.bad.push({ job_name:(r&&r.job_name)?String(r.job_name):'', label:(r&&r.label)?String(r.label):'',
+                   state:state, silenceMinutes:(mins!==null&&isFinite(mins))?Math.floor(mins):null });
+  }
+  return out;
+}
+function jobHealthMessage(summary){
+  if(!summary || typeof summary!=='object') return '';
+  var bad = Array.isArray(summary.bad)?summary.bad:[];
+  if(bad.length>0){
+    var parts = bad.map(function(b){
+      var name=String(b.label||'');
+      if(b.state==='never') return name+'（一度も動いていません）';
+      if(b.state==='failing') return name+'（最後の実行が失敗しています）';
+      return name+'（最後に成功したのは'+jobHealthSilenceText(b.silenceMinutes)+'）';
+    });
+    return '⚠️ 自動でやっているはずの処理が止まっています：'+parts.join(' ／ ')
+         + '。このままだと自動の案内が届きません。';
+  }
+  if(Number(summary.unknownCount)>0) return JOB_HEALTH_UNAVAILABLE;
+  return '';
+}
+function showHomeJobHealthLine(msg){
+  var old=document.getElementById('home-job-health'); if(old) old.remove();
+  if(!msg) return;
+  var host=document.getElementById('home-attn');
+  var card=host ? (host.closest('.home-metric')||host.parentElement) : null;
+  if(!card || !card.parentElement) return;
+  var el=document.createElement('div'); el.id='home-job-health'; el.className='help-hint';
+  el.textContent=msg;   /* 文字は textContent で入れる＝HTMLを組み立てない */
+  card.parentElement.insertAdjacentElement('afterend', el);
+}
+function loadHomeJobHealth(){
+  if(!window.IS_PLATFORM_ADMIN || typeof sbRpc!=='function') return;
+  sbRpc('job_health_status', {}).then(function(rows){
+    showHomeJobHealthLine(jobHealthMessage(summarizeJobHealth(rows, Date.now())));
+  }).catch(function(){
+    /* ★取れなかったことを黙らない。正常と同じ無表示にすると点呼が壊れても気づけない（Codexレビュー P1）。 */
+    showHomeJobHealthLine(JOB_HEALTH_UNAVAILABLE);
+  });
+}
+
 function loadHomeAttention(){
   loadHomeJudgeWarn();
+  loadHomeJobHealth();
   if(typeof sbGet!=='function') return;
   sbGet('customers?select=id,human_status&human_status=not.in.("",done)').then(function(rows){
     var n = Array.isArray(rows) ? rows.filter(function(r){ return humanNeedsAttention(r && r.human_status); }).length : 0;
@@ -3945,6 +4032,9 @@ function initResvStoreBar(){
     // ★platform_admin(全体管理者=仁義)フラグを正式公開＝「お店の設定」の🔗LINE接続タブを全体管理者だけに出すため。
     window.IS_PLATFORM_ADMIN = isPlatformAdmin;
     if (typeof applyManagerNav === 'function') applyManagerNav();   // グループ/小タブの役割出し分け
+    // ★ホームは既に描き終わっているが、描いた時点では上のフラグがまだ決まっていない。
+    //   ここで点呼だけ呼び直さないと、ログイン直後のホームでは自動処理が止まっていても何も出ない。
+    if (isPlatformAdmin && typeof loadHomeJobHealth === 'function') loadHomeJobHealth();
     var bar = document.getElementById('resvStoreBar');
     if (!bar) return;
     bar.style.display = window.IS_MANAGER ? '' : 'none';   // staff：自店固定（RLSが自店だけを返す）
