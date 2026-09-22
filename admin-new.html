@@ -3389,7 +3389,13 @@ function renderBoard(rows){
         var rid = esc(it.reservation_id);
         var acts = '<div class="rc-acts">' +
           ((it.questionnaireDone || manual) ? '' : '<button type="button" class="rbtn" data-act="remind" data-rid="'+rid+'">📨 問診リマインド</button>') +
-          (manual ? '' : '<button type="button" class="rbtn" data-act="consent" data-rid="'+rid+'">📝 同意書を送る</button>') +
+          /* ★2026-09-22：同意書が送れるかどうかは「予約の入り口（電話/LINE）」ではなく
+             「この予約にLINEが紐づいているか」で決まる（送信先が line_uid のため）。
+             電話予約でも紐づけ後は送れるので、判定を it.uid に変えた。 */
+          (it.uid ? '<button type="button" class="rbtn" data-act="consent" data-rid="'+rid+'">📝 同意書を送る</button>' : '') +
+          /* 電話予約は line_uid が空のまま作られる＝同意書・カルテ・来店回数が動かない。
+             あとからLINEのお客様に紐づける入口（電話予約で、まだ紐づいていない時だけ出す）。 */
+          ((manual && !it.uid) ? '<button type="button" class="rbtn" data-act="linkline" data-rid="'+rid+'">🔗 LINEのお客様と紐づける</button>' : '') +
           '<button type="button" class="rbtn" data-act="visited" data-rid="'+rid+'">✅ 来店済み</button>' +
           '<button type="button" class="rbtn" data-act="noshow" data-rid="'+rid+'">⚠️ 無断</button>' +
           /* ★2026-08-28：日時変更。キャンセル→取り直しが不要になる（設計書 docs/reschedule-design.md）。
@@ -3622,10 +3628,103 @@ function openCourseChange(rid){
   }).catch(function(){body.textContent='コース変更を読み込めませんでした。画面を再読み込みし、改善しない場合は管理者へ連絡してください。';});
 }
 
+/* ★2026-09-22：電話予約（source='manual'）をあとからLINEのお客様に紐づける。
+   電話予約は line_uid が空のまま作られるため、同意書・問診票・顧客カルテ・来店回数が動かない。
+   ここで紐づけると、そのままの予約で同意書が送れるようになる（キャンセル→取り直しは不要）。
+   候補は 電話の完全一致 → 本名 → LINE表示名 の順で出すが、選ぶのは必ず人。LINE送信はしない。
+   純粋ロジック（並べ替え・エラー文）は poc/admin_link_line_pure.mjs に写してテストしている。 */
+function linkLineErrMsg(err){
+  var raw=String(err&&err.message||err||'');
+  var codes={already_linked:'この予約にはすでにLINEのお客様が紐づいています。',
+    not_manual_reservation:'LINEから入った予約には紐づけできません（電話予約だけが対象です）。',
+    cancelled_reservation:'キャンセル済みの予約には紐づけできません。',
+    customer_not_found:'この店舗のLINEのお客様として見つかりませんでした。',
+    forbidden_store:'この店舗を操作する権限がありません。',
+    reservation_not_found:'予約が見つかりませんでした。画面を開き直してお試しください。'};
+  for(var k in codes){if(raw.indexOf(k)>=0)return codes[k];}
+  return '紐づけできませんでした。お手数ですが時間をおいて再度お試しください。';
+}
+function linkLineRank(rows){
+  if(!Array.isArray(rows))return [];
+  var ord={phone:0,name:1,display:2};
+  var kind=function(r){var k=String(r&&r.match_kind||'display');return ord.hasOwnProperty(k)?ord[k]:2;};
+  var last=function(r){var t=r&&r.last_visit_at?Date.parse(r.last_visit_at):NaN;return isFinite(t)?t:-Infinity;};
+  return rows.slice().sort(function(a,b){
+    return kind(a)-kind(b) || last(b)-last(a) || (Number(b&&b.visit_count)||0)-(Number(a&&a.visit_count)||0);});
+}
+function openLinkLine(rid){
+  var old=document.getElementById('linkLineModal'); if(old) old.remove();
+  var ov=document.createElement('div'); ov.id='linkLineModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,26,31,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  var dlg=document.createElement('div');
+  dlg.setAttribute('role','dialog'); dlg.setAttribute('aria-modal','true'); dlg.setAttribute('aria-label','LINEのお客様と紐づける');
+  dlg.style.cssText='background:white;border-radius:12px;max-width:480px;width:100%;max-height:90vh;overflow:auto;padding:20px';
+  dlg.innerHTML='<h3 style="margin-top:0">🔗 LINEのお客様と紐づける</h3>'
+    +'<p style="font-size:13px;line-height:1.6;margin:0 0 12px">この電話予約を、公式LINEのお客様と同じ人として結びつけます。結びつけると、この予約のまま<b>同意書</b>が送れるようになり、顧客カルテと来店回数にも正しく乗ります。<b>LINEへの送信はしません。</b>（問診票は電話予約には付きません。来店時に紙でお願いします）</p>'
+    +'<label style="display:block">お名前・LINEの表示名・電話番号のどれかで探す'
+    +'<input class="ll-q" type="search" placeholder="例）かな／釜田／08012345678" style="display:block;width:100%;box-sizing:border-box;padding:12px;font-size:16px;margin:6px 0 10px"></label>'
+    +'<button type="button" class="ll-search" style="width:100%;padding:12px;border:0;border-radius:8px;background:#0b6e77;color:white;font-weight:bold;font-size:15px">探す</button>'
+    +'<div class="ll-list" style="margin-top:14px">読み込み中…</div>'
+    +'<p class="ll-msg" role="status" style="color:#a3231a"></p>'
+    +'<button type="button" class="ll-close" style="margin-top:12px;padding:10px;width:100%">閉じる</button>';
+  ov.appendChild(dlg); document.body.appendChild(ov);
+  var busy=false, q=dlg.querySelector('.ll-q'), search=dlg.querySelector('.ll-search');
+  var list=dlg.querySelector('.ll-list'), msg=dlg.querySelector('.ll-msg'), close=dlg.querySelector('.ll-close');
+  close.onclick=function(){if(!busy)ov.remove();};
+  ov.onclick=function(e){if(e.target===ov&&!busy)ov.remove();};
+  dlg.onkeydown=function(e){if(e.key==='Escape'&&!busy)ov.remove();};
+
+  function draw(rows){
+    var r=linkLineRank(rows);
+    if(!r.length){list.innerHTML='<p style="font-size:14px">見つかりませんでした。LINEの表示名（例：かな）でも探してみてください。</p>';return;}
+    var label={phone:'📞 電話が一致',name:'🧑 お名前が一致',display:'💬 LINEの表示名'};
+    list.innerHTML=r.map(function(c){
+      var sub=[];
+      if(c.customer_name) sub.push('本名：'+esc(c.customer_name));
+      if(c.phone) sub.push('電話：'+esc(c.phone));
+      if(c.last_visit_at) sub.push('最終来店：'+esc(String(c.last_visit_at).slice(0,10)));
+      sub.push('来店'+esc(String(Number(c.visit_count)||0))+'回');
+      return '<div style="border:1px solid #d7e2e4;border-radius:8px;padding:10px;margin-bottom:8px">'
+        +'<div style="font-weight:bold">'+esc(c.line_display_name||'（表示名なし）')+' <span style="font-size:12px;font-weight:normal;color:#5a6b70">'+esc(label[c.match_kind]||'')+'</span></div>'
+        +'<div style="font-size:13px;color:#5a6b70;margin:4px 0 8px">'+sub.join(' ／ ')+'</div>'
+        +'<button type="button" class="ll-pick" data-uid="'+esc(c.line_uid)+'" data-name="'+esc(c.line_display_name||'')+'" style="width:100%;padding:10px;border:0;border-radius:6px;background:#0b6e77;color:white;font-size:15px">この方と紐づける</button>'
+        +'</div>';
+    }).join('');
+    [].forEach.call(list.querySelectorAll('.ll-pick'),function(b){
+      b.onclick=function(){
+        var uid=b.getAttribute('data-uid'), nm=b.getAttribute('data-name')||uid;
+        if(!window.confirm('この電話予約を「'+nm+'」さんと紐づけますか？\n\n紐づけると、この予約のまま同意書を送れるようになります。\nLINEへの送信はしません。'))return;
+        busy=true; msg.textContent='紐づけています…'; close.disabled=true; search.disabled=true;
+        [].forEach.call(list.querySelectorAll('.ll-pick'),function(x){x.disabled=true;});
+        sbRpc('link_manual_reservation',{p_resv:rid,p_line_uid:uid})
+          .then(function(){busy=false;close.disabled=false;close.textContent='閉じる';
+            list.innerHTML='<p style="font-size:15px">✅ 「'+esc(nm)+'」さんと紐づけました。予約カードから「📝 同意書を送る」が使えます。</p>';
+            msg.textContent='';
+            if(typeof CRM_CARDS !== 'undefined') CRM_CARDS={};
+            loadBoard();
+          })
+          .catch(function(err){busy=false;close.disabled=false;search.disabled=false;
+            [].forEach.call(list.querySelectorAll('.ll-pick'),function(x){x.disabled=false;});
+            msg.textContent=linkLineErrMsg(err);});
+      };
+    });
+  }
+  function run(){
+    msg.textContent=''; list.textContent='探しています…';
+    sbRpc('search_line_customers',{p_resv:rid,p_q:(q.value||'').trim()||null})
+      .then(function(rows){if(ov.isConnected)draw(rows);})
+      .catch(function(err){list.textContent=''; msg.textContent=linkLineErrMsg(err);});
+  }
+  search.onclick=run;
+  q.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();run();}};
+  run();   /* 開いた時点で、予約の電話番号での一致と最近のお客様を出す */
+}
+
 function handleBoardAction(act, rid){
   if (!rid) return;
   if (act === 'course'){ openCourseChange(rid); return; }
   if (act === 'reschedule'){ openReschedule(rid); return; }   /* 確認は専用フォーム内で行う */
+  if (act === 'linkline'){ openLinkLine(rid); return; }       /* 確認は候補を選んだ後に専用フォーム内で行う */
   var plan = {
     remind:  { q:'このお客様に「問診リマインド」をLINEで送信しますか？',
                run:function(){ return pushQuestionnaireReminder(rid)
