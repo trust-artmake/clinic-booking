@@ -28,6 +28,14 @@
        ・frame-ancestors / report-uri は meta では効かない → クリックジャッキングは下のJSフレームバスティングで代替 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://static.line-scdn.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://stgarheuldubyrzdqzaq.supabase.co https://profile.line-scdn.net; connect-src 'self' https://stgarheuldubyrzdqzaq.supabase.co https://*.line.me https://*.line-scdn.net; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
+  <!-- ★LINE でリンクを送ったときの紹介カード用の説明文（2026-09-23）。
+       これが無いと LINE は本文の文字を先頭から拾い、「読み込み中… ご予約を承りました…」のように
+       予約完了画面の文言（非表示）まで紹介カードに出ていた。LINE の読み取りは ?store= を見ないので、
+       店名は入れない（店に依存しない文にする）。公開されている画像が無いので og:image は付けない。 -->
+  <meta name="description" content="アートメイクのご予約ページです。空き状況の確認とご予約ができます。">
+  <meta property="og:title" content="アートメイクのご予約">
+  <meta property="og:description" content="空き状況の確認とご予約ができます。">
+  <meta property="og:type" content="website">
   <style id="fbGuard">body{display:none !important}</style>
   <script>
   // クリックジャッキング対策（GitHub PagesはX-Frame-Options等のHTTPヘッダ不可のためJSで代替）。
