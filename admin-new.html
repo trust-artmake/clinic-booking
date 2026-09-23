@@ -2267,6 +2267,53 @@ function loadHomeJobHealth(){
     /* ★取れなかったことを黙らない。正常と同じ無表示にすると点呼が壊れても気づけない（Codexレビュー P1）。 */
     showHomeJobHealthLine(JOB_HEALTH_UNAVAILABLE);
   });
+  loadHomeSendFailures();
+}
+
+/* LINE送信の失敗（直近24時間）をホームに一行出す（2026-09-23・migration 20260923222000_send_failures.sql）。
+   点呼で分かるのは「定期実行が止まったか」まで。LINEに断られた（月の上限・鍵の失効など）ことはここで知らせる。
+   平常時（0件）は無音。全体管理者（仁義さん）だけ。通知にLINEを使わない（LINEが止まると一緒に止まるため）。
+   出すのはLINEの失敗と確かなものだけ（時間切れなど「その他」は誤報のもとなので出さない）。
+   判定の正本は poc/admin_job_health_pure.mjs。ここはその写しで、tests/send_failures.test.mjs が一致を確かめる。 */
+var SEND_FAILURE_UNAVAILABLE = '⚠️ LINE送信の結果を確認できませんでした。送信の失敗に気づく仕組みが働いていない可能性があります。';
+function sendFailureReason(category){
+  var map={ monthly_limit:'今月のLINE送信の上限に達しています', rate_limit:'短い時間に送りすぎてLINEに止められました',
+            auth:'LINEの鍵（トークン）が使えません', bad_request:'送り先か内容をLINEが受け付けませんでした',
+            server:'送り先の障害', network:'通信できませんでした（時間切れなど）',
+            notify_failed:'スタッフへの通知（監視など）がLINEで送れませんでした', other:'理由不明' };
+  var k=String(category||'');
+  return Object.prototype.hasOwnProperty.call(map,k) ? map[k] : '理由不明';
+}
+function sendFailureMessage(row){
+  if(!row || typeof row!=='object') return '';
+  if(row.readable===false) return SEND_FAILURE_UNAVAILABLE;
+  var cnt=function(v){ var n=Number(v); return (isFinite(n)&&n>0)?Math.floor(n):0; };
+  var lineDb=cnt(row.line_failures_24h), queue=cnt(row.queue_line_24h);
+  if(lineDb+queue>0){
+    var reason = lineDb>0 ? sendFailureReason(row.top_category) : '予約の通知などが送れませんでした';
+    return '⚠️ 直近24時間で、LINEの送信が'+(lineDb+queue)+'件失敗しています（主な理由：'+reason
+         +'）。お客様やスタッフに届いていない可能性があります。';
+  }
+  return '';
+}
+function showHomeSendFailureLine(msg){
+  var old=document.getElementById('home-send-fail'); if(old) old.remove();
+  if(!msg) return;
+  var host=document.getElementById('home-attn');
+  var card=host ? (host.closest('.home-metric')||host.parentElement) : null;
+  if(!card || !card.parentElement) return;
+  var el=document.createElement('div'); el.id='home-send-fail'; el.className='help-hint';
+  el.textContent=msg;   /* 文字は textContent で入れる＝HTMLを組み立てない */
+  card.parentElement.insertAdjacentElement('afterend', el);
+}
+function loadHomeSendFailures(){
+  if(!window.IS_PLATFORM_ADMIN || typeof sbRpc!=='function') return;
+  sbRpc('send_failure_status', {}).then(function(rows){
+    showHomeSendFailureLine(sendFailureMessage(Array.isArray(rows)?rows[0]:rows));
+  }).catch(function(){
+    /* 取れなかったことを黙らない（点呼と同じ考え方）。 */
+    showHomeSendFailureLine(SEND_FAILURE_UNAVAILABLE);
+  });
 }
 
 function loadHomeAttention(){
