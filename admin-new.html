@@ -8439,7 +8439,7 @@ function stpBuildQuickReply(st){
   // 押した後の返事（record のときだけ）
   if(q.mode==='record'){
     var rf=document.createElement('div'); rf.className='stp-field';
-    var rl=document.createElement('label'); rl.textContent='押した後の返事（500字まで・本文と同じタグ {{予約URL}} {{店名}} などが使えます・空なら「ありがとうございます😊 今後のご案内の参考にさせていただきます」）'; rf.appendChild(rl);
+    var rl=document.createElement('label'); rl.textContent='押した後の返事（500字まで・本文と同じタグが使えます。{{予約URL}} はこの店の予約ページ（LINE予約入口）に置き換わります・空なら「ありがとうございます😊 今後のご案内の参考にさせていただきます」）'; rf.appendChild(rl);
     var rt=document.createElement('textarea'); rt.value=q.reply||'';
     rt.placeholder='例：ありがとうございます😊 いま空いている日時はこちらからご確認いただけます👇 {{予約URL}}';
     rt.oninput=function(){ q.reply=rt.value; };
@@ -8530,6 +8530,11 @@ function stpBuildEditor(){
        （終了17:00・施術2時間30分なら、実際に予約できる最後は14:30）。
        さらに置換元は「テナントの先頭店舗」固定のため、多店舗では別の店の時刻が入る危険もある。
        既に本文へ書かれている分は互換のため置換され続ける（壊さない）。 */
+    +'<br>🔗 <code>{{予約URL}}</code> は、この店のLINE予約入口（LINEの中で開く予約ページ）に置き換わります。店の設定に予約URLがあれば、そちらが優先です。'
+    +'設定画面の「公開ページ」で予約入口に ⚠️（LIFF未設定）が出ている店では、LINE予約入口の代わりに直接の予約ページのURLになります。'
+    /* ★2026-09-23：以前は店の設定（liff_reservation_url）が無いと {{予約URL}} が黙って空になっていた
+       （小倉・久留米とも未設定）。render_step_content に「LINE予約入口 → 直接の予約ページ」の順の代わりを入れて直した
+       （migration 20260923210000）。 */
     +'<br>💡 予約できる最終時刻は、メニューの施術時間によって変わります。文面に時刻を書かず、'
     +'<code>{{予約URL}}</code> で予約ページを見てもらうのが確実です。';
   if(d.trigger_type==='reservation'){
