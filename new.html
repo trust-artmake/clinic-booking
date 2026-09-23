@@ -441,7 +441,9 @@ function getIdemKey(){
 }
 function newIdemKey(){ st.idemKey = null; }
 var TODAY = (function(){ var d=new Date(); d.setHours(0,0,0,0); return d; })();
-var INIT_Y = TODAY.getFullYear(), INIT_M = TODAY.getMonth()+1;
+// 予約可能日の下限（今日から3日後から）。久留米・薬院と同じ締切（2026-09-24）。スタッフの手入力は対象外。
+var MIN_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+3); return d; })();
+var INIT_Y = MIN_DATE.getFullYear(), INIT_M = MIN_DATE.getMonth()+1;
 // 予約可能日の上限（今日から60日先まで）。
 var MAX_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+60); return d; })();
 
@@ -639,9 +641,9 @@ function isClosedDay(d){
   if(c.dates.has(ymd(d))) return true;
   return false;
 }
-// 予約可能な「候補日」か（今日〜60日先・定休日除外）。空き有無は別途 busy_ranges で判定。
+// 予約可能な「候補日」か（3日後〜60日先・定休日除外）。空き有無は別途 busy_ranges で判定。
 function isBookableDay(d){
-  if(d<TODAY) return false;
+  if(d<MIN_DATE) return false;
   if(d>MAX_DATE) return false;
   if(isClosedDay(d)) return false;
   return true;
@@ -678,6 +680,7 @@ function s3(){
     h+='<div class="'+cls+'"'+click+'>'+d+'</div>';
   }
   h+='</div>';
+  h+='<div class="c-note" style="font-size:12px;color:#6b7280;margin-top:8px">※ご予約は3日後以降の日程から承っております。お急ぎの場合はLINEのトークでご相談ください。</div>';
   if(st.adErr){
     h+='<div class="msg-err">空き情報を取得できませんでした。電波の良い場所で、もう一度お試しください。<div style="margin-top:10px"><button class="btn-retry" onclick="retryAD()">再試行</button></div></div>';
   }else if(st.availDates===null){
