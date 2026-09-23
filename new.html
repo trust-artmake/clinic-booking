@@ -434,8 +434,8 @@ function getIdemKey(){
 function newIdemKey(){ st.idemKey = null; }
 var TODAY = (function(){ var d=new Date(); d.setHours(0,0,0,0); return d; })();
 var INIT_Y = TODAY.getFullYear(), INIT_M = TODAY.getMonth()+1;
-// 予約可能日の上限（今日から約45日先まで）。
-var MAX_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+45); return d; })();
+// 予約可能日の上限（今日から60日先まで）。
+var MAX_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+60); return d; })();
 
 // ===== ユーティリティ =====
 function p2(n){ return n<10?'0'+n:''+n; }
@@ -631,7 +631,7 @@ function isClosedDay(d){
   if(c.dates.has(ymd(d))) return true;
   return false;
 }
-// 予約可能な「候補日」か（今日〜45日先・定休日除外）。空き有無は別途 busy_ranges で判定。
+// 予約可能な「候補日」か（今日〜60日先・定休日除外）。空き有無は別途 busy_ranges で判定。
 function isBookableDay(d){
   if(d<TODAY) return false;
   if(d>MAX_DATE) return false;
@@ -645,7 +645,7 @@ function s3(){
   var ms=p2(st.calMonth), dcnt=new Date(st.calYear,st.calMonth,0).getDate();
   var first=new Date(st.calYear,st.calMonth-1,1).getDay();
   var canPrev=!(st.calYear===INIT_Y&&st.calMonth===INIT_M);
-  // 翌月以降に候補日が無ければ「次へ」を止める（45日上限）。
+  // 翌月以降に候補日が無ければ「次へ」を止める（60日上限）。
   var nextFirst=new Date(st.calYear,st.calMonth,1);
   var canNext=(nextFirst<=MAX_DATE);
   var h='<div class="s-title">日時を選んでください</div>';
