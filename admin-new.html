@@ -539,6 +539,14 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .stp-thumb img{width:100%;height:100%;object-fit:cover}
 .stp-thumb button{position:absolute;top:1px;right:1px;width:18px;height:18px;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:1;cursor:pointer;padding:0}
 .stp-msgactions{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.stp-qr{margin-top:10px;border:1px dashed #c7d2fe;background:#f8faff;border-radius:10px;padding:10px 12px}
+.stp-qr textarea{width:100%;box-sizing:border-box;min-height:64px;padding:8px;border:1px solid #d1d5db;border-radius:8px;font-size:13px}
+.stp-qr-preview{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.stp-qr-chip{border:1px solid #06c755;color:#06c755;background:#fff;border-radius:999px;padding:3px 10px;font-size:12px}
+.stp-qr-chip.ng{border-color:#dc2626;color:#dc2626}
+.stp-out{margin:0 4px 12px;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;background:#fff;font-size:12.5px;line-height:1.8;color:#374151}
+.stp-out h4{margin:0 0 4px;font-size:13px}
+.stp-out .muted{color:#6b7280;font-size:11.5px}
 .stp-msg-line{font-size:12px;min-height:16px;margin:4px 4px 0}
 .stp-msg-line.ok{color:#15803d}
 .stp-msg-line.ng{color:#c2410c}
@@ -1089,6 +1097,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <button type="button" class="stp-btn ghost" onclick="stpReload()">🔄 更新</button>
   </div>
   <div class="stp-msg-line" id="stpTopMsg"></div>
+  <div class="stp-out" id="stpOutreach" style="display:none"></div>
   <div id="stpList"><div class="placeholder">読み込み中…</div></div>
 </div>
 
@@ -8186,6 +8195,7 @@ function stpReload(){
   var list=document.getElementById('stpList');
   if(list) list.innerHTML='<div class="placeholder">読み込み中…</div>';
   var loadTenant = TENANT_ID;
+  stpLoadOutreach();
   return stpCall('scenario_list', {}).then(function(d){
     if(loadTenant !== TENANT_ID) return; // 店切替前の古い一覧応答は描画しない
     if(!d.ok){ stpTopMsg(stpReason(d.reason), false); if(list) list.innerHTML=''; return; }
@@ -8242,7 +8252,9 @@ function stpStartEdit(sid){
     is_active:!!s.is_active, send_hour_from:(s.send_hour_from==null?9:s.send_hour_from), send_hour_to:(s.send_hour_to==null?21:s.send_hour_to),
     steps: stpMessagesOf(sid).map(function(m){
       var min=Math.max(0, Number(m.delay_minutes)||0);
-      return { days:Math.floor(min/1440), hours:Math.floor((min%1440)/60), content:m.content||'', image_urls:Array.isArray(m.image_urls)?m.image_urls.slice():[] };
+      return { days:Math.floor(min/1440), hours:Math.floor((min%1440)/60), content:m.content||'', image_urls:Array.isArray(m.image_urls)?m.image_urls.slice():[],
+               // ★1タップ質問（2026-09-23）：読み込み→保存で持ち回る。ここで落とすと、保存し直しただけでボタンが消える。
+               quick_reply:stpCloneQuickReply(m.quick_reply) };
     })
   };
 }
@@ -8324,6 +8336,7 @@ function stpBuildStepCard(st, i){
     t.appendChild(x); thumbs.appendChild(t);
   });
   card.appendChild(thumbs);
+  card.appendChild(stpBuildQuickReply(st));
   var acts=document.createElement('div'); acts.className='stp-msgactions';
   var line=document.createElement('div'); line.className='stp-msg-line'; line.style.flexBasis='100%';
   var fi=document.createElement('input'); fi.type='file'; fi.accept='image/*'; fi.style.display='none';
@@ -8335,6 +8348,146 @@ function stpBuildStepCard(st, i){
   bDel.onclick=function(){ STP.draft.steps.splice(i,1); stpRenderList(); };
   acts.appendChild(bDel); acts.appendChild(line);
   card.appendChild(acts); return card;
+}
+/* ───────── 1タップ質問（2026-09-23）─────────
+   ステップ配信の1通に「1タップで答えられるボタン」を付ける。送る通数は増えない（ボタンは吹き出しの付属品）。
+   ・答えを記録（record）…押された答えを記録し、下の「押した後の返事」を返す（AIは使わない）。
+   ・AIに質問（ask）………押すと、その文言がお客様の発言としてAIに届く（AIがいつも通り答える＝会話が始まる）。
+   形の検査は manage-steps（normalizeQuickReply）と送信時のDB（build_step_quick_reply）で二重に行う。ここは入力の手助けだけ。
+   値はすべて textContent / value で入れる（innerHTML に連結しない）。 */
+var STP_QR_DEFAULT_RECORD=['平日','土曜','日曜','まだ決めていない'];
+var STP_QR_DEFAULT_ASK=['痛みが心配です','料金を知りたいです','仕上がりが心配です'];
+var STP_QR_KEYS=[['pref_day','ご希望の曜日'],['pref_time','ご希望の時間帯'],['concern','いちばん気になること'],['timing','ご検討の時期'],['custom','その他（名前を英字で）']];
+function stpCloneQuickReply(q){
+  if(!q || typeof q!=='object' || !Array.isArray(q.items)) return null;
+  return { key:String(q.key||''), mode:(q.mode==='ask'?'ask':'record'), items:q.items.map(function(x){ return String(x); }), reply:String(q.reply||'') };
+}
+var STP_QR_TRIM=/^[ \t\n\r\u3000]+|[ \t\n\r\u3000]+$/g;   // manage-steps QR_TRIM・SQL btrim と同じ
+function stpQuickReplyProblem(q){
+  if(!q) return '';
+  if(!/^[a-z][a-z0-9_]{0,31}$/.test(String(q.key||''))) return '名前は英小文字で始まる英小文字・数字・_ の32字までにしてください';
+  var items=(q.items||[]).filter(function(x){ return String(x).replace(STP_QR_TRIM,'').length>0; });
+  if(!items.length) return 'ボタンの文言を1つ以上入れてください';
+  for(var i=0;i<items.length;i++){
+    var it=String(items[i]).replace(STP_QR_TRIM,'');
+    // ★サーバー（normalizeQuickReply）が黙って捨てるものは、ここで先に止める（保存できたのにボタンが消える、を防ぐ）
+    if(/[\u0000-\u001f\u007f]/.test(it)) return '「'+it.replace(/[\u0000-\u001f\u007f]/g,'□')+'」に見えない文字（タブ等）が入っています。打ち直してください';
+    // LINE は絵文字などを2文字と数える（UTF-16 単位）。String.length と同じ数え方
+    if(it.length>20) return '「'+it+'」が長すぎます（20字まで。絵文字は2字と数えます）';
+  }
+  if(items.length>13) return 'ボタンは13個までです';
+  return '';
+}
+function stpQrKeyLabel(k){
+  for(var i=0;i<STP_QR_KEYS.length;i++){ if(STP_QR_KEYS[i][0]===k) return STP_QR_KEYS[i][1]; }
+  return k;
+}
+function stpBuildQuickReply(st){
+  var box=document.createElement('div'); box.className='stp-qr';
+  var head=document.createElement('div'); head.className='stp-row';
+  var t=document.createElement('span'); t.style.cssText='font-size:12px;font-weight:700;color:#3730a3';
+  t.textContent='🔘 1タップ質問（任意）'; head.appendChild(t);
+  var tg=document.createElement('button'); tg.className='stp-btn ghost sm';
+  tg.textContent=st.quick_reply?'ボタンを外す':'＋ ボタンを付ける';
+  tg.onclick=function(){
+    st.quick_reply = st.quick_reply ? null : { key:'pref_day', mode:'record', items:STP_QR_DEFAULT_RECORD.slice(), reply:'' };
+    stpRenderList();
+  };
+  head.appendChild(tg); box.appendChild(head);
+  var q=st.quick_reply;
+  if(!q){
+    var hint=document.createElement('div'); hint.className='muted'; hint.style.cssText='font-size:11.5px;color:#6b7280;margin-top:4px';
+    hint.textContent='本文の下にボタンを並べ、お客様に1タップで答えてもらえます。黙っている方の希望を知る入口になります。';
+    box.appendChild(hint); return box;
+  }
+  // 聞くこと
+  var known=STP_QR_KEYS.some(function(x){ return x[0]===q.key && x[0]!=='custom'; });
+  box.appendChild(stpFieldSelect('聞くこと（集計の名前）', STP_QR_KEYS, known?q.key:'custom', function(v){
+    if(v==='custom'){ if(known) q.key=''; } else { q.key=v; }
+    stpRenderList();
+  }));
+  if(!known){
+    var kf=stpFieldText('名前（英小文字で始まる英小文字・数字・_ の32字まで。例 menu_interest）', q.key, function(v){ q.key=String(v||'').trim(); });
+    box.appendChild(kf);
+  }
+  // 押したら
+  box.appendChild(stpFieldSelect('押したら', [['record','答えを記録して、決まった返事を返す（AIは使わない）'],['ask','その文言を、AIへの質問として送る（会話が始まる）']], q.mode, function(v){
+    // AI質問型は、押した文言だけがお客様の発言としてAIに届く（前後の文脈は届かない）。
+    // 既定の「平日／土曜…」のまま切り替えると「平日」だけがAIに届くので、質問として意味の通る文言に入れ替える。
+    var sameAs=function(a,b){ return a.length===b.length && a.every(function(x,i){ return x===b[i]; }); };
+    if(v==='ask' && sameAs(q.items||[], STP_QR_DEFAULT_RECORD)){ q.items=STP_QR_DEFAULT_ASK.slice(); q.key='concern'; }
+    if(v==='record' && sameAs(q.items||[], STP_QR_DEFAULT_ASK)){ q.items=STP_QR_DEFAULT_RECORD.slice(); q.key='pref_day'; }
+    q.mode=v; stpRenderList();
+  }));
+  // ボタンの文言
+  var f=document.createElement('div'); f.className='stp-field';
+  var l=document.createElement('label'); l.textContent='ボタンの文言（1行に1つ・各20字以内〈絵文字は2字〉・4つまでがおすすめ・最大13）'; f.appendChild(l);
+  var ta=document.createElement('textarea'); ta.value=(q.items||[]).join('\n');
+  var pv=document.createElement('div'); pv.className='stp-qr-preview';
+  function drawPreview(){
+    while(pv.firstChild) pv.removeChild(pv.firstChild);
+    (q.items||[]).forEach(function(x){
+      var c=document.createElement('span'); c.className='stp-qr-chip'+(x.length>20?' ng':'');
+      c.textContent=x; pv.appendChild(c);
+    });
+  }
+  ta.oninput=function(){
+    q.items=ta.value.split('\n').map(function(x){ return x.replace(STP_QR_TRIM,''); }).filter(function(x){ return x.length>0; }).slice(0,13);
+    drawPreview();
+  };
+  f.appendChild(ta); f.appendChild(pv); drawPreview(); box.appendChild(f);
+  // 押した後の返事（record のときだけ）
+  if(q.mode==='record'){
+    var rf=document.createElement('div'); rf.className='stp-field';
+    var rl=document.createElement('label'); rl.textContent='押した後の返事（500字まで・本文と同じタグ {{予約URL}} {{店名}} などが使えます・空なら「ありがとうございます😊 今後のご案内の参考にさせていただきます」）'; rf.appendChild(rl);
+    var rt=document.createElement('textarea'); rt.value=q.reply||'';
+    rt.placeholder='例：ありがとうございます😊 いま空いている日時はこちらからご確認いただけます👇 {{予約URL}}';
+    rt.oninput=function(){ q.reply=rt.value; };
+    rf.appendChild(rt); box.appendChild(rf);
+  }
+  var note=document.createElement('div'); note.style.cssText='font-size:11.5px;color:#6b7280;margin-top:4px;line-height:1.7';
+  note.textContent='💡 質問文は本文の最後に書いてください（ボタンは本文の下に並びます）。まだ無い機能（「空きが出たらお知らせします」など）は返事に書かないでください。';
+  box.appendChild(note);
+  return box;
+}
+/* 1タップ質問の回答とブロックの数（直近30日）。数字だけ。読めなければ枠ごと隠す。 */
+function stpLoadOutreach(){
+  var box=document.getElementById('stpOutreach'); if(!box) return;
+  var loadTenant=TENANT_ID;
+  if(!loadTenant){ box.style.display='none'; return; }
+  sbRpc('outreach_stats', { p_tenant:loadTenant, p_days:30 }).then(function(d){
+    if(loadTenant!==TENANT_ID) return;
+    while(box.firstChild) box.removeChild(box.firstChild);
+    if(!d || typeof d!=='object'){ box.style.display='none'; return; }
+    var h=document.createElement('h4'); h.textContent='📊 1タップ質問とブロック（直近30日）'; box.appendChild(h);
+    var f=Number(d.follows)||0, u=Number(d.unfollows)||0;
+    var l1=document.createElement('div');
+    l1.textContent='友だち追加 '+f+'件 ／ ブロック '+u+'件 ／ いまブロック中 '+(Number(d.blockedNow)||0)+'人';
+    box.appendChild(l1);
+    var ans=(d.answers&&typeof d.answers==='object')?d.answers:{};
+    var keys=Object.keys(ans);
+    var l2=document.createElement('div');
+    if(!keys.length){ l2.textContent='1タップ質問の回答：まだありません'; }
+    else{
+      l2.textContent='1タップ質問の回答（'+(Number(d.answeredPeople)||0)+'人）：'+keys.map(function(k){
+        var dist=ans[k]||{}; return stpQrKeyLabel(k)+'＝'+Object.keys(dist).map(function(a){ return a+' '+dist[a]; }).join('・');
+      }).join(' ／ ');
+    }
+    box.appendChild(l2);
+    // ★「AIに質問」型のボタンは、押すと普通の発言として届くため、手で同じ文を打った人と区別できない（目安）
+    var l3=document.createElement('div'); l3.textContent='「AIに質問」ボタンの文言と同じ発言をした人：'+(Number(d.askLabelMatches)||0)+'人（手で打った人も含む目安）'; box.appendChild(l3);
+    var by=Array.isArray(d.unfollowByStep)?d.unfollowByStep:[];
+    if(by.length){
+      var l4=document.createElement('div');
+      l4.textContent='ブロック時点で届いていた通：'+by.slice(0,5).map(function(x){ return String(x.scenario||'')+' '+(x.step==null?'?':x.step)+'通目まで '+(Number(x.n)||0)+'人'; }).join(' ／ ');
+      box.appendChild(l4);
+    }
+    var since=d.since?String(d.since).slice(0,10):'';
+    var m=document.createElement('div'); m.className='muted';
+    m.textContent='※ブロック・友だち追加の記録は'+(since?(' '+since+' から'):'、まだ1件もありません（記録を始めた日から数えます）')+'。友だち追加の件数には、ブロックを解除して戻った人も含みます。';
+    box.appendChild(m);
+    box.style.display='block';
+  }).catch(function(){ box.style.display='none'; });
 }
 function stpBuildEnroll(d){
   var box=document.createElement('div'); box.className='stp-enroll';
@@ -8386,7 +8539,7 @@ function stpBuildEditor(){
   d.steps.forEach(function(st,i){ w.appendChild(stpBuildStepCard(st,i)); });
   var row=document.createElement('div'); row.className='stp-row'; row.style.margin='10px 0';
   var bAdd=document.createElement('button'); bAdd.className='stp-btn ghost sm'; bAdd.textContent='＋ メッセージを追加';
-  bAdd.onclick=function(){ d.steps.push({ days:(d.steps.length?1:0), hours:0, content:'', image_urls:[] }); stpRenderList(); };
+  bAdd.onclick=function(){ d.steps.push({ days:(d.steps.length?1:0), hours:0, content:'', image_urls:[], quick_reply:null }); stpRenderList(); };
   row.appendChild(bAdd);
   if(d.trigger_type==='reservation'){
     var bTplResv=document.createElement('button'); bTplResv.className='stp-btn ghost sm'; bTplResv.textContent='💡 リマインド2通を入れる';
@@ -8443,12 +8596,26 @@ function stpUploadImage(file, st, line){
 /* ───────── 保存・トグル・削除 ───────── */
 function stpSaveDraft(){
   var d=STP.draft; if(!d) return;
+  // ★1タップ質問の設定が崩れていると、サーバーは黙って外して保存する（normalizeQuickReply）。
+  //   「保存できたのにボタンが付いていない」を防ぐため、先に止めて理由を見せる。
+  var qrSeen={};
+  for(var qi=0; qi<d.steps.length; qi++){
+    var q0=d.steps[qi].quick_reply;
+    var bad=stpQuickReplyProblem(q0);
+    if(bad){ stpTopMsg((qi+1)+'通目の1タップ質問：'+bad, false); return; }
+    // 同じ「聞くこと」を1つのシナリオで2通に付けると、押した後の返事がどちらの通のものか決まらない
+    if(q0 && q0.mode!=='ask'){
+      if(qrSeen[q0.key]){ stpTopMsg((qi+1)+'通目の1タップ質問：「'+stpQrKeyLabel(q0.key)+'」は'+qrSeen[q0.key]+'通目でも聞いています。1つのシナリオでは1回にしてください', false); return; }
+      qrSeen[q0.key]=qi+1;
+    }
+  }
   stpTopMsg('保存中…');
   return stpCall('scenario_save', { scenario:{ id:d.id, name:d.name, trigger_type:d.trigger_type, ab_group:d.ab_group||'', is_active:d.is_active, send_hour_from:d.send_hour_from, send_hour_to:d.send_hour_to } })
   .then(function(r1){
     if(!r1.ok) throw new Error(r1.reason||'save_failed');
     var steps=d.steps.map(function(st){
-      return { delay_minutes:(Number(st.days)||0)*1440+(Number(st.hours)||0)*60, content:st.content||'', image_urls:(st.image_urls||[]).slice(0,4) };
+      return { delay_minutes:(Number(st.days)||0)*1440+(Number(st.hours)||0)*60, content:st.content||'', image_urls:(st.image_urls||[]).slice(0,4),
+               quick_reply:stpCloneQuickReply(st.quick_reply) };
     });
     return stpCall('steps_save', { scenario_id:d.id, steps:steps });
   }).then(function(r2){
@@ -8498,8 +8665,9 @@ function stpApplyTemplate(kind){
   if(!STP.draft) return;
   var tpl = STP_TPL[kind] || STP_TPL.std;
   var label = (kind==='lite') ? '軽め版2通' : (kind==='resv') ? 'リマインド2通' : '標準版7通';
-  if(STP.draft.steps.length && !window.confirm('いまのメッセージを、'+label+'で置きかえます。よろしいですか？')) return;
-  STP.draft.steps = tpl.map(function(t){ return { days:t.days, hours:t.hours, content:t.content, image_urls:[] }; });
+  var hasQr=STP.draft.steps.some(function(x){ return !!x.quick_reply; });
+  if(STP.draft.steps.length && !window.confirm('いまのメッセージを、'+label+'で置きかえます。'+(hasQr?'\n1タップ質問のボタン設定も消えます。':'')+'よろしいですか？')) return;
+  STP.draft.steps = tpl.map(function(t){ return { days:t.days, hours:t.hours, content:t.content, image_urls:[], quick_reply:null }; });
   stpRenderList();
   stpTopMsg(label+'を入れました。文面を調整して「保存する」を押してください💡', true);
 }
