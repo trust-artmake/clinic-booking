@@ -2106,6 +2106,10 @@ function loadHome(){
   acts.appendChild(b1); acts.appendChild(b2); card.appendChild(acts);
   body.appendChild(card);
 
+  // ①' クリニック連携の確認待ち（小倉。0件なら出さない＝ loadHomeClinicNotice が中身を作る）
+  var cc=document.createElement('div'); cc.className='home-card alert'; cc.id='home-clinic-card'; cc.hidden=true;
+  body.appendChild(cc);
+
   // ② お店の準備（未完了設定）＝manager のみ
   if(isMgr){
     var ac=document.createElement('div'); ac.className='home-card'; ac.id='home-setup-card';
@@ -2135,7 +2139,68 @@ function loadHome(){
   // データ取得（それぞれ独立・失敗しても他を止めない）
   loadHomeReservations();
   loadHomeAttention();
+  loadHomeClinicNotice();
   if(isMgr) loadHomeSetup();
+}
+
+/* クリニックへの予約報告 v2（差分方式・設計書 docs/clinic-notice-v2-design.md・migration 20260924100000_clinic_notice.sql）。
+   ホームに「クリニック連携の確認待ち」を出す。0件なら出さない。種類とボタン：
+     送れなかった／届いたか不明 … ［伝わっている］（手で伝えた・届いていた）／［自動で送り直す］ ＝この予約の自動の報告を再開
+     変更依頼 … ［対応済み］／未確認 … ［確認済みにする］（文字や電話でOK）／まだ送れていない … ［手で伝えた］
+   見られる店・操作できる店の判定は DB（clinic_notice_admin_list / admin_mark）。文字は textContent で入れる。 */
+var CLINIC_NOTICE_REASON={ change_requested:'変更依頼', unconfirmed:'未確認', failed:'送れなかった', unknown:'届いたか不明', not_sent:'まだ送れていない' };
+var CLINIC_NOTICE_ACTIONS={
+  failed:[['delivered','伝わっている'],['resend','自動で送り直す']],
+  unknown:[['delivered','伝わっている'],['resend','自動で送り直す']],
+  change_requested:[['resolve_change','対応済み']],
+  unconfirmed:[['confirm','確認済みにする']],
+  not_sent:[['told','手で伝えた']]
+};
+function clinicNoticeWhen(iso){
+  var t=Date.parse(iso); if(!isFinite(t)) return '';
+  var d=new Date(t+9*3600*1000);
+  return (d.getUTCMonth()+1)+'月'+d.getUTCDate()+'日（'+'日月火水木金土'[d.getUTCDay()]+'）'
+       +('0'+d.getUTCHours()).slice(-2)+':'+('0'+d.getUTCMinutes()).slice(-2)+'〜';
+}
+function loadHomeClinicNotice(){
+  var card=document.getElementById('home-clinic-card'); if(!card || typeof sbRpc!=='function') return;
+  sbRpc('clinic_notice_admin_list', TENANT_ID ? { p_tenant: TENANT_ID } : {}).then(function(res){
+    var items=(res && Array.isArray(res.items)) ? res.items : [];
+    card.replaceChildren();
+    if(!items.length){ card.hidden=true; return; }
+    card.hidden=false;
+    var t=document.createElement('div'); t.className='home-ctitle';
+    t.textContent='🏥 クリニック連携の確認待ち（'+items.length+'件）'; card.appendChild(t);
+    items.forEach(function(it){
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid #fde2e2;font-size:13px';
+      var tag=document.createElement('span'); tag.style.cssText='font-weight:800;color:#9a3412';
+      tag.textContent=CLINIC_NOTICE_REASON[it.reason]||'確認'; row.appendChild(tag);
+      var s=clinicNoticeWhen(it.start_at)+' '+(it.customer_name||'')+'様（'+(it.artist||'担当未設定')+'）';
+      if(it.kind==='cancelled') s+='［取消の報告］'; else if(it.kind==='changed') s+='［変更の報告］';
+      if(it.reason==='change_requested' && it.change_requested_by_name) s+='　押した人：'+it.change_requested_by_name;
+      if(it.reason==='unconfirmed' && it.followed_up_at) s+='　後追い済み';
+      var txt=document.createElement('span'); txt.style.cssText='flex:1 1 200px'; txt.textContent=s; row.appendChild(txt);
+      (CLINIC_NOTICE_ACTIONS[it.reason]||[]).forEach(function(a){
+        var btn=document.createElement('button'); btn.type='button'; btn.className='home-btn ghost'; btn.textContent=a[1];
+        btn.onclick=function(){
+          btn.disabled=true;
+          var body={ p_target: it.target_id, p_action: a[0] };
+          if(a[0]==='told'){ body.p_expect_kind=it.expect_kind; body.p_expect_start=it.expect_start; }
+          sbRpc('clinic_notice_admin_mark', body).then(function(r){
+            if(r && (r.ok || r.result==='already')) loadHomeClinicNotice();
+            else if(r && r.result==='changed'){ alert('予約の内容が変わりました。画面を読み込み直して、もう一度確かめてください。'); loadHomeClinicNotice(); }
+            else { btn.disabled=false; alert('更新できませんでした。画面を読み込み直してから、もう一度押してください。'); }
+          }).catch(function(){ btn.disabled=false; alert('更新できませんでした。通信状態を確かめて、もう一度押してください。'); });
+        };
+        row.appendChild(btn);
+      });
+      card.appendChild(row);
+    });
+    var note=document.createElement('div'); note.style.cssText='font-size:12px;color:#6b7280;margin-top:6px';
+    note.textContent='送れなかった・届いたか不明の報告は、その予約の自動の報告を止めています。クリニックとのトークで確かめてから［伝わっている］か［自動で送り直す］を押してください。［手で伝えた］を押した分は、あとから自動では送りません。';
+    card.appendChild(note);
+  }).catch(function(){ card.hidden=true; });   // 未適用・権限なしなら静かに隠す
 }
 
 // 今日の予約件数＋次の予約（reservations を当日範囲で取得＝loadBoard と同じ作り）
