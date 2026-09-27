@@ -103,11 +103,11 @@ window.startVideoCoachLive = async function () {
         ).join("") +
         '</div><label for="other">補足（氏名などは入れないでください）</label><textarea id="other">' +
         esc(inputs.other || "") +
-        "</textarea><fieldset><legend>お客様の映り方は？</legend>" +
-        [["customer_face_ok", "お客様の顔を出してよい（掲載の同意あり）"], [
+        "</textarea><fieldset><legend>映っている人の顔は？</legend>" +
+        [["customer_face_ok", "映っている人の顔を出してよい（モデルのスタッフを含む・掲載同意あり）"], [
           "customer_face_ng",
           "顔は出さない",
-        ], ["no_customer", "お客様は映っていない"]].map(([v, t]) =>
+        ], ["no_customer", "人は映っていない（部屋・道具だけ）"]].map(([v, t]) =>
           '<label class="radio-row"><input type="radio" name="visibility" value="' +
           v + '" ' + (inputs.visibility === v ? "checked" : "") + ">" + t +
           "</label>"
@@ -127,8 +127,8 @@ window.startVideoCoachLive = async function () {
         esc(L.seconds(plan.total_out_seconds)) + "秒・" + plan.items.length +
         "場面</p>" + plan.items.map((item, n) =>
           '<article class="scene"><h2>場面' + (n + 1) + " " +
-          esc(L.ROLE_LABELS[item.role]) + "</h2><p>" +
-          item.caption.lines.map(esc).join("<br>") + "</p><p>完成 " +
+          esc(item.narration ? L.BEAT_LABELS[item.narration.beat] : L.ROLE_LABELS[item.role]) + "</h2><p>テロップ：" +
+          item.caption.lines.map(esc).join("<br>") + "</p>" + narrationHtml(item, n) + "<p>完成 " +
           esc(L.seconds(item.output.start)) + "–" +
           esc(L.seconds(item.output.end)) +
           '秒</p><button data-action="play" data-index="' + n + '" ' +
@@ -200,6 +200,20 @@ window.startVideoCoachLive = async function () {
         : "") +
       "</p>"
     ).join("");
+  }
+  function narrationHtml(item, n) {
+    const nar = item.narration;
+    if (!nar) return "";
+    const text = nar.source === "speech"
+      ? "素材の声をそのまま使う" + (nar.text ? "（声を使わない場合：" + esc(nar.text) + "）" : "")
+      : nar.text ? esc(nar.text) : "入れない（間をとる）";
+    return '<p class="narration">読む原稿：' + text + "</p>" +
+      (nar.ref
+        ? '<p class="narration-source">遠山さん ' + esc(nar.ref.code) + " " +
+          esc(L.seconds(nar.ref.start)) + "〜" + esc(L.seconds(nar.ref.end)) +
+          '秒の言い回し <button data-action="phrase" data-index="' + n +
+          '">言い回しの元を見る</button></p>'
+        : "");
   }
   async function ensureSession() {
     if (session) return session;
@@ -649,9 +663,9 @@ window.startVideoCoachLive = async function () {
         item.edit.zoom = null;
         item.edit.note = c.why;
         adjustPlan(next);
-      } else if (action === "play" || action === "reference") {
+      } else if (action === "play" || action === "reference" || action === "phrase") {
         playerIndex = Number(b.dataset.index);
-        playerSide = action === "reference" ? "reference" : "source";
+        playerSide = action === "play" ? "source" : action;
         if (!dialog.open) dialog.showModal();
         await play();
       }
@@ -666,14 +680,22 @@ window.startVideoCoachLive = async function () {
     video.pause();
     playerEnd = null;
     const item = plan.items[playerIndex],
-      reference = playerSide === "reference";
+      phrase = playerSide === "phrase" && !!item.narration?.ref,
+      reference = playerSide === "reference" || phrase;
     $("player-title").textContent = "場面" + (playerIndex + 1);
     $("player-status").textContent = "区間を準備しています…";
     $("source-tab").disabled = !item.source;
     $("reference-tab").disabled = !item.reference;
     try {
       let url, range;
-      if (reference) {
+      if (phrase) {
+        // 遠山さんの動画で、この言い回しが出ている秒数を再生する。
+        const r = await request("sign_reference", {
+          code: item.narration.ref.code,
+        });
+        url = C.signedURL(r.signed);
+        range = item.narration.ref;
+      } else if (reference) {
         const r = await request("sign_reference", {
           reference_id: item.reference.id,
         });
@@ -714,10 +736,14 @@ window.startVideoCoachLive = async function () {
       video.currentTime = range.start;
       playerEnd = range.end;
       $("player-meta").textContent = range.start + "–" + range.end + "秒";
-      $("player-point").textContent = reference
+      $("player-point").textContent = phrase
+        ? "遠山さんの言い回し：" + item.narration.text
+        : reference
         ? "参考にする点：" + item.reference.point
         : "採用する元区間";
-      $("player-difference").textContent = reference
+      $("player-difference").textContent = phrase
+        ? "テロップと話す言葉をそろえる型です。自分の言葉に言い換えても大丈夫です"
+        : reference
         ? "今回との違い：" + item.reference.difference
         : "公開前に映像と字幕を確認してください";
       $("player-status").textContent = "区間の終わりで停止します";
