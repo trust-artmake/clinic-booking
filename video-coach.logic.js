@@ -193,7 +193,7 @@ function fitCaption(text        , duration        , d = DEFAULTS)           {
   return cut?[text.slice(0,cut),text.slice(cut)]:[];
 }
 function durationNote(plan      )         {
-  const d = plan.defaults;
+  const d = plan.defaults ?? DEFAULTS;
   return plan.total_out_seconds < d.targetSeconds.min || plan.total_out_seconds > d.targetSeconds.max ? `約${seconds(plan.total_out_seconds)}秒です。目安の${d.targetSeconds.min}〜${d.targetSeconds.max}秒の範囲外です。発話を優先して残しました。「別の候補」で短い説明を選ぶか、必要な素材を撮り足してください。` : '';
 }
 function newItem(role      , source               , c                  , inputs               , index                , d                 )           {
@@ -366,9 +366,9 @@ function verifyPlan(plan      , analyses                , inputs               ,
 
 function formatCapcutMemo(plan      , clips                )         {
   if(!plan.checks.ok)return '案を表示できません。素材と区間を確認してください。';
-  const lines=['CapCut で、この順番に並べてください。','ローカル模擬版。素材のAI読み取りは行っていません。',`約${seconds(plan.total_out_seconds)}秒｜${TEMPLATE_LABELS[plan.template]}`,
+  const lines=['CapCut で、この順番に並べてください。',...(clips.length&&clips.every(c=>c.model==='mock-no-api')?['ローカル模擬版。素材のAI読み取りは行っていません。']:[]),`約${seconds(plan.total_out_seconds)}秒｜${TEMPLATE_LABELS[plan.template]}`,
     '1. 素材を順に読み込む：'+plan.items.map(i=>i.source?clips.find(c=>c.clip_id===i.source?.clip_id)?.original_name??i.source.clip_id:'文字カード').join(' → '),
-    `2. 各クリップの残す区間（前後を${plan.defaults.trimStep}秒多めに残して、あとで詰める）`];
+    `2. 各クリップの残す区間（前後を${(plan.defaults??DEFAULTS).trimStep}秒多めに残して、あとで詰める）`];
   for(const i of plan.items){
     const s=i.source;
     lines.push(`\n場面${String(i.slot).padStart(2,'0')} ${ROLE_LABELS[i.role]}`,
