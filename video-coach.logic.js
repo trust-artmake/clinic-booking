@@ -14,6 +14,8 @@ const DEFAULTS = Object.freeze({
   targetSeconds: { min: 20, max: 30 }, speed: { min: 0.5, max: 2, normal: 1 },
   caption: { maxLines: 2, minChars: 10, maxChars: 16, secondsPerChar: 0.15, padding: 0.5 },
   speechTolerance: 0.3, trimStep: 0.5, contextSeconds: 1, alternativeCount: 3,
+  // AI の時刻読みのズレ（秒）。これ以内は実測の長さに丸め、超えたら捏造の疑いとして failed。
+  analysisOverrunSeconds: 1,
   maxClips: 12, maxClipSeconds: 600, maxWorries: 3, codeDigits: 6,
   textCardSeconds: 3, stillSeconds: 1.5, displayDecimals: 2, epsilon: 1e-7,
   zoom: { maxPerPlan: 1, from: 100, to: 115, closeOnlyThreshold: 150 },
@@ -424,17 +426,44 @@ function validateClipInput(value         )            {
   if(!v||typeof v.sha256!=='string'||!/^[a-f0-9]{64}$/.test(v.sha256)||!finite(v.duration)||v.duration<=0||v.duration>DEFAULTS.maxClipSeconds||![v.width,v.height,v.size_bytes].every(x=>Number.isSafeInteger(x)&&x>0)||v.size_bytes>DEFAULTS.maxClipBytes||!DEFAULTS.videoMimeTypes.includes(v.mime_type))throw new Error('素材の形式・長さ・容量を確認してください');
   return {sha256:v.sha256,duration:v.duration,width:v.width,height:v.height,size_bytes:v.size_bytes,mime_type:v.mime_type};
 }
+// AI の時刻・付帯項目の小さな揺れを直す。実測の長さ（端末で計った duration）を正とする。
+// 許容差を超えるズレは直さずに残し、下の検査で failed にする。
+function normalizeGeminiAnalysis(value         , clipId        , duration        )          {
+  const v = value                           ;
+  if (!v || typeof v !== 'object' || !finite(duration) || duration <= 0) return v;
+  const tol = DEFAULTS.analysisOverrunSeconds;
+  const near = (n         )              => finite(n) && n >= -tol && n <= duration + tol;
+  const clamp = (n        , lo        , hi        ) => Math.min(Math.max(n, lo), hi);
+  const segments = Array.isArray(v.segments) ? (v.segments                             ).map(seg => {
+    if (!seg || typeof seg !== 'object' || !near(seg.start) || !near(seg.end)) return seg;
+    const start = clamp(seg.start, 0, duration), end = clamp(seg.end, 0, duration);
+    const speech = Array.isArray(seg.speech) ? (seg.speech                             ).flatMap(p => {
+      if (!p || typeof p !== 'object' || !near(p.start) || !near(p.end)) return [p];
+      const q                          = { ...p, start: clamp(p.start, start, end), end: clamp(p.end, start, end) };
+      if (finite(p.confidence)) q.confidence = clamp(p.confidence, 0, 1);
+      return (q.start          ) < (q.end          ) ? [q] : [];
+    }) : seg.speech;
+    return { ...seg, start, end, speech, retake_of: seg.retake_of ?? null };
+  }).filter(seg => !seg || typeof seg !== 'object' || !finite(seg.start) || !finite(seg.end) || seg.start < seg.end) : v.segments;
+  // clip_id・model・usage は呼び出し側が実値で上書きするので、AI の書いた値は使わない。
+  return { ...v, clip_id: clipId, duration, segments, model: '', usage: { input_tokens: 0, output_tokens: 0 } };
+}
 function validateGeminiAnalysis(json        , clipId       , duration       )               {
+  let step = 'json';
   try {
-    const c=parseAnalyses(JSON.stringify([JSON.parse(json)]))[0];
+    const raw = JSON.parse(json); step = 'structure';
+    const c=parseAnalyses(JSON.stringify([normalizeGeminiAnalysis(raw, clipId, duration)]))[0]; step = 'clip';
     if(c.clip_id!==clipId||!finite(c.duration)||c.duration<=0||c.duration>duration+DEFAULTS.speechTolerance||!finite(duration)||!c.segments.length||c.status==='failed'||typeof c.model!=='string'||!c.usage||![c.usage.input_tokens,c.usage.output_tokens].every(x=>Number.isSafeInteger(x)&&x>=0))throw 0;
+    step = 'flags';
     if(![c.clip_flags.silent,c.clip_flags.multiple_customers_suspected,c.clip_flags.text_burned_in].every(x=>typeof x==='boolean')||c.worry_candidates.some(w=>!WORRIES.some(k=>k[0]===w.key)||typeof w.evidence!=='string'))throw 0;
     for(const s of c.segments){
+      step = 'segment_range';
       if(s.start<0||s.end<=s.start||s.end>Math.min(c.duration,duration)||![s.camera.stable,s.camera.dark,s.camera.blurry].every(x=>typeof x==='boolean')||typeof s.notes!=='string'||!(s.retake_of===null||typeof s.retake_of==='string'))throw 0;
+      step = 'speech_range';
       if(s.speech.some(p=>p.start<s.start||p.end>s.end||p.confidence!==undefined&&(!finite(p.confidence)||p.confidence<0||p.confidence>1)))throw 0;
     }
     return {...c,status:'analyzed'};
-  }catch{return {clip_id:clipId,duration,status:'failed',error:'読み取り結果の形式を確認できませんでした',segments:[],clip_flags:{silent:false,multiple_customers_suspected:false,text_burned_in:false},worry_candidates:[],model:'',usage:{input_tokens:0,output_tokens:0}};}
+  }catch{return {clip_id:clipId,duration,status:'failed',error:`読み取り結果の形式を確認できませんでした（${step}）`,segments:[],clip_flags:{silent:false,multiple_customers_suspected:false,text_burned_in:false},worry_candidates:[],model:'',usage:{input_tokens:0,output_tokens:0}};}
 }
 function applyCaptions(plan      , value         )       {
   const items=(value                                                            )?.items;
@@ -446,5 +475,5 @@ function estimateCost(input       ,output       )        {
   return (input*DEFAULTS.inputUsdPerMillion+output*DEFAULTS.outputUsdPerMillion)*DEFAULTS.usdJpy/1e6;
 }
 
-window.VIDEO_COACH={DEFAULTS,CAPTION_LIMITS,FORBIDDEN_PHRASES,CAUTION_PHRASES,ROLE_LABELS,TEMPLATE_LABELS,WORRIES,seconds,parseAnalyses,endsWithContinuation,snapToSpeech,eligibleAnalyses,pickTemplate,pickAlternatives,linkReference,computeTimeline,buildPlan,verifyPlan,formatCapcutMemo,authorize,requireUuid,advanceState,budgetStatus,retentionUntil,uploadPath,validateSessionInputs,validateClipInput,validateGeminiAnalysis,applyCaptions,estimateCost};
+window.VIDEO_COACH={DEFAULTS,CAPTION_LIMITS,FORBIDDEN_PHRASES,CAUTION_PHRASES,ROLE_LABELS,TEMPLATE_LABELS,WORRIES,seconds,parseAnalyses,endsWithContinuation,snapToSpeech,eligibleAnalyses,pickTemplate,pickAlternatives,linkReference,computeTimeline,buildPlan,verifyPlan,formatCapcutMemo,authorize,requireUuid,advanceState,budgetStatus,retentionUntil,uploadPath,validateSessionInputs,validateClipInput,normalizeGeminiAnalysis,validateGeminiAnalysis,applyCaptions,estimateCost};
 })();
