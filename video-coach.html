@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#f7f3ec">
+  <title>動画づくりの相談室｜ローカル模擬版</title>
+  <link rel="stylesheet" href="video-coach.css">
+  <script defer src="video-coach.logic.js"></script>
+  <script defer src="video-coach.data.js"></script>
+  <script defer src="video-coach.auth.js"></script>
+  <script defer src="video-coach.contract.js"></script>
+  <script defer src="video-coach.live.js"></script>
+  <script defer src="video-coach.js"></script>
+</head>
+<body>
+  <div class="demo-banner">ローカル模擬版 <span>メール送信・AI解析・外部保存は行いません</span></div>
+  <header class="site-header"><span class="brand-mark" aria-hidden="true">c.</span><div>動画づくりの相談室<small>ARTMAKE / VIDEO NOTE</small></div><span class="edition">試作 A・切替式</span></header>
+  <main id="app" tabindex="-1"></main>
+  <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  <footer class="action-bar"><div><span id="step-label"></span><button id="primary" class="primary" type="button">入る</button></div></footer>
+  <dialog id="player-dialog" aria-labelledby="player-title">
+    <div class="dialog-top"><h2 id="player-title">場面を確認</h2><button id="close-player" type="button" aria-label="閉じる">閉じる ×</button></div>
+    <div class="player-tabs"><button id="source-tab" type="button">使う素材</button><button id="reference-tab" type="button">参考を見る</button></div>
+    <video id="player" controls playsinline preload="metadata" muted></video>
+    <p id="player-meta"></p><p id="player-point"></p><p id="player-difference"></p><p id="player-status" role="status"></p>
+    <div class="player-tools"><button id="context-toggle" type="button">前後1秒も見る</button><button id="replay" type="button">もう一度再生</button></div>
+  </dialog>
+</body>
+</html>
