@@ -39,7 +39,7 @@ window.startVideoCoachLive = async function () {
     for_ads: false,
     selected_at: new Date().toISOString(),
   };
-  let playerIndex = 0, playerSide = "source", playerEpoch = 0, playerEnd = null;
+  let playerIndex = 0, playerSide = "source", playerEpoch = 0, playerEnd = null, playerStart = null;
   const dialog = $("player-dialog"), video = $("player");
   document.querySelector(".demo-banner").textContent = "動画づくりの相談室";
   document.title = "動画づくりの相談室";
@@ -713,32 +713,18 @@ window.startVideoCoachLive = async function () {
         range = item.source;
       }
       if (epoch !== playerEpoch || !dialog.open) return;
-      video.src = url;
-      await new Promise((resolve, reject) => {
-        const t = setTimeout(
-          () =>
-            reject(
-              Error(
-                "動画の準備に時間がかかっています。もう一度再生してください",
-              ),
-            ),
-          15000,
-        );
-        video.onloadedmetadata = () => {
-          clearTimeout(t);
-          resolve();
-        };
-        video.onerror = () => {
-          clearTimeout(t);
-          reject(
-            Error("閲覧URLを取り直すには「もう一度再生」を押してください"),
-          );
-        };
-        video.load();
-      });
-      if (epoch !== playerEpoch || !dialog.open) return;
-      video.currentTime = range.start;
+      // iPhone の Safari は再生を始めるまで動画を読み込まない（読み込み完了を待つと止まったままになる）。
+      // 読み込みを待たずに再生を始め、始まってから区間の先頭へ移る。#t= は対応ブラウザでの開始位置の指定。
+      playerStart = range.start;
       playerEnd = range.end;
+      video.src = url + "#t=" + range.start + "," + range.end;
+      video.onloadedmetadata = () => seekToStart();
+      video.onerror = () => {
+        if (epoch === playerEpoch) {
+          $("player-status").textContent =
+            "閲覧URLを取り直すには「もう一度再生」を押してください";
+        }
+      };
       $("player-meta").textContent = range.start + "–" + range.end + "秒";
       $("player-point").textContent = phrase
         ? "遠山さんの言い回し：" + item.narration.text
@@ -750,8 +736,17 @@ window.startVideoCoachLive = async function () {
         : reference
         ? "今回との違い：" + item.reference.difference
         : "公開前に映像と字幕を確認してください";
-      $("player-status").textContent = "区間の終わりで停止します";
-      await video.play();
+      video.load();
+      try {
+        await video.play();
+        seekToStart();
+        $("player-status").textContent = "区間の終わりで停止します";
+      } catch (_e) {
+        // 自動で始められない端末では、動画の ▶ を押してもらう（押すと区間の先頭から流れる）。
+        if (epoch === playerEpoch) {
+          $("player-status").textContent = "動画の ▶ を押すと再生します";
+        }
+      }
     } catch (e) {
       $("player-status").textContent = C.errorMessage(e);
     }
@@ -772,6 +767,7 @@ window.startVideoCoachLive = async function () {
     video.removeAttribute("src");
     video.load();
     playerEnd = null;
+    playerStart = null;
     dialog.close();
   }
   $("close-player").onclick = close;
@@ -779,6 +775,14 @@ window.startVideoCoachLive = async function () {
     e.preventDefault();
     close();
   });
+  function seekToStart() {
+    if (playerStart === null) return;
+    if (
+      video.currentTime < playerStart - 0.3 ||
+      (playerEnd !== null && video.currentTime >= playerEnd)
+    ) video.currentTime = playerStart;
+  }
+  video.addEventListener("play", seekToStart);
   video.addEventListener("timeupdate", () => {
     if (playerEnd !== null && video.currentTime >= playerEnd) {
       video.pause();
