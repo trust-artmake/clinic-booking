@@ -415,6 +415,10 @@ window.startVideoCoachLive = async function () {
         button("おすすめの構成を見る", !inputs.worries.length);
       }
     } catch (e) {
+      if (e.status === 409 && /処理中/.test(e.message)) {
+        // 別の処理が進行中なだけ（一時的）。案づくりの予約は取り消さず、少し待って続ける。
+        return;
+      }
       fail(e);
       wantPlan = false;
       if (screen === 2) button("おすすめの構成を見る", !inputs.worries.length);
