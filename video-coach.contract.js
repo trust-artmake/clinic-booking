@@ -41,6 +41,14 @@
         r.clip_id = s.clip_id;
         break;
       case "sign_reference":
+        // 参考場面は索引の id、言い回しの元は遠山さんの動画コードで開く（許可するコードはサーバー側で照合）。
+        if (s.code !== undefined) {
+          if (typeof s.code !== "string" || !/^[A-Za-z0-9_-]+$/.test(s.code)) {
+            throw Error("参考を確認してください");
+          }
+          r.code = s.code;
+          break;
+        }
         if (typeof s.reference_id !== "string" || !s.reference_id) {
           throw Error("参考を確認してください");
         }
