@@ -78,7 +78,7 @@ window.startVideoCoachLive = async function () {
         button("入る");
       } else if (auth === "code") {
         app.innerHTML =
-          '<h1>メールに届いた6桁のコードを入れてください</h1><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">';
+          '<h1>メールに届いたコードを入れてください</h1><input id="code" inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10" autocomplete="one-time-code">';
         button("入る");
       } else {
         app.innerHTML =
@@ -446,9 +446,10 @@ window.startVideoCoachLive = async function () {
           await A.sendCode(client, email);
           auth = "code";
         } else if (auth === "code") {
-          const token = $("code").value;
-          if (!/^\d{6}$/.test(token)) {
-            throw Error("6桁の数字を入力してください");
+          const token = $("code").value.replace(/\s/g, "");
+          // Supabase のコード桁数はプロジェクト設定で 6〜10 桁（本番は 8 桁）。
+          if (!/^\d{6,10}$/.test(token)) {
+            throw Error("メールに届いた数字のコードを入力してください");
           }
           member = await A.verifyCode(client, email, token);
           auth = "ready";
