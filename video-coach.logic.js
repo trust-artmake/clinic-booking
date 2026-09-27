@@ -683,7 +683,10 @@ function validateGeminiAnalysis(json        , clipId       , duration       )   
 function applyCaptions(plan      , value         )       {
   const items=(value                                                                              )?.items;
   if(!Array.isArray(items)||items.length!==plan.items.length||items.some(i=>!i||!Array.isArray(i.lines)||i.lines.length>CAPTION_LIMITS.maxLines||i.lines.some(l=>typeof l!=='string'||l.length>256)||!['speech','bank','new'].includes(i.source)||i.narration!==undefined&&(typeof i.narration!=='string'||i.narration.length>512)))throw new Error('字幕の形式を確認できませんでした');
-  return {...plan,items:plan.items.map((item,n)=>{const t=items[n].narration;const narration                    =typeof t!=='string'||t===item.narration?.text?item.narration:{text:t,source:items[n].source==='speech'?'speech':'new',beat:item.narration?.beat??beatForRole(item.role),ref:null};
+  return {...plan,items:plan.items.map((item,n)=>{
+    // 遠山さんの言い回し（出典あり）は AI に書き換えさせない。テロップも同じ文のまま（出典の紐づけと「言い回しの元を見る」を守る）。
+    if(item.narration?.ref&&item.narration.source!=='new'&&item.narration.text)return item;
+    const t=items[n].narration;const narration                    =typeof t!=='string'||t===item.narration?.text?item.narration:{text:t,source:items[n].source==='speech'?'speech':'new',beat:item.narration?.beat??beatForRole(item.role),ref:null};
     return {...item,narration,caption:{...item.caption,lines:items[n].lines,source:items[n].source==='speech'?'speech':'new'}};})};
 }
 function estimateCost(input       ,output       )        {
