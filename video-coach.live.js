@@ -758,11 +758,16 @@ window.startVideoCoachLive = async function () {
   button("接続を準備しています", true);
   try {
     // 公開ページ内の定数だけを読む。ページのスクリプトは実行しない。
-    const response = await fetch("admin.html", {
-      cache: "no-cache",
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) throw Error("接続設定を取得できませんでした");
+    //   公開先（GitHub Pages）では管理画面は admin-new.html の名前で置かれる（改名して公開される）。
+    //   ローカル・模擬では admin.html。先に公開名を試し、無ければ元の名前に戻る。
+    let response = null;
+    for (const name of ["admin-new.html", "admin.html"]) {
+      try {
+        const r = await fetch(name, { cache: "no-cache", signal: AbortSignal.timeout(15000) });
+        if (r.ok) { response = r; break; }
+      } catch (_e) { /* 次の候補へ */ }
+    }
+    if (!response) throw Error("接続設定を取得できませんでした");
     const text = await response.text();
     const base = text.match(/var SB_URL\s*=\s*"([^"]+)"/)?.[1],
       key = text.match(/var SB_KEY\s*=\s*"([^"]+)"/)?.[1];
