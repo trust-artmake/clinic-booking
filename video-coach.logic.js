@@ -16,16 +16,23 @@ const DEFAULTS = Object.freeze({
   speechTolerance: 0.3, trimStep: 0.5, contextSeconds: 1, alternativeCount: 3,
   // AI の時刻読みのズレ（秒）。これ以内は実測の長さに丸め、超えたら捏造の疑いとして failed。
   analysisOverrunSeconds: 1,
+  // 声に頼らない構成（設計追補 v1.3）。ナレーションは1秒あたり約7文字（遠山さんのテロップ実測 7〜8文字/秒より少し余裕）。
+  narrationCharsPerSecond: 7, minStaffQuoteChars: 10, fillTargetSeconds: 25, fillCutSeconds: 3, cutSeconds: { min: 1.5, max: 3 },
   maxClips: 12, maxClipSeconds: 600, maxWorries: 3, codeDigits: 6,
   textCardSeconds: 3, stillSeconds: 1.5, displayDecimals: 2, epsilon: 1e-7,
   zoom: { maxPerPlan: 1, from: 100, to: 115, closeOnlyThreshold: 150 },
   retakeShotSeconds: 5, consecutiveShotLimit: 3, referenceFps: 30,
-  budgets: { opening: 3, consult: 5, explain: 4, finish: 2, conditions: 3, cta: 3 },
+  budgets: { opening: 3, consult: 5, explain: 4, finish: 3, conditions: 3, cta: 3 },
   shotBudgets: { design_hands: 1.5, procedure_wide: 2, brow_close: 1.5 },
 });
 const CAPTION_LIMITS = DEFAULTS.caption;
 const FORBIDDEN_PHRASES = ['必ず定着', '絶対消えない', '美肌加工', '肌を加工', '眉の色を加工', '治る', '痛くない', 'ダウンタイムなし']         ;
 const CAUTION_PHRASES = ['人生が変わ', '垢抜け', '別人', '必ず', '絶対', '気に入り', '嬉しい', 'うれしい', '満足']         ;
+
+
+
+
+
 
 
 
@@ -132,7 +139,7 @@ function candidates(analyses                , inputs                )           
   const superseded = new Set(analyses.filter(c => c.status !== 'failed').flatMap(c => c.segments.filter(s => s.retake_of).map(s => s.retake_of .includes(':') ? s.retake_of  : `${c.clip_id}:${s.retake_of}`)));
   return analyses.flatMap(c => c.status === 'failed' || !finite(c.duration) || c.duration <= 0 || c.clip_flags.multiple_customers_suspected ? [] : c.segments.flatMap((s, i) => {
     const id = s.id;
-    if (superseded.has(`${c.clip_id}:${id}`) || s.start < 0 || s.end > c.duration || s.end <= s.start || !finite(s.start) || !finite(s.end) || s.shot_type === 'other') return [];
+    if (superseded.has(`${c.clip_id}:${id}`) || s.start < 0 || s.end > c.duration || s.end <= s.start || !finite(s.start) || !finite(s.end) || s.shot_type === 'other' && !['none', 'staff_only'].includes(s.who_visible)) return [];
     if (inputs?.visibility === 'customer_face_ng' && s.who_visible === 'customer_face') return [];
     if (inputs?.visibility === 'no_customer' && ['customer_face', 'customer_partial'].includes(s.who_visible)) return [];
     return [{ clip_id: c.clip_id, start: s.start, end: s.end, segment_id: id, shot_type: s.shot_type, who_visible: s.who_visible, segment: s, clip: c, why: s.retake_of ? '言い直しを避けて後半を使いました' : 'この役割に合う構図の候補です' }];
@@ -194,15 +201,207 @@ function fitCaption(text        , duration        , d = DEFAULTS)           {
 }
 function durationNote(plan      )         {
   const d = plan.defaults ?? DEFAULTS;
-  return plan.total_out_seconds < d.targetSeconds.min || plan.total_out_seconds > d.targetSeconds.max ? `約${seconds(plan.total_out_seconds)}秒です。目安の${d.targetSeconds.min}〜${d.targetSeconds.max}秒の範囲外です。発話を優先して残しました。「別の候補」で短い説明を選ぶか、必要な素材を撮り足してください。` : '';
+  return plan.total_out_seconds < d.targetSeconds.min || plan.total_out_seconds > d.targetSeconds.max ? `約${seconds(plan.total_out_seconds)}秒です。目安の${d.targetSeconds.min}〜${d.targetSeconds.max}秒の範囲外です。${plan.total_out_seconds < d.targetSeconds.min ? '素材が足りないため、下の「撮ると使える場面」を撮り足してください。' : '発話を優先して残しました。「別の候補」で短い説明を選ぶか、必要な素材を撮り足してください。'}` : '';
 }
+// ── 声に頼らない構成（設計追補 v1.3）────────────────────────────────
+// 遠山さんの動画11本（analysis-output/utan-20260926/precision/analysis.json の画面文字）から、工程ごとの言い回しを抜き出した。
+// 遠山さんの動画はテロップ＝ナレーションで、1〜2秒ごとに1フレーズ進む。ここでも同じ文を「テロップ兼ナレーション原稿」に使う。
+// 入れないもの：お客様の発言・反応（「すごい」「別人」「〜との声多数」＝実際に言っていない声の捏造になる）、遠山さん個人の実績（施術人数など）。
+// w＝関連する悩み（空＝どの悩みでも可）。ref＝元の動画コードと秒数（担当者が元の場面を確認できるように残す）。
+
+const bankLine = (beat      , text        , w          , code               , start = 0, end = 0)           => ({ beat, text, w, ref: code ? { code, start, end } : null });
+const NARRATION_BANK                      = Object.freeze([
+  bankLine('hook', '“眉毛”だけで垢抜ける方法、教えます', ['impression', 'color', 'suitable'], 'DcsYuD1pLVT', 0, 2.1),
+  bankLine('hook', '“眉毛”ってそんなに変わる？', [], 'Dag9_a0psJP', 0, 2.1),
+  bankLine('hook', 'メイク上手な人ほど、実は眉を描いていない', ['morning_time', 'suitable'], 'DdYIcKtzcor', 0, 2.9),
+  bankLine('hook', '一歩踏み出せない方へ', ['anxiety', 'previous'], 'Dabhwkvz_vC', 0, 3.2),
+  bankLine('hook', '初めてのアートメイク', ['anxiety'], 'Da90Xz0pY7-', 0, 2.7),
+  bankLine('hook', '眉毛、形だけで決まると思っていませんか？', ['color', 'impression'], 'DawSANOJnMu', 6.4, 8.3),
+  bankLine('hook', 'アートメイクで垢抜けます', ['impression', 'droopy'], 'Db7OhBlJMaw', 0, 2.1),
+  bankLine('intro', 'アートメイク看護師の（名前）です', [], 'DQ86PDmk-hN', 0.5, 2.4),
+  bankLine('intro', '看護師の（名前）です', [], 'DQ86PDmk-hN', 0.5, 2.4),
+  bankLine('worry', 'やさしい印象になりたい', ['impression'], 'DQ86PDmk-hN', 3.2, 4.8),
+  bankLine('worry', '自分で描くと左右差がある', ['asymmetry'], 'DQ86PDmk-hN', 14.7, 16),
+  bankLine('worry', 'メイクに時間がかかる', ['morning_time'], 'DQ86PDmk-hN', 16, 16.8),
+  bankLine('worry', '少し困り眉に見える印象でした', ['droopy'], 'Db7OhBlJMaw', 4.8, 6.4),
+  bankLine('worry', '似合う形にしてほしいとのご要望', ['suitable'], 'DbS1uVlJdQY', 8.3, 10.7),
+  bankLine('worry', '眉尻が欲しい、整え方が分からない', ['male', 'tail'], 'Dag9_a0psJP', 5.3, 7.2),
+  bankLine('worry', '他院の眉のご相談', ['previous'], 'DbS1uVlJdQY', 4.8, 6.1),
+  bankLine('worry', 'ダウンタイムや定着が心配', ['anxiety'], 'Da90Xz0pY7-', 0, 2.7),
+  bankLine('worry', '汗や皮脂で眉が消える', ['sweat'], null),
+  bankLine('worry', '今日のお客様のお悩みは', [], 'DQ86PDmk-hN', 2.4, 3.2),
+  bankLine('approach', '骨格と表情に合わせてデザインします', [], 'DQ86PDmk-hN', 18.4, 22.9),
+  bankLine('approach', '顔全体のバランスを見ながらデザイン', [], 'DdYIcKtzcor', 13.3, 16),
+  bankLine('approach', '眉山・眉尻・毛流れまで', ['tail', 'asymmetry', 'suitable'], 'DdYIcKtzcor', 12, 13.3),
+  bankLine('approach', '眉山の筋肉に合わせて角度を控えめに', ['droopy', 'impression'], 'DQ86PDmk-hN', 8.8, 10.9),
+  bankLine('approach', '自然体のラインに整えていきます', ['droopy', 'impression'], 'DQ86PDmk-hN', 11.2, 13.1),
+  bankLine('approach', '毛の流れと毛量を見ながら', ['male', 'tail'], 'Dag9_a0psJP', 16.3, 18.7),
+  bankLine('approach', '髪色や肌のトーン、普段のメイクまで', ['color'], 'DcsYuD1pLVT', 15.7, 18.9),
+  bankLine('approach', '一番似合うカラーをご提案します', ['color'], 'DcsYuD1pLVT', 20, 22.4),
+  bankLine('approach', '明るめの色素をおすすめしています', ['color'], 'DbAqi9TpYGq', 20.3, 25.3),
+  bankLine('approach', 'アートメイクは90%の完成をおすすめしています', ['morning_time', 'anxiety'], 'Db7OhBlJMaw', 8, 12),
+  bankLine('approach', 'プロが丁寧にデザインを作成します', [], 'Dabhwkvz_vC', 9.3, 11.7),
+  bankLine('approach', '何度も確認しながらデザイン', ['anxiety', 'suitable'], 'Dabhwkvz_vC', 19.7, 21.1),
+  bankLine('approach', '自眉を生かしてデザインします', ['previous', 'impression'], 'DbhcmcopFxX', 5.1, 8),
+  bankLine('approach', '過去の定着を生かして', ['previous'], 'DbS1uVlJdQY', 14.1, 16.3),
+  bankLine('procedure', '施術スタート', [], 'DbhcmcopFxX', 8, 8.8),
+  bankLine('procedure', '1本1本描いて、お顔に馴染む眉に', [], 'DbhcmcopFxX', 8.8, 11.5),
+  bankLine('procedure', '完全オーダーメイドで施術していきます', [], 'Dag9_a0psJP', 18.7, 20.8),
+  bankLine('procedure', '表面麻酔クリームを塗ってから施術します', ['anxiety'], 'Dabhwkvz_vC', 22.9, 25.9),
+  bankLine('procedure', '会話をしながら施術します', ['anxiety'], 'Dabhwkvz_vC', 27.5, 29.1),
+  bankLine('reveal', '新しい眉毛とご対面', [], 'DbhcmcopFxX', 14.9, 15.7),
+  bankLine('reveal', 'ついに新しい眉とご対面', [], 'Dabhwkvz_vC', 30.7, 32.8),
+  bankLine('benefit', 'ナチュラルなのに存在感のある眉', [], 'Dag9_a0psJP', 20.8, 23.7),
+  bankLine('benefit', '眉毛が変わるだけで、顔の印象はここまで変わります', ['impression', 'suitable', 'color'], 'DcsYuD1pLVT', 23.5, 28),
+  bankLine('benefit', '眉毛が整うと、印象は想像以上に変わります', ['asymmetry', 'droopy', 'impression'], 'DQ86PDmk-hN', 23.2, 26.1),
+  bankLine('benefit', 'ガイドラインができると、朝の行動が変わります', ['morning_time', 'sweat'], 'Db7OhBlJMaw', 15.5, 19.7),
+  bankLine('benefit', '描き足す量が減るだけで、朝のメイクがラクに', ['morning_time'], 'DdYIcKtzcor', 16, 19.5),
+  bankLine('benefit', '時短できるアートメイク', ['morning_time', 'sweat'], 'DbhcmcopFxX', 20.3, 21.1),
+  bankLine('benefit', '眉を少し明るくするだけで、顔全体がパッと明るく', ['color'], 'DawSANOJnMu', 14.9, 18.1),
+  bankLine('benefit', 'ナチュラルで抜け感のある眉', ['impression', 'color'], 'DawSANOJnMu', 22.1, 26.1),
+  bankLine('benefit', '過去の定着を生かしたナチュラルなレベルアップ', ['previous'], 'DbS1uVlJdQY', 14.1, 17.6),
+  bankLine('benefit', '自分でも仕上げられる眉に', [], 'DdYIcKtzcor', 29.1, 30.7),
+  bankLine('benefit', '1週間は眉の保湿をお願いしています', ['anxiety'], 'Da90Xz0pY7-', 28.8, 31.5),
+  bankLine('benefit', '当日はお酒を控えていただきます', ['anxiety'], 'Da90Xz0pY7-', 37.1, 39.2),
+  bankLine('close', '眉毛にお悩みの方、ぜひお待ちしてます', [], 'DbhcmcopFxX', 21.1, 22.7),
+  bankLine('close', '垢抜けたい方、ぜひお待ちしてます', ['impression', 'color'], 'DawSANOJnMu', 26.1, 26.4),
+]);
+const BEAT_LABELS                       = { hook: '問いかけ', intro: '名乗り', worry: 'お悩み', approach: 'デザインの考え方', procedure: '施術', reveal: 'ご対面', benefit: '仕上がりの良さ', close: '予約の案内' };
+const ARC         = ['intro', 'worry', 'approach', 'procedure', 'reveal', 'benefit'];
+const ARC_PRIORITY         = ['worry', 'approach', 'benefit', 'reveal', 'procedure', 'intro'];
+const ARC_EXTRA         = ['approach', 'benefit', 'procedure', 'worry'];
+/** 場面の数に合わせて、遠山さんの流れ（問いかけ→名乗り→悩み→方針→施術→対面→良さ→案内）を割り当てる。 */
+function arcBeats(n        )         {
+  if (n <= 0) return [];
+  if (n === 1) return ['close'];
+  const middle = n - 2;
+  const beats         = middle >= ARC.length ? [...ARC] : ARC_PRIORITY.slice(0, middle);
+  for (let k = 0; beats.length < middle; k++) beats.push(ARC_EXTRA[k % ARC_EXTRA.length]);
+  beats.sort((a, b) => ARC.indexOf(a) - ARC.indexOf(b));
+  return ['hook', ...beats, 'close'];
+}
+function beatForRole(role      )       {
+  return role === 'opening' ? 'hook' : role === 'cta' ? 'close' : role === 'consult' ? 'worry' : role === 'finish' ? 'benefit' : role === 'conditions' ? 'benefit' : 'approach';
+}
+function narrationCapacity(seconds        , d = DEFAULTS)         {
+  return Math.max(0, Math.floor(seconds * (d.narrationCharsPerSecond ?? DEFAULTS.narrationCharsPerSecond) + DEFAULTS.epsilon));
+}
+/** 工程・悩み・読める長さで言い回しを選ぶ。主の悩みに合う文→ほかの悩み→どの悩みでも可、の順。同じ文は繰り返さない。 */
+function pickNarration(beat      , inputs               , capacity        , used              = new Set(), captionCapacity = capacity)                            {
+  const primary = inputs.worries.find(w => w.primary)?.key ?? '';
+  const others = inputs.worries.filter(w => !w.primary).map(w => w.key);
+  const worry = WORRIES.find(w => w[0] === primary);
+  const region = inputs.region_label && !dangerous(inputs.region_label) ? inputs.region_label : '';
+  const pattern = (start        , end        )               => ({ code: 'DQ86PDmk-hN', start, end });
+  const dynamic                                  = [];
+  if (beat === 'hook' && worry) dynamic.push({ beat, text: worry[3], w: [primary], ref: null, rank: 0.5 });
+  if (beat === 'worry' && worry && primary !== 'other') {
+    dynamic.push({ beat, text: `今日のお客様は「${worry[1]}」とのお悩み`, w: [primary], ref: pattern(2.4, 6.9), rank: -1 });
+    dynamic.push({ beat, text: `「${worry[1]}」とのお悩み`, w: [primary], ref: pattern(2.4, 6.9), rank: 0.5 });
+    dynamic.push({ beat, text: worry[1], w: [primary], ref: null, rank: 0.8 });
+  }
+  const other = (inputs.other ?? '').replace(/\s+/g, ' ').trim();
+  if (beat === 'worry' && primary === 'other' && other && !dangerous(other) && !outputBanned(other)) dynamic.push({ beat, text: `「${other}」とのお悩み`, w: [primary], ref: pattern(2.4, 6.9), rank: -1 });
+  if (beat === 'close') dynamic.push({ beat, text: region ? `${region}で眉のご相談は、プロフィールから` : 'ご予約はプロフィールから', w: [], ref: pattern(26.4, 27.2), rank: -1 });
+  const score = (l          ) => !l.w.length ? 2 : l.w.includes(primary) ? 0 : l.w.some(k => others.includes(k)) ? 1 : 9;
+  const pool = [...NARRATION_BANK.filter(l => l.beat === beat).map(l => ({ ...l, rank: score(l) })), ...dynamic]
+    .filter(l => l.rank < 9 && !dangerous(l.text)).sort((a, b) => a.rank - b.rank);
+  const fits = (l          ) => Array.from(l.text).length <= capacity;
+  // 同じ関連度なら、テロップにもそのまま載る長さの文を先にする（テロップ＝話す言葉、が遠山さんの型）。
+  const onScreen = (l          ) => Array.from(l.text).length <= captionCapacity ? 0 : 1;
+  pool.sort((a, b) => a.rank - b.rank || onScreen(a) - onScreen(b));
+  const chosen = pool.find(l => fits(l) && !used.has(l.text)) ?? pool.find(fits);
+  return chosen ? { text: chosen.text, beat, ref: chosen.ref ? { ...chosen.ref } : null } : { text: '', beat, ref: null };
+}
+/** 各場面にナレーション原稿を付け、テロップも同じ文にする（遠山さんの型）。声がある場面は素材の声を使う。 */
+function assignNarration(plan      , inputs               , d                 )       {
+  const beats = arcBeats(plan.items.length), used = new Set        ();
+  plan.items.forEach((item, n) => {
+    const length = item.output.end - item.output.start;
+    const captionCapacity = Math.min(d.caption.maxChars * d.caption.maxLines, Math.floor((length - d.caption.padding + d.epsilon) / d.caption.secondsPerChar));
+    const picked = pickNarration(beats[n], inputs, narrationCapacity(length, d), used, captionCapacity);
+    // 声がある場面は素材の声を使う。原稿は「声を使わない場合」の代わりとして残す。
+    item.narration = { ...picked, source: item.caption.source === 'speech' ? 'speech' : 'bank' };
+    if (!picked.text) return;
+    used.add(picked.text);
+    if (item.caption.source === 'speech') return;
+    const first = picked.text.split('、')[0];
+    const caption = fitCaption(picked.text, length, d).length ? picked.text : fitCaption(first, length, d).length ? first : '';
+    if (caption) item.caption.lines = [caption];
+  });
+}
+const FLOW_ORDER         = ['opening', 'consult', 'explain', 'finish', 'conditions', 'cta'];
+function fillRole(c           )              {
+  if (c.shot_type === 'consult_mid') return 'consult';
+  if (c.shot_type === 'face_front' || c.shot_type === 'brow_close') return c.segment.camera.dark || c.segment.camera.blurry || !c.segment.camera.stable ? 'explain' : 'finish';
+  if (['design_hands', 'procedure_wide', 'tool_prop', 'staff_intro', 'other'].includes(c.shot_type)) return 'explain';
+  return null;
+}
+function freeSpans(c                                                 , taken          , d                 )                                   {
+  const spans = [{ start: c.start, end: c.end }];
+  for (const u of taken.filter(u => u.clip_id === c.clip_id).sort((a, b) => a.start - b.start)) {
+    for (let n = spans.length - 1; n >= 0; n--) {
+      const s = spans[n];
+      if (!overlap(s, u)) continue;
+      spans.splice(n, 1, ...[{ start: s.start, end: Math.min(s.end, u.start) }, { start: Math.max(s.start, u.end), end: s.end }].filter(x => x.end - x.start > d.epsilon));
+    }
+  }
+  return spans;
+}
+/** 固定の枠で足りない分を、未使用の区間から1〜3秒のカットで埋める。まだ使っていない素材を優先し、目標秒数に届くか素材が尽きるまで。 */
+function fillPlan(plan      , list             , used          , inputs               , index                , d                 )       {
+  const lengthOf = (i          ) => i.still ? i.still.hold : i.source ? (i.source.end - i.source.start) / i.speed : 0;
+  let total = plan.items.reduce((n, i) => n + lengthOf(i), 0);
+  const blocked           = [];
+  const uses = (id        ) => used.filter(u => u.clip_id === id).length;
+  const primary = inputs.worries.find(w => w.primary)?.key;
+  for (let guard = 0; guard < 60 && total < d.fillTargetSeconds - d.epsilon; guard++) {
+    const room = d.targetSeconds.max - total;
+    if (room < d.cutSeconds.min) break;
+    const options = list.flatMap(c => {
+      const role = fillRole(c);
+      if (!role) return [];
+      const span = freeSpans(c, [...used, ...blocked], d).find(s => s.end - s.start >= d.cutSeconds.min - d.epsilon);
+      return span ? [{ c, role, span }] : [];
+    });
+    if (!options.length) break;
+    options.sort((a, b) => uses(a.c.clip_id) - uses(b.c.clip_id)
+      || Number(b.c.clip.worry_candidates.some(w => w.key === primary)) - Number(a.c.clip.worry_candidates.some(w => w.key === primary))
+      || Number(a.c.shot_type === 'other') - Number(b.c.shot_type === 'other'));
+    const { c, role, span } = options[0];
+    const avail = span.end - span.start;
+    let length = Math.min(d.fillCutSeconds, avail, room);
+    if (avail - length < d.cutSeconds.min && avail <= Math.min(d.cutSeconds.max, room)) length = avail;
+    const cut = snapToSpeech({ start: span.start, end: span.start + length }, c.clip.segments.flatMap(s => s.speech), d.speechTolerance);
+    if (!cut || cut.start < c.start - d.epsilon || cut.end > c.end + d.epsilon || used.some(u => u.clip_id === c.clip_id && overlap(u, cut)) || cut.end - cut.start > room + d.epsilon) {
+      blocked.push({ clip_id: c.clip_id, start: span.start, end: span.end });
+      continue;
+    }
+    const source         = { clip_id: c.clip_id, segment_id: c.segment_id, start: cut.start, end: cut.end };
+    const at = plan.items.findIndex(i => FLOW_ORDER.indexOf(i.role) > FLOW_ORDER.indexOf(role));
+    plan.items.splice(at < 0 ? plan.items.length : at, 0, newItem(role, source, c, inputs, index, d));
+    used.push(source);
+    total += cut.end - cut.start;
+  }
+}
+const RETAKE_HINTS                                = {
+  opening: '本人が悩みを問いかける冒頭（3秒）', consult: '鏡の前で希望を話す相談（5秒）', explain: '施術中の手元と寝台の引き（5秒ずつ）',
+  finish: '仕上がりの正面と眉の寄り（5秒ずつ）', cta: '本人が予約を案内する姿（3秒）',
+};
+function shortGap(plan      , d                 )             {
+  if (plan.total_out_seconds >= d.targetSeconds.min - d.epsilon) return null;
+  const missing = (['opening', 'consult', 'explain', 'finish', 'cta']          ).filter(r => !plan.items.some(i => i.role === r && i.source)).map(r => RETAKE_HINTS[r] );
+  const hints = missing.length ? missing : [RETAKE_HINTS.explain , RETAKE_HINTS.finish ];
+  return { reason: `あと約${(d.targetSeconds.min - plan.total_out_seconds).toFixed(1)}秒足りません。`, next_time: `撮ると使える場面：${hints.join('／')}` };
+}
+
 function newItem(role      , source               , c                  , inputs               , index                , d                 )           {
   const note = c?.segment.camera.dark || c?.segment.camera.blurry || c && !c.segment.camera.stable ? '暗い・ブレ・ピントの懸念があるため補助映像としてのみ候補。' : '';
-  const spoken = c?.segment.speech.find(s => source && overlap(s,source) && fitCaption(s.text,(source.end-source.start)/d.speed.normal,d).length);
+  const spoken = c?.segment.speech.find(s => source && overlap(s,source) && (s.speaker !== 'staff' || Array.from(s.text).length >= d.minStaffQuoteChars) && fitCaption(s.text,(source.end-source.start)/d.speed.normal,d).length);
   return { slot: 0, role, source, shot_type: c?.shot_type ?? 'other', who_visible: c?.who_visible ?? 'none', output: {start:0,end:0}, speed:d.speed.normal,
     still: source ? null : {kind:'text_card',hold:d.textCardSeconds},
     caption:{lines:[spoken?.text ?? bank(role,inputs)],position: c && ['customer_face','customer_partial'].includes(c.who_visible) ? 'top' : 'lower_center',show_from:0,show_to:0,source:spoken?'speech':'bank'},
-    edit:{cut:source?'通常の切替':'文字カード',zoom:null,note:`${note}${c?.clip.clip_flags.silent ? '声が無いので字幕で説明。' : ''}${c?.segment.retake_of ? '言い直しを避けて後半を使いました。' : ''}字幕は眉・顔を避ける。`,audio:'keep'},
+    edit:{cut:source?'通常の切替':'文字カード',zoom:null,note:`${note}${c?.clip.clip_flags.silent ? '声が無いのでテロップと後付けナレーションで説明。' : ''}${c?.segment.retake_of ? '言い直しを避けて後半を使いました。' : ''}字幕は眉・顔を避ける。`,audio:'keep'},
     why:{observation:c?clean(c.segment.notes):'この役割の素材がないため文字カードの案です',booking_aim:'相談内容と次の行動が伝わるようにする（仮説）',reach_aim:'自分に関係する話だと早く分かるようにする（仮説）'},
     reference: c ? linkReference(role,c.shot_type,inputs.worries.some(w=>w.key==='asymmetry')?['R01','R04']:['R03'],index) : null,
     alternatives:[],warnings:[],needs_check:role==='finish'?['撮影時点は未確認。施術前後や定着後とは断定しません。']:role==='cta'?['実際のプロフィールの相談先を公開前に確認してください。']:[],confidence:{observation:'medium',fit:'low'}};
@@ -218,7 +417,7 @@ function buildPlan(analyses                , inputs               , referenceInd
     if (c.duration <= 0) plan.gaps.push({clip_id:c.clip_id,reason:'素材の長さが0秒のため使えません。'});
     if (c.clip_flags.multiple_customers_suspected) plan.gaps.push({clip_id:c.clip_id,reason:'別のお客様が映っていそうです。1回に1症例として素材を分けてください。'});
     if(c.segments.some(s => ['face_front','brow_close'].includes(s.shot_type) && (s.camera.dark || s.camera.blurry || !s.camera.stable))) plan.gaps.push({clip_id:c.clip_id,role:'finish',reason:'暗い・ブレ・ピントに懸念がある区間は仕上がりに使いません。'});
-    if(c.segments.some(s=>s.shot_type==='other')) plan.gaps.push({clip_id:c.clip_id,reason:'場面の種類を判別できない区間は使いません。'});
+    if(c.segments.some(s=>s.shot_type==='other'&&!['none','staff_only'].includes(s.who_visible))) plan.gaps.push({clip_id:c.clip_id,reason:'場面の種類を判別できない区間は使いません。'});
   }
   if (!list.length) { plan.checks.errors.push('読み取れませんでした。使える素材と映り方の設定を確認してください。'); return plan; }
   const requests                                  = template==='explain' ? [{role:'opening',shots:['staff_intro','design_hands']},{role:'explain',shots:['staff_intro']},{role:'explain',shots:['design_hands','tool_prop']},{role:'conditions'},{role:'cta'}] : template==='case_intro' ? [{role:'opening',shots:['face_front']},{role:'explain'},{role:'finish',shots:['face_front']},{role:'finish',shots:['brow_close']},{role:'conditions'},{role:'cta'}] : [{role:'opening'},{role:'consult'},{role:'explain',shots:['design_hands']},{role:'explain',shots:['staff_intro','procedure_wide','tool_prop']},{role:'finish',shots:['face_front']},{role:'finish',shots:['brow_close']},{role:'cta'}];
@@ -240,6 +439,7 @@ function buildPlan(analyses                , inputs               , referenceInd
       const spans=[{start:c.start,end:c.end}];
       for(const u of occupied){for(let n=spans.length-1;n>=0;n--){const s=spans[n];if(!overlap(s,u))continue;spans.splice(n,1,...[{start:s.start,end:Math.min(s.end,u.start)},{start:Math.max(s.start,u.end),end:s.end}].filter(x=>x.end-x.start>defaults.epsilon));}}
       for(const span of spans) {
+        if(span.end-span.start<defaults.cutSeconds.min-defaults.epsilon&&!(same(span.start,c.start)&&same(span.end,c.end)))continue;
         const shotBudget = role==='explain' ? defaults.shotBudgets[c.shot_type                                     ] : undefined;
         const proposed={start:span.start,end:Math.min(span.end,span.start+(shotBudget??defaults.budgets[role]))};
         const speech=c.clip.segments.flatMap(s=>s.speech);
@@ -256,9 +456,12 @@ function buildPlan(analyses                , inputs               , referenceInd
     if(source)used.push(source);
     plan.items.push(item);
   }
+  fillPlan(plan,list,used,inputs,referenceIndex,defaults);
   if (!plan.items.some(i=>i.source)) {plan.items=[];plan.checks.errors.push('読み取れませんでした。構成に使える区間がありません。');return plan;}
   const timeline=computeTimeline(plan.items);plan.items=timeline.items;plan.total_out_seconds=timeline.total_out_seconds;
   for(const [i,item] of plan.items.entries()){item.slot=i+1;item.caption.show_from=item.output.start;item.caption.show_to=item.output.end;item.alternatives=pickAlternatives(item.role,eligibleAnalyses(analyses,inputs),used,defaults.alternativeCount);}
+  assignNarration(plan,inputs,defaults);
+  const short=shortGap(plan,defaults);if(short)plan.gaps.push(short);
   plan.duration_note=durationNote(plan);
   plan.checks=verifyPlan(plan,analyses,inputs,referenceIndex,referenceIndex.hypotheses_ids);
   return plan;
@@ -323,10 +526,20 @@ function verifyPlan(plan      , analyses                , inputs               ,
     let lines=fitCaption(text,length,d);
     if(!lines.length&&text){lines=fitCaption(bank(item.role,inputs),length,d);if(!lines.length){const short                    ={opening:'眉のお悩みは？',consult:'希望を確認',explain:'形を相談',finish:'眉を確認',conditions:'個人差があります',cta:'相談はプロフィールへ'};lines=fitCaption(short[item.role],length,d);}result.fixes.push('読める長さに合わせて字幕を短縮しました。');}
     const captionText=lines.join('');
+    const narCap=narrationCapacity(length,d);
+    let nar=item.narration;
+    const beat=nar?.beat??beatForRole(item.role);
+    if(!nar||typeof nar.text!=='string'||!['bank','new','speech'].includes(nar.source)||dangerous(nar.text)||outputBanned(nar.text)||nar.source==='new'&&/[「」『』]/.test(nar.text)||Array.from(nar.text).length>narCap){
+      if(nar?.source==='new')result.fixes.push('ナレーション案を、読める長さ・使える表現の定型に戻しました。');
+      nar={...pickNarration(beat,inputs,narCap,new Set(plan.items.filter(x=>x!==item).map(x=>x.narration?.text??''))),source:'bank'};
+    }
+    nar={...nar,source:item.caption.source==='speech'?'speech':nar.source==='speech'?'bank':nar.source};
+    item.narration=nar;
+    const heard=captionText+nar.text;
     const reasons         =[];
     if(speeches.some(s=>s.speaker!=='staff'))reasons.push('お客様の感想・反応、または話者不明の声');
-    if(CAUTION_PHRASES.some(word=>captionText.includes(word)))reasons.push('体験談・強い言葉');
-    if(PRICE.test(captionText.normalize('NFKC')))reasons.push('料金の数字');
+    if(CAUTION_PHRASES.some(word=>heard.includes(word)))reasons.push('体験談・強い言葉');
+    if(PRICE.test(heard.normalize('NFKC')))reasons.push('料金の数字');
     if(/施術前後|ビフォーアフター|before.*after/i.test(captionText)||
       plan.items.some(x=>analyses.find(c=>c.clip_id===x.source?.clip_id)?.segments.some(s=>x.source&&overlap(s,x.source)&&s.timing==='before'))&&
       clip?.segments.some(s=>item.source&&overlap(s,item.source)&&s.timing==='after'))reasons.push('施術前後の比較');
@@ -371,11 +584,12 @@ function formatCapcutMemo(plan      , clips                )         {
     `2. 各クリップの残す区間（前後を${(plan.defaults??DEFAULTS).trimStep}秒多めに残して、あとで詰める）`];
   for(const i of plan.items){
     const s=i.source;
-    lines.push(`\n場面${String(i.slot).padStart(2,'0')} ${ROLE_LABELS[i.role]}`,
+    lines.push(`\n場面${String(i.slot).padStart(2,'0')} ${ROLE_LABELS[i.role]}${i.narration?`（流れ：${BEAT_LABELS[i.narration.beat]}）`:''}`,
       s?`元の秒数：${clips.find(c=>c.clip_id===s.clip_id)?.original_name??s.clip_id} ${seconds(s.start)}〜${seconds(s.end)}秒（丸め前 ${s.start}〜${s.end}）`:`元の秒数：${i.still?.kind==='text_card'?'文字カード・元素材なし':`静止フレーム ${i.still?.clip_id} ${i.still?.at}秒`}（丸め前 hold=${i.still?.hold}）`,
       `配置の目安：${seconds(i.output.start)}〜${seconds(i.output.end)}秒（丸め前 ${i.output.start}〜${i.output.end}）`,
       `速度：${i.speed}倍${i.still?`／表示 ${i.still.hold}秒`:''}`,
       `3. 字幕案：${i.caption.lines.join(' ／ ')||'なし（この短い場面に文字を詰めない）'}｜${i.caption.lines.length}行｜${i.caption.position==='top'?'上':i.caption.position==='center'?'中央':'中央下'}｜完成側 ${seconds(i.caption.show_from)}〜${seconds(i.caption.show_to)}秒（丸め前 ${i.caption.show_from}〜${i.caption.show_to}）`,
+      `ナレーション（後で読む）：${i.narration?.source==='speech'?`素材の声をそのまま使う${i.narration.text?`（声を使わない場合：${i.narration.text}）`:''}`:i.narration?.text||'入れない（間をとる）'}${i.narration?.ref?`（遠山さん ${i.narration.ref.code} ${seconds(i.narration.ref.start)}〜${seconds(i.narration.ref.end)}秒の言い回し）`:''}`,
       `4. ズーム：${i.edit.zoom?`${i.edit.zoom.from}→${i.edit.zoom.to}%（試験値）`:'固定'}。${i.edit.note}`,
       `音声：${i.edit.audio==='mute'?'元音声をミュート。':'実際に再生して確認'}`,
       i.reference?`参考：${i.reference.code} ${seconds(i.reference.start)}〜${seconds(i.reference.end)}秒。参考にする点：${i.reference.point}／今回との違い：${i.reference.difference}／予約増加は未検証。${i.reference.baseline_note??''}`:'参考なし・新しい仮説',
@@ -384,7 +598,8 @@ function formatCapcutMemo(plan      , clips                )         {
       ...i.warnings.map(s=>'確認の印：'+s),
       ...i.needs_check.map(s=>'要確認：'+s));
   }
-  lines.push('\n5. 最後：黒い余白を残さない。書き出し前に最後のフレームまで確認。',plan.duration_note,...plan.gaps.map(g=>`補足：${g.reason??''}${g.next_time??''}`),'秒数・倍率・文字数は試験値です。予約増加・未知素材での判断精度は未検証です。');
+  lines.push('\n5. 最後：黒い余白を残さない。書き出し前に最後のフレームまで確認。',
+    '6. ナレーションは CapCut の「録音」で、並べた動画を再生しながら読むと秒数が合います。'+(plan.items.some(i=>i.narration?.text.includes('（名前）'))?'「（名前）」はご自身の名前に置き換えてください。':''),plan.duration_note,...plan.gaps.map(g=>`補足：${g.reason??''}${g.next_time??''}`),'秒数・倍率・文字数は試験値です。予約増加・未知素材での判断精度は未検証です。');
   return clean(lines.join('\n'));
 }
 
@@ -466,14 +681,15 @@ function validateGeminiAnalysis(json        , clipId       , duration       )   
   }catch{return {clip_id:clipId,duration,status:'failed',error:`読み取り結果の形式を確認できませんでした（${step}）`,segments:[],clip_flags:{silent:false,multiple_customers_suspected:false,text_burned_in:false},worry_candidates:[],model:'',usage:{input_tokens:0,output_tokens:0}};}
 }
 function applyCaptions(plan      , value         )       {
-  const items=(value                                                            )?.items;
-  if(!Array.isArray(items)||items.length!==plan.items.length||items.some(i=>!i||!Array.isArray(i.lines)||i.lines.length>CAPTION_LIMITS.maxLines||i.lines.some(l=>typeof l!=='string'||l.length>256)||!['speech','bank','new'].includes(i.source)))throw new Error('字幕の形式を確認できませんでした');
-  return {...plan,items:plan.items.map((item,n)=>({...item,caption:{...item.caption,lines:items[n].lines,source:items[n].source==='speech'?'speech':'new'}}))};
+  const items=(value                                                                              )?.items;
+  if(!Array.isArray(items)||items.length!==plan.items.length||items.some(i=>!i||!Array.isArray(i.lines)||i.lines.length>CAPTION_LIMITS.maxLines||i.lines.some(l=>typeof l!=='string'||l.length>256)||!['speech','bank','new'].includes(i.source)||i.narration!==undefined&&(typeof i.narration!=='string'||i.narration.length>512)))throw new Error('字幕の形式を確認できませんでした');
+  return {...plan,items:plan.items.map((item,n)=>{const t=items[n].narration;const narration                    =typeof t!=='string'||t===item.narration?.text?item.narration:{text:t,source:items[n].source==='speech'?'speech':'new',beat:item.narration?.beat??beatForRole(item.role),ref:null};
+    return {...item,narration,caption:{...item.caption,lines:items[n].lines,source:items[n].source==='speech'?'speech':'new'}};})};
 }
 function estimateCost(input       ,output       )        {
   if(![input,output].every(x=>Number.isSafeInteger(x)&&x>=0))throw new Error('使用量が不正です');
   return (input*DEFAULTS.inputUsdPerMillion+output*DEFAULTS.outputUsdPerMillion)*DEFAULTS.usdJpy/1e6;
 }
 
-window.VIDEO_COACH={DEFAULTS,CAPTION_LIMITS,FORBIDDEN_PHRASES,CAUTION_PHRASES,ROLE_LABELS,TEMPLATE_LABELS,WORRIES,seconds,parseAnalyses,endsWithContinuation,snapToSpeech,eligibleAnalyses,pickTemplate,pickAlternatives,linkReference,computeTimeline,buildPlan,verifyPlan,formatCapcutMemo,authorize,requireUuid,advanceState,budgetStatus,retentionUntil,uploadPath,validateSessionInputs,validateClipInput,normalizeGeminiAnalysis,validateGeminiAnalysis,applyCaptions,estimateCost};
+window.VIDEO_COACH={DEFAULTS,CAPTION_LIMITS,FORBIDDEN_PHRASES,CAUTION_PHRASES,ROLE_LABELS,TEMPLATE_LABELS,WORRIES,seconds,parseAnalyses,endsWithContinuation,snapToSpeech,eligibleAnalyses,pickTemplate,pickAlternatives,linkReference,computeTimeline,NARRATION_BANK,BEAT_LABELS,arcBeats,narrationCapacity,pickNarration,buildPlan,verifyPlan,formatCapcutMemo,authorize,requireUuid,advanceState,budgetStatus,retentionUntil,uploadPath,validateSessionInputs,validateClipInput,normalizeGeminiAnalysis,validateGeminiAnalysis,applyCaptions,estimateCost};
 })();
