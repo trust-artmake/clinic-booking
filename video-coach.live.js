@@ -125,9 +125,10 @@ window.startVideoCoachLive = async function () {
     } else if (screen === 3) {
       app.innerHTML = "<h1>おすすめの構成</h1><p>約" +
         esc(L.seconds(plan.total_out_seconds)) + "秒・" + plan.items.length +
-        "場面</p>" + plan.items.map((item, n) =>
+        "場面</p>" + skeletonHtml() + plan.items.map((item, n) =>
           '<article class="scene"><h2>場面' + (n + 1) + " " +
-          esc(item.narration ? L.BEAT_LABELS[item.narration.beat] : L.ROLE_LABELS[item.role]) + "</h2><p>テロップ：" +
+          esc(item.skeleton ? L.SLOT_LABELS[item.skeleton] : L.ROLE_LABELS[item.role]) + "</h2>" +
+          (item.narration ? '<p class="beat">流れ：' + esc(L.BEAT_LABELS[item.narration.beat]) + "</p>" : "") + "<p>テロップ：" +
           item.caption.lines.map(esc).join("<br>") + "</p>" + narrationHtml(item, n) + "<p>完成 " +
           esc(L.seconds(item.output.start)) + "–" +
           esc(L.seconds(item.output.end)) +
@@ -200,6 +201,21 @@ window.startVideoCoachLive = async function () {
         : "") +
       "</p>"
     ).join("");
+  }
+  // 遠山型の骨組み（10枠）のそろい具合と、足りない枠の撮影リスト。各項目で遠山さんの例を再生できる。
+  function skeletonHtml() {
+    const missing = plan.gaps.map((g, i) => ({ g, i })).filter(({ g }) => g.skeleton);
+    if (!plan.items.some((i) => i.skeleton)) return "";
+    const filled = L.SKELETON.length - missing.length;
+    return '<section class="skeleton"><h2>遠山型の骨組み ' + filled + "/" + L.SKELETON.length +
+      " がそろっています</h2>" +
+      (missing.length
+        ? "<p>足りない場面を撮ると、遠山さんの型に近づきます。</p><ul>" + missing.map(({ g, i }) =>
+          "<li>" + esc(L.SLOT_LABELS[g.skeleton]) + "：" + esc(g.next_time || "") +
+          (g.example ? ' <button data-action="example" data-index="' + i + '">遠山さんの例を見る</button>' : "") +
+          "</li>"
+        ).join("") + "</ul>"
+        : "<p>すべての場面がそろっています。</p>") + "</section>";
   }
   function narrationHtml(item, n) {
     const nar = item.narration;
@@ -667,7 +683,7 @@ window.startVideoCoachLive = async function () {
         item.edit.zoom = null;
         item.edit.note = c.why;
         adjustPlan(next);
-      } else if (action === "play" || action === "reference" || action === "phrase") {
+      } else if (action === "play" || action === "reference" || action === "phrase" || action === "example") {
         playerIndex = Number(b.dataset.index);
         playerSide = action === "play" ? "source" : action;
         if (!dialog.open) dialog.showModal();
@@ -683,16 +699,24 @@ window.startVideoCoachLive = async function () {
     const epoch = ++playerEpoch;
     video.pause();
     playerEnd = null;
-    const item = plan.items[playerIndex],
-      phrase = playerSide === "phrase" && !!item.narration?.ref,
-      reference = playerSide === "reference" || phrase;
-    $("player-title").textContent = "場面" + (playerIndex + 1);
+    const example = playerSide === "example" ? plan.gaps[playerIndex] : null,
+      item = example ? null : plan.items[playerIndex],
+      phrase = playerSide === "phrase" && !!item?.narration?.ref,
+      reference = playerSide === "reference" || phrase || !!example;
+    $("player-title").textContent = example
+      ? "撮影の例：" + L.SLOT_LABELS[example.skeleton]
+      : "場面" + (playerIndex + 1);
     $("player-status").textContent = "区間を準備しています…";
-    $("source-tab").disabled = !item.source;
-    $("reference-tab").disabled = !item.reference;
+    $("source-tab").disabled = !item?.source;
+    $("reference-tab").disabled = !item?.reference;
     try {
       let url, range;
-      if (phrase) {
+      if (example) {
+        // 足りない枠の撮り方を、遠山さんの該当場面で見せる。
+        const r = await request("sign_reference", { code: example.example.code });
+        url = C.signedURL(r.signed);
+        range = { start: example.example.start, end: example.example.end };
+      } else if (phrase) {
         // 遠山さんの動画で、この言い回しが出ている秒数を再生する。
         const r = await request("sign_reference", {
           code: item.narration.ref.code,
@@ -730,15 +754,21 @@ window.startVideoCoachLive = async function () {
             "閲覧URLを取り直すには「もう一度再生」を押してください";
         }
       };
-      $("player-meta").textContent = phrase
+      $("player-meta").textContent = example
+        ? "遠山さん " + example.example.code + " " + L.seconds(range.start) + "–" + L.seconds(range.end) + "秒"
+        : phrase
         ? L.seconds(item.narration.ref.start) + "–" + L.seconds(item.narration.ref.end) + "秒（前後1秒ずつ足して再生）"
         : range.start + "–" + range.end + "秒";
-      $("player-point").textContent = phrase
+      $("player-point").textContent = example
+        ? "撮り方の例：" + example.example.desc + "（" + (example.next_time || "") + "）"
+        : phrase
         ? "遠山さんの言い回し：" + item.narration.text
         : reference
         ? "参考にする点：" + item.reference.point
         : "採用する元区間";
-      $("player-difference").textContent = phrase
+      $("player-difference").textContent = example
+        ? "同じ構図で撮って素材に加えると、骨組みがそろいます"
+        : phrase
         ? "テロップと話す言葉をそろえる型です。自分の言葉に言い換えても大丈夫です"
         : reference
         ? "今回との違い：" + item.reference.difference
