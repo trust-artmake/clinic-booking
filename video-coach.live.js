@@ -386,7 +386,8 @@ window.startVideoCoachLive = async function () {
       f.done = true;
       localStorage.removeItem(key);
     } catch (e) {
-      f.error = e.message;
+      // 通信の切断などは英語（Failed to fetch）のまま出さず、日本語の案内にする。
+      f.error = C.errorMessage(e);
       fail(e);
     } finally {
       f.running = false;
@@ -503,7 +504,16 @@ window.startVideoCoachLive = async function () {
         schedule();
       } else if (screen === 2) {
         inputs.selected_at = new Date().toISOString();
-        await request("update_inputs", { inputs });
+        // 素材の読み取り中は「処理中」(409) で断られることがある。少し待ってやり直す（案づくりの予約を落とさない）。
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await request("update_inputs", { inputs });
+            break;
+          } catch (e) {
+            if (!(e.status === 409 && /処理中/.test(e.message)) || attempt >= 8) throw e;
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
         wantPlan = true;
         render();
         schedule(1);
@@ -715,7 +725,11 @@ window.startVideoCoachLive = async function () {
         // 足りない枠の撮り方を、遠山さんの該当場面で見せる。
         const r = await request("sign_reference", { code: example.example.code });
         url = C.signedURL(r.signed);
-        range = { start: example.example.start, end: example.example.end };
+        // カットの切れ目ちょうどから始めると前の場面が一瞬映るので、0.2秒後から流す。
+        range = {
+          start: Math.min(example.example.start + 0.2, example.example.end - 0.1),
+          end: example.example.end,
+        };
       } else if (phrase) {
         // 遠山さんの動画で、この言い回しが出ている秒数を再生する。
         const r = await request("sign_reference", {
