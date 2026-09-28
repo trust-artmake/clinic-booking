@@ -17,7 +17,7 @@ const DEFAULTS = Object.freeze({
   // AI の時刻読みのズレ（秒）。これ以内は実測の長さに丸め、超えたら捏造の疑いとして failed。
   analysisOverrunSeconds: 1,
   // 声に頼らない構成（設計追補 v1.3）。ナレーションは1秒あたり約7文字（遠山さんのテロップ実測 7〜8文字/秒より少し余裕）。
-  narrationCharsPerSecond: 7, minStaffQuoteChars: 10, fillTargetSeconds: 25, fillCutSeconds: 3, cutSeconds: { min: 1.5, max: 3 },
+  narrationCharsPerSecond: 7, minStaffQuoteChars: 10, skeletonCutSeconds: 2, fillTargetSeconds: 25, fillCutSeconds: 3, cutSeconds: { min: 1.5, max: 3 },
   maxClips: 12, maxClipSeconds: 600, maxWorries: 3, codeDigits: 6,
   textCardSeconds: 3, stillSeconds: 1.5, displayDecimals: 2, epsilon: 1e-7,
   zoom: { maxPerPlan: 1, from: 100, to: 115, closeOnlyThreshold: 150 },
@@ -28,6 +28,9 @@ const DEFAULTS = Object.freeze({
 const CAPTION_LIMITS = DEFAULTS.caption;
 const FORBIDDEN_PHRASES = ['必ず定着', '絶対消えない', '美肌加工', '肌を加工', '眉の色を加工', '治る', '痛くない', 'ダウンタイムなし']         ;
 const CAUTION_PHRASES = ['人生が変わ', '垢抜け', '別人', '必ず', '絶対', '気に入り', '嬉しい', 'うれしい', '満足']         ;
+
+
+
 
 
 
@@ -77,8 +80,8 @@ const WORRIES = [
 ]         ;
 const ROLE_SHOTS                           = {
   opening: ['face_front', 'brow_close', 'staff_intro', 'design_hands'],
-  consult: ['consult_mid'], explain: ['design_hands', 'staff_intro', 'procedure_wide', 'tool_prop', 'brow_close'],
-  finish: ['face_front', 'brow_close'], conditions: ['staff_intro', 'tool_prop'], cta: ['store_cta', 'staff_intro'],
+  consult: ['consult_mid'], explain: ['design_hands', 'staff_intro', 'procedure_wide', 'needle_close', 'tool_prop', 'brow_close'],
+  finish: ['face_front', 'brow_close', 'mirror_reaction'], conditions: ['staff_intro', 'tool_prop'], cta: ['store_cta', 'staff_intro'],
 };
 const OUTPUT_BANNED = /効果|確率|[\d０-９.．]*[%％]で伸びる|適合済み/g;
 const PRICE = /(?:[¥￥]\s*[\d０-９])|(?:[\d０-９][\d０-９,，.．\s]*(?:万|千|百)?\s*円)|(?:[\d０-９]+\s*万(?:円)?)|(?:料金|価格|税込|税別)[^\d０-９]*[\d０-９]/;
@@ -244,14 +247,23 @@ const NARRATION_BANK                      = Object.freeze([
   bankLine('approach', '何度も確認しながらデザイン', ['anxiety', 'suitable'], 'Dabhwkvz_vC', 19.7, 21.1),
   bankLine('approach', '自眉を生かしてデザインします', ['previous', 'impression'], 'DbhcmcopFxX', 5.1, 8),
   bankLine('approach', '過去の定着を生かして', ['previous'], 'DbS1uVlJdQY', 14.1, 16.3),
+  bankLine('approach', '細かくデザイン', [], 'DcsYuD1pLVT', 9.6, 10.4),
+  bankLine('approach', 'バランスを見ながら', [], 'DcsYuD1pLVT', 8.5, 9.6),
+  bankLine('approach', 'デザイン完成', [], 'Dabhwkvz_vC', 19.7, 21.1),
+  bankLine('approach', 'デザインが決まり施術へ', [], 'Dabhwkvz_vC', 21.1, 22.9),
   bankLine('procedure', '施術スタート', [], 'DbhcmcopFxX', 8, 8.8),
+  bankLine('procedure', '色素の施術', [], 'Dabhwkvz_vC', 25.9, 27.5),
+  bankLine('procedure', '表面麻酔クリームを塗布', ['anxiety'], 'Dabhwkvz_vC', 22.9, 25.9),
   bankLine('procedure', '1本1本描いて、お顔に馴染む眉に', [], 'DbhcmcopFxX', 8.8, 11.5),
   bankLine('procedure', '完全オーダーメイドで施術していきます', [], 'Dag9_a0psJP', 18.7, 20.8),
   bankLine('procedure', '表面麻酔クリームを塗ってから施術します', ['anxiety'], 'Dabhwkvz_vC', 22.9, 25.9),
   bankLine('procedure', '会話をしながら施術します', ['anxiety'], 'Dabhwkvz_vC', 27.5, 29.1),
   bankLine('reveal', '新しい眉毛とご対面', [], 'DbhcmcopFxX', 14.9, 15.7),
+  bankLine('reveal', '感動の瞬間', [], 'DdYIcKtzcor', 19.7, 20.5),
   bankLine('reveal', 'ついに新しい眉とご対面', [], 'Dabhwkvz_vC', 30.7, 32.8),
   bankLine('benefit', 'ナチュラルなのに存在感のある眉', [], 'Dag9_a0psJP', 20.8, 23.7),
+  bankLine('benefit', '存在感のある眉', [], 'Dag9_a0psJP', 22.7, 23.7),
+  bankLine('benefit', 'お顔に馴染む眉', [], 'DbhcmcopFxX', 9.9, 11.5),
   bankLine('benefit', '眉毛が変わるだけで、顔の印象はここまで変わります', ['impression', 'suitable', 'color'], 'DcsYuD1pLVT', 23.5, 28),
   bankLine('benefit', '眉毛が整うと、印象は想像以上に変わります', ['asymmetry', 'droopy', 'impression'], 'DQ86PDmk-hN', 23.2, 26.1),
   bankLine('benefit', 'ガイドラインができると、朝の行動が変わります', ['morning_time', 'sweat'], 'Db7OhBlJMaw', 15.5, 19.7),
@@ -264,6 +276,8 @@ const NARRATION_BANK                      = Object.freeze([
   bankLine('benefit', '1週間は眉の保湿をお願いしています', ['anxiety'], 'Da90Xz0pY7-', 28.8, 31.5),
   bankLine('benefit', '当日はお酒を控えていただきます', ['anxiety'], 'Da90Xz0pY7-', 37.1, 39.2),
   bankLine('close', '眉毛にお悩みの方、ぜひお待ちしてます', [], 'DbhcmcopFxX', 21.1, 22.7),
+  bankLine('close', 'ご予約はプロフィールから', [], 'DQ86PDmk-hN', 26.4, 27.2),
+  bankLine('close', '詳細はコチラ', [], 'DbS1uVlJdQY', 17.6, 19.7),
   bankLine('close', '垢抜けたい方、ぜひお待ちしてます', ['impression', 'color'], 'DawSANOJnMu', 26.1, 26.4),
 ]);
 const BEAT_LABELS                       = { hook: '問いかけ', intro: '名乗り', worry: 'お悩み', approach: 'デザインの考え方', procedure: '施術', reveal: 'ご対面', benefit: '仕上がりの良さ', close: '予約の案内' };
@@ -310,12 +324,18 @@ function pickNarration(beat      , inputs               , capacity        , used
   // 同じ関連度なら、テロップにもそのまま載る長さの文を先にする（テロップ＝話す言葉、が遠山さんの型）。
   const onScreen = (l          ) => Array.from(l.text).length <= captionCapacity ? 0 : 1;
   pool.sort((a, b) => a.rank - b.rank || onScreen(a) - onScreen(b));
-  const chosen = pool.find(l => fits(l) && !used.has(l.text)) ?? pool.find(fits);
+  const chosen = pool.find(l => fits(l) && !used.has(l.text));
   return chosen ? { text: chosen.text, beat, ref: chosen.ref ? { ...chosen.ref } : null } : { text: '', beat, ref: null };
 }
 /** 各場面にナレーション原稿を付け、テロップも同じ文にする（遠山さんの型）。声がある場面は素材の声を使う。 */
 function assignNarration(plan      , inputs               , d                 )       {
-  const beats = arcBeats(plan.items.length), used = new Set        ();
+  const arc = arcBeats(plan.items.length), used = new Set        ();
+  const beats = plan.items.map((item, n)       => {
+    if (n === 0) return 'hook';
+    if (!item.skeleton) return arc[n];
+    const list = SLOT_BEATS[item.skeleton], k = plan.items.slice(0, n).filter(x => x.skeleton === item.skeleton).length;
+    return list[Math.min(k, list.length - 1)];
+  });
   plan.items.forEach((item, n) => {
     const length = item.output.end - item.output.start;
     const captionCapacity = Math.min(d.caption.maxChars * d.caption.maxLines, Math.floor((length - d.caption.padding + d.epsilon) / d.caption.secondsPerChar));
@@ -330,13 +350,6 @@ function assignNarration(plan      , inputs               , d                 ) 
     if (caption) item.caption.lines = [caption];
   });
 }
-const FLOW_ORDER         = ['opening', 'consult', 'explain', 'finish', 'conditions', 'cta'];
-function fillRole(c           )              {
-  if (c.shot_type === 'consult_mid') return 'consult';
-  if (c.shot_type === 'face_front' || c.shot_type === 'brow_close') return c.segment.camera.dark || c.segment.camera.blurry || !c.segment.camera.stable ? 'explain' : 'finish';
-  if (['design_hands', 'procedure_wide', 'tool_prop', 'staff_intro', 'other'].includes(c.shot_type)) return 'explain';
-  return null;
-}
 function freeSpans(c                                                 , taken          , d                 )                                   {
   const spans = [{ start: c.start, end: c.end }];
   for (const u of taken.filter(u => u.clip_id === c.clip_id).sort((a, b) => a.start - b.start)) {
@@ -348,42 +361,6 @@ function freeSpans(c                                                 , taken    
   }
   return spans;
 }
-/** 固定の枠で足りない分を、未使用の区間から1〜3秒のカットで埋める。まだ使っていない素材を優先し、目標秒数に届くか素材が尽きるまで。 */
-function fillPlan(plan      , list             , used          , inputs               , index                , d                 )       {
-  const lengthOf = (i          ) => i.still ? i.still.hold : i.source ? (i.source.end - i.source.start) / i.speed : 0;
-  let total = plan.items.reduce((n, i) => n + lengthOf(i), 0);
-  const blocked           = [];
-  const uses = (id        ) => used.filter(u => u.clip_id === id).length;
-  const primary = inputs.worries.find(w => w.primary)?.key;
-  for (let guard = 0; guard < 60 && total < d.fillTargetSeconds - d.epsilon; guard++) {
-    const room = d.targetSeconds.max - total;
-    if (room < d.cutSeconds.min) break;
-    const options = list.flatMap(c => {
-      const role = fillRole(c);
-      if (!role) return [];
-      const span = freeSpans(c, [...used, ...blocked], d).find(s => s.end - s.start >= d.cutSeconds.min - d.epsilon);
-      return span ? [{ c, role, span }] : [];
-    });
-    if (!options.length) break;
-    options.sort((a, b) => uses(a.c.clip_id) - uses(b.c.clip_id)
-      || Number(b.c.clip.worry_candidates.some(w => w.key === primary)) - Number(a.c.clip.worry_candidates.some(w => w.key === primary))
-      || Number(a.c.shot_type === 'other') - Number(b.c.shot_type === 'other'));
-    const { c, role, span } = options[0];
-    const avail = span.end - span.start;
-    let length = Math.min(d.fillCutSeconds, avail, room);
-    if (avail - length < d.cutSeconds.min && avail <= Math.min(d.cutSeconds.max, room)) length = avail;
-    const cut = snapToSpeech({ start: span.start, end: span.start + length }, c.clip.segments.flatMap(s => s.speech), d.speechTolerance);
-    if (!cut || cut.start < c.start - d.epsilon || cut.end > c.end + d.epsilon || used.some(u => u.clip_id === c.clip_id && overlap(u, cut)) || cut.end - cut.start > room + d.epsilon) {
-      blocked.push({ clip_id: c.clip_id, start: span.start, end: span.end });
-      continue;
-    }
-    const source         = { clip_id: c.clip_id, segment_id: c.segment_id, start: cut.start, end: cut.end };
-    const at = plan.items.findIndex(i => FLOW_ORDER.indexOf(i.role) > FLOW_ORDER.indexOf(role));
-    plan.items.splice(at < 0 ? plan.items.length : at, 0, newItem(role, source, c, inputs, index, d));
-    used.push(source);
-    total += cut.end - cut.start;
-  }
-}
 const RETAKE_HINTS                                = {
   opening: '本人が悩みを問いかける冒頭（3秒）', consult: '鏡の前で希望を話す相談（5秒）', explain: '施術中の手元と寝台の引き（5秒ずつ）',
   finish: '仕上がりの正面と眉の寄り（5秒ずつ）', cta: '本人が予約を案内する姿（3秒）',
@@ -393,6 +370,96 @@ function shortGap(plan      , d                 )             {
   const missing = (['opening', 'consult', 'explain', 'finish', 'cta']          ).filter(r => !plan.items.some(i => i.role === r && i.source)).map(r => RETAKE_HINTS[r] );
   const hints = missing.length ? missing : [RETAKE_HINTS.explain , RETAKE_HINTS.finish ];
   return { reason: `あと約${(d.targetSeconds.min - plan.total_out_seconds).toFixed(1)}秒足りません。`, next_time: `撮ると使える場面：${hints.join('／')}` };
+}
+
+// ── 遠山型の骨組み（設計追補 v1.4）────────────────────────────────
+// 遠山さんの11本（precision/analysis.json の shot 説明）を画角で集計した10枠。1カットは中央値1.5秒。
+// 骨組みを先に置いて各枠をその画角の素材で埋める。同じ画角での水増しはしない。無い枠は「撮影が必要」と出す。
+
+const ex = (code        , start        , end        , desc        ) => ({ code, start, end, desc });
+const SKELETON                         = Object.freeze([
+  { key: 'host_open', label: '担当者本人（冒頭）', role: 'opening', cuts: 2, seconds: 2.5, retake: '担当者本人がカメラに向かって問いかけ・名乗る（3秒）', examples: [ex('DbS1uVlJdQY', 0, 3.37, '見下ろしの自撮り'), ex('Dabhwkvz_vC', 0, 1.67, '扉を開けて迎える')] },
+  { key: 'before_face', label: '施術前の正面顔', role: 'opening', cuts: 1, retake: '施術前のお客様の正面顔（3秒）', examples: [ex('DbS1uVlJdQY', 4.47, 5.83, '施術前の正面'), ex('DcsYuD1pLVT', 1.47, 2.97, '施術前の正面顔')] },
+  { key: 'consult', label: '相談（鏡・対面）', role: 'consult', cuts: 2, retake: '鏡を持って相談する様子（5秒）', examples: [ex('DbS1uVlJdQY', 7.43, 8.2, '鏡を持つ相談'), ex('Dabhwkvz_vC', 2.97, 5.47, '希望を聞く相談')] },
+  { key: 'design', label: 'デザインを測る・描く', role: 'explain', cuts: 1, retake: '眉を測る・デザインを描く手元（3秒）', examples: [ex('Dabhwkvz_vC', 9.3, 11.57, 'デザインを描く'), ex('Da90Xz0pY7-', 11.63, 13.43, '立って顔を測る')] },
+  { key: 'procedure_wide', label: '施術の全景', role: 'explain', cuts: 2, retake: '施術の全景（寝台の引き・3秒）', examples: [ex('Dabhwkvz_vC', 22.8, 24.23, '施術の全景'), ex('DcsYuD1pLVT', 8.33, 9.4, '施術の斜め俯瞰')] },
+  { key: 'needle', label: '針先・手元の接写', role: 'explain', cuts: 1, retake: '針先・手元の接写（3秒）', examples: [ex('DbS1uVlJdQY', 5.83, 7.43, '針先と眉の寄り'), ex('Dabhwkvz_vC', 24.23, 25.73, '手元の寄り')] },
+  { key: 'mirror_reaction', label: '鏡を見た反応', role: 'finish', cuts: 1, retake: '仕上がりを鏡で見た瞬間（3秒）', examples: [ex('Dabhwkvz_vC', 30.43, 36, '鏡を見た反応'), ex('DcsYuD1pLVT', 14.93, 15.73, '鏡で仕上がりを見る')] },
+  { key: 'finish_close', label: '完成眉の接写', role: 'finish', cuts: 2, retake: '完成した眉の接写（ブラシで整える・3秒）', examples: [ex('DbS1uVlJdQY', 10.63, 12.1, '完成眉・顔上半分'), ex('DcsYuD1pLVT', 18.83, 19.83, '完成眉の寄り')] },
+  { key: 'after_face', label: '完成後の正面・斜め顔', role: 'finish', cuts: 1, retake: '完成後の正面と斜めの顔（3秒）', examples: [ex('Da90Xz0pY7-', 45.6, 47.23, '施術後の目元'), ex('Dag9_a0psJP', 25.7, 28.17, '施術後の正面顔')] },
+  { key: 'host_close', label: '担当者本人の案内', role: 'cta', cuts: 1, seconds: 3, retake: '担当者本人が予約を案内する（3秒）', examples: [ex('DbS1uVlJdQY', 17.47, 18.63, '担当者の案内'), ex('DcsYuD1pLVT', 27.93, 29.87, '担当者が案内')] },
+]);
+const SLOT_LABELS                              = Object.fromEntries(SKELETON.map(s => [s.key, s.label]))                               ;
+const SLOT_BEATS                              = {
+  host_open: ['hook', 'intro'], before_face: ['worry'], consult: ['approach'], design: ['approach'], procedure_wide: ['procedure'],
+  needle: ['procedure'], mirror_reaction: ['reveal'], finish_close: ['benefit'], after_face: ['benefit'], host_close: ['close'],
+};
+function slotMatches(slot             , c           )          {
+  const t = c.segment.timing;
+  switch (slot) {
+    case 'host_open': case 'host_close': return c.shot_type === 'staff_intro' || slot === 'host_close' && c.shot_type === 'store_cta';
+    case 'before_face': return c.shot_type === 'face_front' && t !== 'after' && t !== 'during';
+    case 'consult': return c.shot_type === 'consult_mid';
+    case 'design': return c.shot_type === 'design_hands';
+    case 'procedure_wide': return c.shot_type === 'procedure_wide';
+    case 'needle': return c.shot_type === 'needle_close' || c.shot_type === 'brow_close' && t === 'during';
+    case 'mirror_reaction': return c.shot_type === 'mirror_reaction';
+    case 'finish_close': return c.shot_type === 'brow_close' && t !== 'during' && t !== 'before' && !c.segment.camera.dark && !c.segment.camera.blurry && c.segment.camera.stable;
+    case 'after_face': return c.shot_type === 'face_front' && t !== 'before' && t !== 'during' && !c.segment.camera.dark && !c.segment.camera.blurry && c.segment.camera.stable;
+  }
+}
+/** 骨組みの枠ごとに、その画角の区間から1.5〜2.5秒のカットを取る。1区間は2カットまで・隣り合わせない。 */
+function fillSkeleton(plan      , list             , inputs               , index                , d                 )           {
+  const used           = [];
+  const segKey = (c                                          ) => `${c.clip_id}:${c.segment_id}`;
+  const segUses = new Map                ();
+  const primary = inputs.worries.find(w => w.primary)?.key;
+  const timingRank = (slot             , c           ) => slot === 'before_face' ? Number(c.segment.timing !== 'before') : slot === 'after_face' || slot === 'finish_close' ? Number(c.segment.timing !== 'after') : 0;
+  for (const slot of SKELETON) {
+    let got = 0;
+    for (let k = 0; k < slot.cuts; k++) {
+      const last = plan.items.at(-1)?.source;
+      const pool = list.filter(c => slotMatches(slot.key, c)
+        && (segUses.get(segKey(c)) ?? 0) < (c.end - c.start >= d.cutSeconds.min * 3 ? 2 : 1)
+        && !(last && segKey(last) === segKey(c)))
+        .sort((a, b) => timingRank(slot.key, a) - timingRank(slot.key, b)
+          || (segUses.get(segKey(a)) ?? 0) - (segUses.get(segKey(b)) ?? 0)
+          || used.filter(u => u.clip_id === a.clip_id).length - used.filter(u => u.clip_id === b.clip_id).length
+          || Number(b.clip.worry_candidates.some(w => w.key === primary)) - Number(a.clip.worry_candidates.some(w => w.key === primary)));
+      let placed = false;
+      for (const c of pool) {
+        const span = freeSpans(c, used, d).find(s => s.end - s.start >= Math.min(d.cutSeconds.min, c.end - c.start) - d.epsilon);
+        if (!span) continue;
+        const length = Math.min(span.end - span.start, slot.seconds ?? d.skeletonCutSeconds);
+        const cut = snapToSpeech({ start: span.start, end: span.start + length }, c.clip.segments.flatMap(s => s.speech), d.speechTolerance);
+        if (!cut || cut.start < c.start - d.epsilon || cut.end > c.end + d.epsilon || used.some(u => u.clip_id === c.clip_id && overlap(u, cut))) continue;
+        // 2カット目は、この後の枠（素材があるもの）の分を残しても上限（30秒）に収まる時だけ入れる。
+        const total = plan.items.reduce((n, i) => n + (i.still ? i.still.hold : i.source ? i.source.end - i.source.start : 0), 0);
+        const later = SKELETON.slice(SKELETON.indexOf(slot) + 1).reduce((n, s) => n + (s.key === 'host_close' || list.some(x => slotMatches(s.key, x)) ? s.seconds ?? d.skeletonCutSeconds : 0), 0);
+        if (k > 0 && total + (cut.end - cut.start) + later > d.targetSeconds.max) continue;
+        const source         = { clip_id: c.clip_id, segment_id: c.segment_id, start: cut.start, end: cut.end };
+        const item = newItem(slot.role, source, c, inputs, index, d);
+        item.skeleton = slot.key;
+        plan.items.push(item);
+        used.push(source);
+        segUses.set(segKey(c), (segUses.get(segKey(c)) ?? 0) + 1);
+        got++; placed = true;
+        break;
+      }
+      if (!placed) break;
+    }
+    if (!got) {
+      plan.gaps.push({ skeleton: slot.key, role: slot.role, reason: `撮影が必要：${slot.label}`, next_time: slot.retake, example: { ...slot.examples[0] }, ...(slot.key === 'host_close' ? { handled_by: 'text_card' } : {}) });
+      if (slot.key === 'host_close') {
+        const card = newItem('cta', null, null, inputs, index, d);
+        card.skeleton = 'host_close';
+        plan.items.push(card);
+      }
+    }
+  }
+  const filled = SKELETON.filter(s => plan.items.some(i => i.skeleton === s.key && i.source)).length;
+  plan.coverage = { filled, total: SKELETON.length, missing: SKELETON.filter(s => !plan.items.some(i => i.skeleton === s.key && i.source)).map(s => s.key) };
+  return used;
 }
 
 function newItem(role      , source               , c                  , inputs               , index                , d                 )           {
@@ -420,43 +487,9 @@ function buildPlan(analyses                , inputs               , referenceInd
     if(c.segments.some(s=>s.shot_type==='other'&&!['none','staff_only'].includes(s.who_visible))) plan.gaps.push({clip_id:c.clip_id,reason:'場面の種類を判別できない区間は使いません。'});
   }
   if (!list.length) { plan.checks.errors.push('読み取れませんでした。使える素材と映り方の設定を確認してください。'); return plan; }
-  const requests                                  = template==='explain' ? [{role:'opening',shots:['staff_intro','design_hands']},{role:'explain',shots:['staff_intro']},{role:'explain',shots:['design_hands','tool_prop']},{role:'conditions'},{role:'cta'}] : template==='case_intro' ? [{role:'opening',shots:['face_front']},{role:'explain'},{role:'finish',shots:['face_front']},{role:'finish',shots:['brow_close']},{role:'conditions'},{role:'cta'}] : [{role:'opening'},{role:'consult'},{role:'explain',shots:['design_hands']},{role:'explain',shots:['staff_intro','procedure_wide','tool_prop']},{role:'finish',shots:['face_front']},{role:'finish',shots:['brow_close']},{role:'cta'}];
-  const used           = [];
+  const used = fillSkeleton(plan,list,inputs,referenceIndex,defaults);
   let zooms = 0;
-  for (const request of requests) {
-    const role = request.role;
-    const pool = list.filter(c=>eligible(role,c) && (!request.shots || request.shots.includes(c.shot_type))).sort((a,b)=>{
-      const worry = inputs.worries.find(w=>w.primary)?.key;
-      return Number(b.clip.worry_candidates.some(w=>w.key===worry))-Number(a.clip.worry_candidates.some(w=>w.key===worry)) || ROLE_SHOTS[role].indexOf(a.shot_type)-ROLE_SHOTS[role].indexOf(b.shot_type);
-    });
-    let chosen                   = null;
-    let source                = null;
-    for(const c of pool) {
-      const recent=plan.items.slice(-(defaults.consecutiveShotLimit-1));
-      if(recent.length===defaults.consecutiveShotLimit-1&&recent.every(i=>i.shot_type===c.shot_type))continue;
-      // 同じ素材の未使用区間から、発話のまとまりを保って選ぶ。
-      const occupied = used.filter(u=>u.clip_id===c.clip_id).sort((a,b)=>a.start-b.start);
-      const spans=[{start:c.start,end:c.end}];
-      for(const u of occupied){for(let n=spans.length-1;n>=0;n--){const s=spans[n];if(!overlap(s,u))continue;spans.splice(n,1,...[{start:s.start,end:Math.min(s.end,u.start)},{start:Math.max(s.start,u.end),end:s.end}].filter(x=>x.end-x.start>defaults.epsilon));}}
-      for(const span of spans) {
-        if(span.end-span.start<defaults.cutSeconds.min-defaults.epsilon&&!(same(span.start,c.start)&&same(span.end,c.end)))continue;
-        const shotBudget = role==='explain' ? defaults.shotBudgets[c.shot_type                                     ] : undefined;
-        const proposed={start:span.start,end:Math.min(span.end,span.start+(shotBudget??defaults.budgets[role]))};
-        const speech=c.clip.segments.flatMap(s=>s.speech);
-        const cut=snapToSpeech(proposed,speech,defaults.speechTolerance);
-        if(!cut || cut.start<c.start || cut.end>c.end || used.some(u=>u.clip_id===c.clip_id&&overlap(u,cut)))continue;
-        source={clip_id:c.clip_id,segment_id:c.segment_id,...cut};chosen=c;break;
-      }
-      if(chosen)break;
-    }
-    if(!source && role!=='cta' && role!=='conditions') {plan.gaps.push({role,reason:`${ROLE_LABELS[role]}に使える未使用の区間が足りません。`,handled_by:role==='consult'?'説明とまとめる':'撮り足し'});continue;}
-    if(!source)plan.gaps.push({role,handled_by:'text_card',reason:`${ROLE_LABELS[role]}の素材がありません。文字カードで補う案を入れました。`,next_time:role==='cta'?`⑧ 案内・店内を${defaults.retakeShotSeconds}秒撮ると使えます。`:'説明を短く撮り足してください。'});
-    const item=newItem(role,source,chosen,inputs,referenceIndex,defaults);
-    if(chosen?.shot_type==='design_hands'&&role==='explain'&&zooms<defaults.zoom.maxPerPlan){item.edit.zoom={from:defaults.zoom.from,to:defaults.zoom.to};item.edit.note+='拡大は試験値。手元が切れないか確認。';zooms++;}
-    if(source)used.push(source);
-    plan.items.push(item);
-  }
-  fillPlan(plan,list,used,inputs,referenceIndex,defaults);
+  for(const item of plan.items)if(item.shot_type==='design_hands'&&zooms<defaults.zoom.maxPerPlan){item.edit.zoom={from:defaults.zoom.from,to:defaults.zoom.to};item.edit.note+='拡大は試験値。手元が切れないか確認。';zooms++;}
   if (!plan.items.some(i=>i.source)) {plan.items=[];plan.checks.errors.push('読み取れませんでした。構成に使える区間がありません。');return plan;}
   const timeline=computeTimeline(plan.items);plan.items=timeline.items;plan.total_out_seconds=timeline.total_out_seconds;
   for(const [i,item] of plan.items.entries()){item.slot=i+1;item.caption.show_from=item.output.start;item.caption.show_to=item.output.end;item.alternatives=pickAlternatives(item.role,eligibleAnalyses(analyses,inputs),used,defaults.alternativeCount);}
@@ -584,7 +617,7 @@ function formatCapcutMemo(plan      , clips                )         {
     `2. 各クリップの残す区間（前後を${(plan.defaults??DEFAULTS).trimStep}秒多めに残して、あとで詰める）`];
   for(const i of plan.items){
     const s=i.source;
-    lines.push(`\n場面${String(i.slot).padStart(2,'0')} ${ROLE_LABELS[i.role]}${i.narration?`（流れ：${BEAT_LABELS[i.narration.beat]}）`:''}`,
+    lines.push(`\n場面${String(i.slot).padStart(2,'0')} ${i.skeleton?SLOT_LABELS[i.skeleton]:ROLE_LABELS[i.role]}${i.narration?`（流れ：${BEAT_LABELS[i.narration.beat]}）`:''}`,
       s?`元の秒数：${clips.find(c=>c.clip_id===s.clip_id)?.original_name??s.clip_id} ${seconds(s.start)}〜${seconds(s.end)}秒（丸め前 ${s.start}〜${s.end}）`:`元の秒数：${i.still?.kind==='text_card'?'文字カード・元素材なし':`静止フレーム ${i.still?.clip_id} ${i.still?.at}秒`}（丸め前 hold=${i.still?.hold}）`,
       `配置の目安：${seconds(i.output.start)}〜${seconds(i.output.end)}秒（丸め前 ${i.output.start}〜${i.output.end}）`,
       `速度：${i.speed}倍${i.still?`／表示 ${i.still.hold}秒`:''}`,
@@ -598,8 +631,10 @@ function formatCapcutMemo(plan      , clips                )         {
       ...i.warnings.map(s=>'確認の印：'+s),
       ...i.needs_check.map(s=>'要確認：'+s));
   }
+  const shoot=plan.gaps.filter(g=>g.skeleton);
+  if(plan.items.some(i=>i.skeleton))lines.push(`\n撮影リスト（遠山型の骨組み ${SKELETON.length-shoot.length}/${SKELETON.length}）`,...(shoot.length?shoot.map(g=>`・${SLOT_LABELS[g.skeleton ]}：${g.next_time??''}${g.example?`（遠山さん ${g.example.code} ${seconds(g.example.start)}〜${seconds(g.example.end)}秒：${g.example.desc}）`:''}`):['・すべての場面がそろっています']));
   lines.push('\n5. 最後：黒い余白を残さない。書き出し前に最後のフレームまで確認。',
-    '6. ナレーションは CapCut の「録音」で、並べた動画を再生しながら読むと秒数が合います。'+(plan.items.some(i=>i.narration?.text.includes('（名前）'))?'「（名前）」はご自身の名前に置き換えてください。':''),plan.duration_note,...plan.gaps.map(g=>`補足：${g.reason??''}${g.next_time??''}`),'秒数・倍率・文字数は試験値です。予約増加・未知素材での判断精度は未検証です。');
+    '6. ナレーションは CapCut の「録音」で、並べた動画を再生しながら読むと秒数が合います。'+(plan.items.some(i=>i.narration?.text.includes('（名前）'))?'「（名前）」はご自身の名前に置き換えてください。':''),plan.duration_note,...plan.gaps.filter(g=>!g.skeleton).map(g=>`補足：${g.reason??''}${g.next_time??''}`),'秒数・倍率・文字数は試験値です。予約増加・未知素材での判断精度は未検証です。');
   return clean(lines.join('\n'));
 }
 
@@ -658,7 +693,8 @@ function normalizeGeminiAnalysis(value         , clipId        , duration       
       if (finite(p.confidence)) q.confidence = clamp(p.confidence, 0, 1);
       return (q.start          ) < (q.end          ) ? [q] : [];
     }) : seg.speech;
-    return { ...seg, start, end, speech, retake_of: seg.retake_of ?? null };
+    const timing = ['before', 'during', 'after', 'unknown'].includes(seg.timing          ) ? seg.timing : 'unknown';
+    return { ...seg, start, end, speech, timing, retake_of: seg.retake_of ?? null };
   }).filter(seg => !seg || typeof seg !== 'object' || !finite(seg.start) || !finite(seg.end) || seg.start < seg.end) : v.segments;
   // clip_id・model・usage は呼び出し側が実値で上書きするので、AI の書いた値は使わない。
   return { ...v, clip_id: clipId, duration, segments, model: '', usage: { input_tokens: 0, output_tokens: 0 } };
@@ -694,5 +730,5 @@ function estimateCost(input       ,output       )        {
   return (input*DEFAULTS.inputUsdPerMillion+output*DEFAULTS.outputUsdPerMillion)*DEFAULTS.usdJpy/1e6;
 }
 
-window.VIDEO_COACH={DEFAULTS,CAPTION_LIMITS,FORBIDDEN_PHRASES,CAUTION_PHRASES,ROLE_LABELS,TEMPLATE_LABELS,WORRIES,seconds,parseAnalyses,endsWithContinuation,snapToSpeech,eligibleAnalyses,pickTemplate,pickAlternatives,linkReference,computeTimeline,NARRATION_BANK,BEAT_LABELS,arcBeats,narrationCapacity,pickNarration,buildPlan,verifyPlan,formatCapcutMemo,authorize,requireUuid,advanceState,budgetStatus,retentionUntil,uploadPath,validateSessionInputs,validateClipInput,normalizeGeminiAnalysis,validateGeminiAnalysis,applyCaptions,estimateCost};
+window.VIDEO_COACH={DEFAULTS,CAPTION_LIMITS,FORBIDDEN_PHRASES,CAUTION_PHRASES,ROLE_LABELS,TEMPLATE_LABELS,WORRIES,seconds,parseAnalyses,endsWithContinuation,snapToSpeech,eligibleAnalyses,pickTemplate,pickAlternatives,linkReference,computeTimeline,NARRATION_BANK,BEAT_LABELS,arcBeats,narrationCapacity,pickNarration,SKELETON,SLOT_LABELS,buildPlan,verifyPlan,formatCapcutMemo,authorize,requireUuid,advanceState,budgetStatus,retentionUntil,uploadPath,validateSessionInputs,validateClipInput,normalizeGeminiAnalysis,validateGeminiAnalysis,applyCaptions,estimateCost};
 })();
