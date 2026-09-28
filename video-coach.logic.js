@@ -12,7 +12,8 @@ const DEFAULTS = Object.freeze({
   videoMimeTypes: ['video/mp4', 'video/quicktime', 'video/webm'],
 
   targetSeconds: { min: 20, max: 30 }, speed: { min: 0.5, max: 2, normal: 1 },
-  caption: { maxLines: 2, minChars: 10, maxChars: 16, secondsPerChar: 0.15, padding: 0.5 },
+  // 遠山さんのテロップ実測は1秒あたり7〜8文字（例「骨格・目元・顔の」8文字を1.0秒）。読める速さの基準をそこに合わせる（2026-09-28）。
+  caption: { maxLines: 2, minChars: 10, maxChars: 16, secondsPerChar: 0.12, padding: 0.3 },
   speechTolerance: 0.3, trimStep: 0.5, contextSeconds: 1, alternativeCount: 3,
   // AI の時刻読みのズレ（秒）。これ以内は実測の長さに丸め、超えたら捏造の疑いとして failed。
   analysisOverrunSeconds: 1,
@@ -399,7 +400,8 @@ function slotMatches(slot             , c           )          {
   switch (slot) {
     case 'host_open': case 'host_close': return c.shot_type === 'staff_intro' || slot === 'host_close' && c.shot_type === 'store_cta';
     case 'before_face': return c.shot_type === 'face_front' && t !== 'after' && t !== 'during';
-    case 'consult': return c.shot_type === 'consult_mid';
+    // 相談は施術の前。施術中・施術後の鏡の確認（遠山さんの型では施術の後半）を相談の枠に入れると時系列が逆になる。
+    case 'consult': return c.shot_type === 'consult_mid' && t !== 'during' && t !== 'after';
     case 'design': return c.shot_type === 'design_hands';
     case 'procedure_wide': return c.shot_type === 'procedure_wide';
     case 'needle': return c.shot_type === 'needle_close' || c.shot_type === 'brow_close' && t === 'during';
