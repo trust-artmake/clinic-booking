@@ -698,7 +698,12 @@ window.startVideoCoachLive = async function () {
           code: item.narration.ref.code,
         });
         url = C.signedURL(r.signed);
-        range = item.narration.ref;
+        // 言い回しは1秒前後と短いので、前後に contextSeconds（1秒）ずつ足して流れが分かるようにする。
+        const pad = L.DEFAULTS.contextSeconds;
+        range = {
+          start: Math.max(0, item.narration.ref.start - pad),
+          end: item.narration.ref.end + pad,
+        };
       } else if (reference) {
         const r = await request("sign_reference", {
           reference_id: item.reference.id,
@@ -725,7 +730,9 @@ window.startVideoCoachLive = async function () {
             "閲覧URLを取り直すには「もう一度再生」を押してください";
         }
       };
-      $("player-meta").textContent = range.start + "–" + range.end + "秒";
+      $("player-meta").textContent = phrase
+        ? L.seconds(item.narration.ref.start) + "–" + L.seconds(item.narration.ref.end) + "秒（前後1秒ずつ足して再生）"
+        : range.start + "–" + range.end + "秒";
       $("player-point").textContent = phrase
         ? "遠山さんの言い回し：" + item.narration.text
         : reference
