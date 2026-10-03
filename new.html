@@ -921,7 +921,57 @@ function canSub(){
 }
 function updSub(){ var b=document.getElementById('bsub'); if(b)b.disabled=!canSub(); }
 function hasLineUid(uid){ return String(uid == null ? "" : uid).trim() !== ""; }
-var LINE_UID_REQUIRED_MESSAGE = 'LINEアプリで開くと予約できます。予約確認やキャンセル案内を正しくお届けするために必要です。';
+// ★2026-10-03：止まったときの文は専門用語なし。正本は poc/_pure.mjs（tests が写しとの一致を確かめる）。
+var LINE_UID_REQUIRED_MESSAGE = 'うまく開けませんでした。下の「予約ページを開き直す」ボタンを押してください。それでも進めない場合は、LINEのトークにご希望の日時を送っていただければ、スタッフがお取りします。';
+var LINE_UID_REQUIRED_MESSAGE_NO_BUTTON = 'うまく開けませんでした。お手数ですが、LINEのトークにご希望の日時を送っていただければ、スタッフがお取りします。';
+// ===== LINE の普通のブラウザで開かれたら、LINE 専用の入口（LIFF）へ自動で開き直す（2026-10-03） =====
+//   ステップ配信などの外向けURL（…/new.html?store=…）を LINE のトークから開くと、LIFF ではない普通のブラウザで開き、
+//   LINE UID が取れずに最後の「予約する」で必ず止まっていた（小倉 10/3 のお客様「何回しても同じ」）。
+//   すでに送ったメッセージのリンクも救うため、ページ側で LIFF へ開き直す。印(lr=1)付きで戻ってきたら繰り返さない。
+var LIFF_REOPEN_MARK = 'lr';
+function isLineInAppBrowser(ua){ return /\bLine\/\d/i.test(String(ua == null ? '' : ua)); }
+function reopenParams(search){
+  var sp; try{ sp=new URLSearchParams(String(search == null ? '' : search)); }catch(e){ sp=new URLSearchParams(); }
+  var out=new URLSearchParams();
+  function take(p){ p.forEach(function(v,k){ if(k.indexOf('liff.')===0 || k===LIFF_REOPEN_MARK) return; if(!out.has(k)) out.set(k,v); }); }
+  take(sp);
+  var inner=sp.get('liff.state');
+  if(inner){ try{ take(new URLSearchParams(inner.charAt(0)==='?' ? inner.slice(1) : inner)); }catch(e){} }
+  return out;
+}
+function hasLiffReopenMark(search){
+  var sp; try{ sp=new URLSearchParams(String(search == null ? '' : search)); }catch(e){ return false; }
+  if(sp.get(LIFF_REOPEN_MARK)==='1') return true;
+  var inner=sp.get('liff.state'); if(!inner) return false;
+  try{ return new URLSearchParams(inner.charAt(0)==='?' ? inner.slice(1) : inner).get(LIFF_REOPEN_MARK)==='1'; }catch(e){ return false; }
+}
+function buildLiffReopenUrl(liffId, search){
+  var id=String(liffId == null ? '' : liffId).trim();
+  if(!/^[0-9A-Za-z_-]{1,64}$/.test(id)) return '';
+  var p=reopenParams(search); p.set(LIFF_REOPEN_MARK,'1');
+  return 'https://liff.line.me/'+id+'?'+p.toString();
+}
+function shouldReopenInLiff(o){
+  o=o||{};
+  if(o.loggedIn || o.inClient) return false;
+  if(!isLineInAppBrowser(o.ua)) return false;
+  if(!buildLiffReopenUrl(o.liffId,'')) return false;
+  if(hasLiffReopenMark(o.search)) return false;
+  return true;
+}
+// 止まったときの案内：文＋「予約ページを開き直す」ボタン（DOM で組む＝HTML を文字列で作らない）。
+function showLineUidRequired(){
+  var e1=document.getElementById('serr'); if(!e1) return;
+  var url=buildLiffReopenUrl(LIFF_ID, location.search);
+  e1.className='msg-err';
+  e1.textContent=url ? LINE_UID_REQUIRED_MESSAGE : LINE_UID_REQUIRED_MESSAGE_NO_BUTTON;
+  if(url){
+    var wrap=document.createElement('div'); wrap.style.marginTop='10px';
+    var a=document.createElement('a'); a.href=url; a.className='btn-retry'; a.textContent='予約ページを開き直す';
+    a.style.display='inline-block'; a.style.textDecoration='none';
+    wrap.appendChild(a); e1.appendChild(wrap);
+  }
+}
 function doSub(){
   if(!canSub())return;  // ★同意＋（モニター選択可なら選択済み）の両方が揃わないと送らない（patch-48）
   // ★日付・時間が未選択なら送信しない（満席で枠を捨てた後などに null:00 で送るのを防止）。時間選択へ戻す。
@@ -931,7 +981,7 @@ function doSub(){
   }
   // 媒体別LIFFリンク運用の保険：LINE UID が取れない予約は本人紐付けが弱くなるため作らない。
   if(!hasLineUid(st.uid)){
-    var e1=document.getElementById('serr'); if(e1){e1.className='msg-err';e1.textContent=LINE_UID_REQUIRED_MESSAGE;}
+    showLineUidRequired();
     return;
   }
   var btn=document.getElementById('bsub');
@@ -1689,15 +1739,27 @@ function initLiff(){
     if(p.displayName) st.displayName=p.displayName;
     updHeader();
   }
+  // ★2026-10-03：LINE の普通のブラウザ（LIFF ではない）で開かれていたら、LINE 専用の入口へ開き直す。
+  //   開き直すときは画面を進めない（入力の途中で切り替わらないよう、最初に判定する）。
+  function reopenIfNeeded(){
+    try{
+      var inClient=false; try{ inClient=!!(liff.isInClient && liff.isInClient()); }catch(e){}
+      if(!shouldReopenInLiff({ ua:navigator.userAgent, inClient:inClient, loggedIn:false, liffId:LIFF_ID, search:location.search })) return false;
+      var url=buildLiffReopenUrl(LIFF_ID, location.search); if(!url) return false;
+      advanced=true; clearTimeout(tid);
+      location.replace(url);
+      return true;
+    }catch(e){ return false; }
+  }
   try{
     liff.init({liffId:LIFF_ID}).then(function(){
-      if(!liff.isLoggedIn||!liff.isLoggedIn()){ advance(); return; }
+      if(!liff.isLoggedIn||!liff.isLoggedIn()){ if(reopenIfNeeded()) return; advance(); return; }
       // ★#92：本人確認用のIDトークンを取得（openidスコープが必要）。キャンセル/同意書で使う。
       try{ st.idToken = (liff.getIDToken && liff.getIDToken()) || ''; }catch(e){ st.idToken=''; }
       liff.getProfile().then(function(p){ applyLateProfile(p); })
                        .catch(function(){})
                        .then(advance);
-    }).catch(function(){ advance(); });
+    }).catch(function(){ if(reopenIfNeeded()) return; advance(); });
   }catch(e){ advance(); }
 }
 
