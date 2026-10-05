@@ -340,7 +340,7 @@
 //   ★この script は LIFF SDK の読み込みより前に動く＝SDK の取得が固まっても、友だち追加へ進む画面とボタンは出る。
 //   ★mode が land / join でなければ何もしない（予約・キャンセル・同意書・問診は今まで通り）。
 var JOIN_CONFIG_BY_SLUG = {
-  kokura: { joinLiffId: "2010315389-AAclTJ8M", oaId: "@265rrsxh", addFriendUrl: "https://lin.ee/Wl35IY0" },
+  kokura: { joinLiffId: "2010315389-AAclTJ8M", oaId: "@265rrsxh", addFriendUrl: "https://lin.ee/Wl35IY0", storeName: "トラストアートメイク小倉" },
 };
 var JOIN_URL_FORM = 'A';
 function sanitizeJoinTag(s){
@@ -352,7 +352,9 @@ function getJoinConfig(slug){
   var c = JOIN_CONFIG_BY_SLUG[key];
   if (!c || !/^@[0-9a-z]{6,12}$/.test(c.oaId) || !/^https:\/\/lin\.ee\/[0-9A-Za-z]+$/.test(c.addFriendUrl)) return null;
   var liff = /^\d{10}-[A-Za-z0-9]{8}$/.test(c.joinLiffId) ? c.joinLiffId : "";
-  return { slug: key, joinLiffId: liff, oaId: c.oaId, addFriendUrl: c.addFriendUrl };
+  // お店の名前（画面に出す）。文字は textContent でしか使わないが、念のため長さと山かっこを確認。
+  var name = (typeof c.storeName === "string" && c.storeName.length <= 40 && !/[<>]/.test(c.storeName)) ? c.storeName : "";
+  return { slug: key, joinLiffId: liff, oaId: c.oaId, addFriendUrl: c.addFriendUrl, storeName: name };
 }
 function detectLandEnv(ua){
   var s = String(ua == null ? "" : ua);
@@ -411,6 +413,8 @@ function renderLand(cfg, ref, env){
     box.appendChild(joinEl('p','お店のLINEを開けませんでした。お手数ですが、お店のInstagramなどから、もう一度お試しください。'));
     return;
   }
+  // お店の名前を1行（知らないページに来たと不安にならないように・2026-10-06 仁義さん）。
+  if(cfg.storeName) box.appendChild(joinEl('p', cfg.storeName + 'の公式LINEです'));
   box.appendChild(joinEl('h1','LINEで友だち追加'));
   var liffUrl=buildJoinLiffUrl(cfg, ref, JOIN_URL_FORM);
   if(act==='buttons'){
@@ -455,7 +459,7 @@ function startJoinEarly(){
   // join：LINE の中の LIFF。記録とその後の振り分けは SDK 読み込み後の runJoin が行う。
   //   ここでは「待っています」の表示と、友だち追加画面への逃げ道（ボタン・8秒の上限）だけを先に用意する。
   var box=joinBox(); if(!box) return;
-  box.appendChild(joinEl('p','LINEで開いています…'));
+  box.appendChild(joinEl('p',(cfg && cfg.storeName ? cfg.storeName + 'の公式LINEを' : 'LINEで') + '開いています…'));
   var url=buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || '';
   if(url) box.appendChild(joinLinkBtn(url,'友だち追加の画面へ進む',false));
   window.__JOIN_FALLBACK=setTimeout(function(){ goJoinAddFriend(cfg); }, 8000);
@@ -1335,7 +1339,7 @@ function runJoin(){
     finish('');
     var box=joinBox(); if(!box) return;
     box.appendChild(joinEl('h1','ご登録ありがとうございます'));
-    box.appendChild(joinEl('p','すでに友だち追加いただいています。ご予約やご質問はトークからどうぞ。'));
+    box.appendChild(joinEl('p',(cfg && cfg.storeName ? cfg.storeName + 'の公式LINEに' : '') + 'すでに友だち追加いただいています。ご予約やご質問はトークからどうぞ。'));
     var t=buildTalkUrl(cfg); if(t) box.appendChild(joinLinkBtn(t,'トークを開く',true));
   }
   if(!cfg || !cfg.joinLiffId || typeof liff==='undefined'){ toAddFriend(); return; }
