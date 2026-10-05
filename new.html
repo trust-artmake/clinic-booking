@@ -289,6 +289,9 @@
   <div><span class="spinner"></span>読み込み中…</div>
 </div>
 
+<!-- ★流入リンクの着地画面（mode=land）・LINE の中の記録（mode=join）（2026-10-05）。中身は下の startJoinEarly が DOM で組む。 -->
+<div id="s-join" style="display:none"></div>
+
 <div id="s-wizard">
   <div class="app-hd">
     <h1>ご予約</h1>
@@ -331,6 +334,134 @@
   </div>
 </div>
 
+<script>
+// ===== 流入リンクの帰属：着地画面（mode=land）と LINE の中の記録（mode=join）（2026-10-05） =====
+//   設計：docs/ref-join-tracking-design-2026-10-03.md。正本は poc/_pure.mjs（tests/ref_join_page.test.mjs で一致を確認）。
+//   ★この script は LIFF SDK の読み込みより前に動く＝SDK の取得が固まっても、友だち追加へ進む画面とボタンは出る。
+//   ★mode が land / join でなければ何もしない（予約・キャンセル・同意書・問診は今まで通り）。
+var JOIN_CONFIG_BY_SLUG = {
+  kokura: { joinLiffId: "", oaId: "@265rrsxh", addFriendUrl: "https://lin.ee/Wl35IY0" },
+};
+var JOIN_URL_FORM = 'A';
+function sanitizeJoinTag(s){
+  return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "").slice(0, 64);
+}
+function getJoinConfig(slug){
+  var key = sanitizeJoinTag(slug);
+  if (!Object.prototype.hasOwnProperty.call(JOIN_CONFIG_BY_SLUG, key)) return null;
+  var c = JOIN_CONFIG_BY_SLUG[key];
+  if (!c || !/^@[0-9a-z]{6,12}$/.test(c.oaId) || !/^https:\/\/lin\.ee\/[0-9A-Za-z]+$/.test(c.addFriendUrl)) return null;
+  var liff = /^\d{10}-[A-Za-z0-9]{8}$/.test(c.joinLiffId) ? c.joinLiffId : "";
+  return { slug: key, joinLiffId: liff, oaId: c.oaId, addFriendUrl: c.addFriendUrl };
+}
+function detectLandEnv(ua){
+  var s = String(ua == null ? "" : ua);
+  if (/\bLine\/\d/i.test(s)) return "line";
+  if (/iPhone|iPad|iPod|Android/i.test(s)) return "mobile";
+  return "pc";
+}
+function buildJoinLiffUrl(cfg, ref, form){
+  if (!cfg || !cfg.joinLiffId) return "";
+  var tag = sanitizeJoinTag(ref);
+  if (!tag) return "";
+  var head = form === "B" ? "https://line.me/R/app/" : "https://liff.line.me/";
+  return head + cfg.joinLiffId + "?store=" + cfg.slug + "&mode=join&ref=" + tag;
+}
+function buildAddFriendInLineUrl(cfg){
+  if (!cfg || !/^@[0-9a-z]{6,12}$/.test(cfg.oaId)) return "";
+  return "https://line.me/R/ti/p/" + encodeURIComponent(cfg.oaId);
+}
+function buildTalkUrl(cfg){
+  if (!cfg || !/^@[0-9a-z]{6,12}$/.test(cfg.oaId)) return "";
+  return "https://line.me/R/oaMessage/" + encodeURIComponent(cfg.oaId) + "/";
+}
+function decideLandAction(env, cfg, ref){
+  if (!cfg) return "none";
+  var liffUrl = buildJoinLiffUrl(cfg, ref, JOIN_URL_FORM);
+  if (env === "pc") return "to_addfriend";
+  if (!liffUrl) return "to_addfriend"; // LIFF が無い・タグが無い＝記録できない → 今と同じく lin.ee へ（1タップ増やさない）
+  return env === "line" ? "to_liff" : "buttons";
+}
+function decideJoinNext(friendFlag){
+  return friendFlag === true ? "talk" : "addfriend";
+}
+// 画面の部品（文字は textContent・リンクは href だけ＝HTML を文字列で作らない）
+function joinEl(tag, text, cls){
+  var e=document.createElement(tag); if(text) e.textContent=text; if(cls) e.className=cls;
+  if(tag==='p'){ e.style.marginTop='14px'; e.style.lineHeight='1.7'; }
+  return e;
+}
+function joinLinkBtn(href, text, primary){
+  var a=document.createElement('a'); a.href=href; a.textContent=text;
+  a.className = primary ? 'btn btn-p' : 'btn btn-bk';
+  a.style.display='block'; a.style.width='100%'; a.style.boxSizing='border-box'; a.style.textAlign='center';
+  a.style.textDecoration='none'; a.style.marginTop='12px';
+  return a;
+}
+function joinBox(){
+  var box=document.getElementById('s-join'); if(!box) return null;
+  while(box.firstChild) box.removeChild(box.firstChild);
+  box.style.display='block'; box.style.padding='32px 20px'; box.style.maxWidth='420px'; box.style.margin='0 auto';
+  return box;
+}
+function renderLand(cfg, ref, env){
+  var box=joinBox(); if(!box) return;
+  var act=decideLandAction(env, cfg, ref);
+  if(act==='none'){
+    box.appendChild(joinEl('p','お店のLINEを開けませんでした。お手数ですが、お店のInstagramなどから、もう一度お試しください。'));
+    return;
+  }
+  box.appendChild(joinEl('h1','LINEで友だち追加'));
+  var liffUrl=buildJoinLiffUrl(cfg, ref, JOIN_URL_FORM);
+  if(act==='buttons'){
+    box.appendChild(joinEl('p','下のボタンからLINEを開いて、友だち追加をお願いします。'));
+    box.appendChild(joinLinkBtn(liffUrl,'LINEで開く（おすすめ）',true));
+    box.appendChild(joinLinkBtn(cfg.addFriendUrl,'友だち追加だけする',false));
+    box.appendChild(joinEl('p','うまく開かないときは、画面の右上（または右下）の「…」から「ブラウザで開く」を選んでから、もう一度ボタンを押してください。'));
+  }else{
+    box.appendChild(joinEl('p','下のボタンから友だち追加をお願いします。'));
+    box.appendChild(joinLinkBtn(cfg.addFriendUrl,'友だち追加する',true));
+  }
+  // 画面を出してから移動する（移動できなかったときもボタンが残る）。
+  if(act==='to_liff') location.replace(liffUrl);
+  else if(act==='to_addfriend') location.replace(cfg.addFriendUrl);
+}
+function goJoinAddFriend(cfg){
+  var url=buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || '';
+  if(url) location.replace(url);
+}
+// 下の getQueryParam と同じ読み方（通常のクエリ → 無ければ liff.state の中）。LINE は追加の値を liff.state に包むことがある。
+function joinParam(name){
+  try{
+    var sp = new URLSearchParams(location.search);
+    var v = sp.get(name);
+    if(v) return v;
+    var ls = sp.get('liff.state');
+    if(ls){
+      var inner = new URLSearchParams(ls.charAt(0)==='?' ? ls.slice(1) : ls);
+      var v2 = inner.get(name);
+      if(v2) return v2;
+    }
+  }catch(e){}
+  return null;
+}
+function startJoinEarly(){
+  var mode=joinParam('mode')||'';
+  if(mode!=='land'&&mode!=='join') return;
+  window.__JOIN_MODE=mode;
+  var ld=document.getElementById('s-loading'); if(ld) ld.style.display='none';
+  var cfg=getJoinConfig(joinParam('store'));
+  if(mode==='land'){ renderLand(cfg, joinParam('ref'), detectLandEnv(navigator.userAgent)); return; }
+  // join：LINE の中の LIFF。記録とその後の振り分けは SDK 読み込み後の runJoin が行う。
+  //   ここでは「待っています」の表示と、友だち追加画面への逃げ道（ボタン・8秒の上限）だけを先に用意する。
+  var box=joinBox(); if(!box) return;
+  box.appendChild(joinEl('p','LINEで開いています…'));
+  var url=buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || '';
+  if(url) box.appendChild(joinLinkBtn(url,'友だち追加の画面へ進む',false));
+  window.__JOIN_FALLBACK=setTimeout(function(){ goJoinAddFriend(cfg); }, 8000);
+}
+startJoinEarly();
+</script>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 // ===== Supabase 接続設定（公開キー＝埋め込みOK・RLSで保護） =====
@@ -1186,6 +1317,43 @@ function recordRefIfAny(){
   }catch(e){ /* noop */ }
 }
 
+// ===== 流入リンク：LINE の中で本人と流入元を記録してから、友だち追加へ（mode=join・2026-10-05） =====
+//   順番を固定：記録（最大5秒待つ）→ 友だちかどうか → 友だち追加画面（または「登録済み」）。
+//   記録がサーバーに入ってから友だちになるので、帰属の判定（follow より前の履歴）が成り立つ。
+//   どこで失敗しても友だち追加画面へ進む。LINE の外で開かれたらログイン画面は出さず lin.ee へ。
+function runJoin(){
+  var cfg=getJoinConfig(getQueryParam('store'));
+  var ref=sanitizeJoinTag(getQueryParam('ref'));
+  var done=false;
+  function finish(url){
+    if(done) return; done=true;
+    try{ clearTimeout(window.__JOIN_FALLBACK); }catch(e){}
+    if(url) location.replace(url);
+  }
+  function toAddFriend(){ finish(buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || ''); }
+  function showThanks(){
+    finish('');
+    var box=joinBox(); if(!box) return;
+    box.appendChild(joinEl('h1','ご登録ありがとうございます'));
+    box.appendChild(joinEl('p','すでに友だち追加いただいています。ご予約やご質問はトークからどうぞ。'));
+    var t=buildTalkUrl(cfg); if(t) box.appendChild(joinLinkBtn(t,'トークを開く',true));
+  }
+  if(!cfg || !cfg.joinLiffId || typeof liff==='undefined'){ toAddFriend(); return; }
+  try{
+    liff.init({ liffId: cfg.joinLiffId }).then(function(){
+      if(!liff.isInClient()){ finish(cfg.addFriendUrl); return; }
+      var tok=''; try{ tok=liff.getIDToken()||''; }catch(e){}
+      var send = (tok && ref) ? Promise.race([
+        fetch(EDGE_LIFF, { method:'POST', headers:Object.assign({ "Content-Type":"application/json" }, H),
+          body: JSON.stringify({ action:'record_join', id_token: tok, store: cfg.slug, ref: ref }) }),
+        new Promise(function(res){ setTimeout(res, 5000); })
+      ]) : Promise.resolve(null);
+      return send.then(function(){}, function(){}).then(function(){ return liff.getFriendship(); })
+        .then(function(f){ if(decideJoinNext(f && f.friendFlag)==='talk') showThanks(); else toAddFriend(); });
+    }).catch(function(){ toAddFriend(); });
+  }catch(e){ toAddFriend(); }
+}
+
 // ===== お客様によるキャンセル（公開キャンセルRPC my_reservations / cancel_my_reservation）=====
 function clDtText(iso){
   var d=new Date(iso); if(isNaN(d.getTime())) return '';
@@ -1815,6 +1983,8 @@ function showStoreError(){
 }
 
 (function boot(){
+  // ★流入リンクの着地・記録の画面（mode=land / join）は予約ページの処理を一切走らせない（2026-10-05）。
+  if(window.__JOIN_MODE){ if(window.__JOIN_MODE==='join') runJoin(); return; }
   // ★まず店舗設定を解決してから初期化（LIFF_ID/STORE_ID/TENANT_ID を店に合わせる）。
   resolveStoreConfig().then(function(ok){
     if(!ok){ showStoreError(); return; }  // 明示された店が特定できない → 久留米へ倒さず停止。
