@@ -9155,14 +9155,18 @@ function loadAcqStats(){
   Promise.all([
     sbRpc('ref_stats',       { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID, p_basis: ACQ_BASIS }),
     sbRpc('ref_click_stats', { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID }).catch(function(){ return []; }),
-    acqLoadRefSources()
+    acqLoadRefSources(),
+    // ★2026-10-05：流入リンクを LINE で開いた人数（ref_join_stats）。未適用のDBでも落ちないよう失敗時は []。
+    sbRpc('ref_join_stats', { p_from: r[0], p_to: r[1], p_tenant: TENANT_ID }).catch(function(){ return []; })
   ])
     .then(function(res){
       var rows = Array.isArray(res[0]) ? res[0] : [];
       var clk  = Array.isArray(res[1]) ? res[1] : [];
       var taps = {};
       clk.forEach(function(c){ if(c && c.ref != null) taps[c.ref] = Number(c.taps) || 0; });
-      renderAcqStats(rows, ACQ_PERIOD, ACQ_BASIS, taps);
+      var opened = {};
+      (Array.isArray(res[3]) ? res[3] : []).forEach(function(c){ if(c && c.ref != null) opened[c.ref] = Number(c.opened_people) || 0; });
+      renderAcqStats(rows, ACQ_PERIOD, ACQ_BASIS, taps, opened);
     })
     .catch(function(err){
       if(acqNeedsLogin()) return;
@@ -9241,10 +9245,11 @@ function acqYen(n){
 /* 集計描画：ref 別の件数・キャンセル・来店・売上をバー＋表で表示。
    reservations 降順は RPC 側で確定済み。
    basis: 'created'＝申込日（既定／マーケ視点）、'start'＝施術日（実績視点） */
-function renderAcqStats(rows, period, basis, tapsMap){
+function renderAcqStats(rows, period, basis, tapsMap, openedMap){
   var box = document.getElementById('acqStats');
   if(!box) return;
   tapsMap = tapsMap || {};
+  openedMap = openedMap || {};  // ★2026-10-05：LINE で開いた人数（流入リンクの帰属・stores.join_flow が off の店は空）
   rows = Array.isArray(rows) ? rows.slice() : [];
   var label = acqPeriodLabel(period);
   var isFriend = (basis === 'friend_added');
@@ -9255,10 +9260,16 @@ function renderAcqStats(rows, period, basis, tapsMap){
   var seen = {};
   rows.forEach(function(r){ seen[r.ref] = true; });
   Object.keys(tapsMap).forEach(function(k){
-    if(!seen[k]) rows.push({ ref:k, reservations:0, cancelled:0, visited:0, sales:0, friendAdded:0 });
+    if(!seen[k]) { rows.push({ ref:k, reservations:0, cancelled:0, visited:0, sales:0, friendAdded:0 }); seen[k] = true; }
+  });
+  // ★2026-10-05：LINE で開いた記録だけがあるタグ（保存したリンクを後日開いた等）も行に足す。
+  Object.keys(openedMap).forEach(function(k){
+    if(!seen[k]) { rows.push({ ref:k, reservations:0, cancelled:0, visited:0, sales:0, friendAdded:0 }); seen[k] = true; }
   });
   // ref_sources に表示名が残っていない古いタグは、スタッフ画面では不要な内部IDなので出さない。
   rows = rows.filter(function(r){ return acqKnownRef(r.ref); });
+  // ★2026-10-05：試験用のタグ（test- で始まる）は本番の数字に混ぜない（流入リンクの実機テスト用）。
+  rows = rows.filter(function(r){ return String(r.ref || '').indexOf('test-') !== 0; });
 
   rows.sort(function(a, b){
     var ad = acqIsDirectRef(a.ref) ? 1 : 0;
@@ -9284,8 +9295,9 @@ function renderAcqStats(rows, period, basis, tapsMap){
   }
 
   // バー値：友達追加日ベースは friendAdded 件数、それ以外は予約件数で正規化
-  var maxBar = 0, totTaps = 0, totFriend = 0, totResv = 0, totCanc = 0, totVisited = 0, totSales = 0;
+  var maxBar = 0, totTaps = 0, totOpened = 0, totFriend = 0, totResv = 0, totCanc = 0, totVisited = 0, totSales = 0;
   rows.forEach(function(r){
+    totOpened  += (openedMap[r.ref] != null ? (Number(openedMap[r.ref]) || 0) : 0);
     var rv = Number(r.reservations) || 0;
     var fa = Number(r.friendAdded)  || 0;
     var bar = isFriend ? fa : rv;
@@ -9302,6 +9314,8 @@ function renderAcqStats(rows, period, basis, tapsMap){
   // CVR（追加 ÷ タップ）。タップ0/未計測は '—'。
   function cvr(adds, taps){ var t = Number(taps) || 0; if(t <= 0) return '—'; return Math.round((Number(adds) || 0) / t * 100) + '%'; }
   function tapCell(ref){ var t = tapsMap[ref]; return (t == null) ? '—' : esc(Number(t) || 0); }
+  function openedCell(ref){ var t = openedMap[ref]; return (t == null) ? '—' : esc(Number(t) || 0); }
+
   function bestBy(valueFn){
     var best = null, bestVal = 0;
     rows.forEach(function(r){
@@ -9386,14 +9400,14 @@ function renderAcqStats(rows, period, basis, tapsMap){
   // 明細表：タップ列を追加。友達追加日ベースのみ「友達追加」「CVR」も出す。
   h += '<table class="acq-tbl" style="margin-top:10px">'
     + '<tr><th>流入元</th><th>タップ</th>'
-    + (isFriend ? '<th>友達追加</th><th>CVR</th>' : '')
+    + (isFriend ? '<th>LINEで開いた</th><th>友達追加</th><th>CVR</th>' : '')
     + '<th>予約</th><th>キャンセル</th><th>来店</th><th>売上</th></tr>';
   h += rows.map(function(r){
     var fa = Number(r.friendAdded) || 0;
     return '<tr>'
       + '<td>'+acqRefCellHtml(r.ref)+'</td>'
       + '<td>'+tapCell(r.ref)+'</td>'
-      + (isFriend ? ('<td>'+esc(fa)+'</td><td>'+cvr(fa, tapsMap[r.ref])+'</td>') : '')
+      + (isFriend ? ('<td>'+openedCell(r.ref)+'</td><td>'+esc(fa)+'</td><td>'+cvr(fa, tapsMap[r.ref])+'</td>') : '')
       + '<td>'+esc(Number(r.reservations) || 0)+'</td>'
       + '<td>'+esc(Number(r.cancelled)    || 0)+'</td>'
       + '<td>'+esc(Number(r.visited)      || 0)+'</td>'
@@ -9401,7 +9415,7 @@ function renderAcqStats(rows, period, basis, tapsMap){
       + '</tr>';
   }).join('');
   h += '<tr class="tot"><td>合計</td><td>'+esc(totTaps)+'</td>'
-    + (isFriend ? '<td>'+esc(totFriend)+'</td><td>'+cvr(totFriend, totTaps)+'</td>' : '')
+    + (isFriend ? '<td>'+esc(totOpened)+'</td><td>'+esc(totFriend)+'</td><td>'+cvr(totFriend, totTaps)+'</td>' : '')
     + '<td>'+esc(totResv)+'</td><td>'+esc(totCanc)+'</td><td>'+esc(totVisited)+'</td><td>'+esc(acqYen(totSales))+'</td></tr>';
   h += '</table>';
 
