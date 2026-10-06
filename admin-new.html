@@ -346,6 +346,21 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .set-ngb{color:#c2410c;font-weight:700;font-size:12.5px}
 .set-note{font-size:11.5px;color:#9ca3af;margin:6px 4px 14px;line-height:1.6}
 .set-ph{padding:28px 12px;text-align:center;color:#9ca3af;font-size:13px}
+/* 📝 更新履歴（2026-10-06） */
+.rl-head{font-weight:700;font-size:15px;margin-bottom:4px}
+.rl-note{font-size:12px;color:#6b7280;margin-bottom:10px;line-height:1.6}
+.rl-item{border-top:1px solid #eef2f1;padding:10px 2px}
+.rl-top{font-size:12px;color:#374151}
+.rl-sha{font-family:ui-monospace,Menlo,monospace;color:#9ca3af;font-size:11px}
+.rl-title{font-size:14px;margin:3px 0;word-break:break-word}
+.rl-more{font-size:11px;color:#6b7280}
+.rl-chips{margin:4px 0}
+.rl-chip{display:inline-block;font-size:11px;background:#f3f4f6;color:#374151;border-radius:999px;padding:1px 8px;margin:0 4px 4px 0}
+.rl-state{font-size:12px}
+.rl-forced{font-size:12px;color:#b45309;font-weight:700;margin-top:2px}
+.rl-ng .rl-state{color:#b91c1c;font-weight:700}
+.rl-ok .rl-state{color:#047857}
+.rl-wait .rl-state,.rl-none .rl-state{color:#6b7280}
 .set-err{color:#c2410c}
 /* カード（メニュー／アーティスト／店舗・シフト共通） */
 .set-card{background:#fff;border:1px solid #e6eceb;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
@@ -1337,6 +1352,7 @@ var NAV_GROUPS = [
       { label:'💁 メニューとアーティスト', fn:'showMenuArtist' },
       { label:'🤖 AI向け情報',           fn:'showAiContext', mgr:true },
       { label:'🔗 LINE接続',            fn:'showLineConnect', platformAdmin:true },
+      { label:'📝 更新履歴',            fn:'showReleaseLog', platformAdmin:true },
       { label:'👥 スタッフ',             fn:'showUsers', mgr:true },
       { label:'ℹ️ システム情報',         fn:'showSystemInfo' },
       { label:'🧭 初期設定',             fn:'showSetup',  mgr:true } ] }
@@ -6121,6 +6137,183 @@ function showLineConnect(el){
   }
   if (typeof showSetup === 'function') showSetup(null);             // 初期設定ビュー（LINE鍵パネル含む）を表示
   setTimeout(function(){ var p=document.getElementById('lineSecretPanel'); if(p) p.scrollIntoView({behavior:'smooth',block:'start'}); }, 200);
+}
+/* ============================================================================
+   📝 更新履歴（全体管理者のみ・2026-10-06）。誰が・いつ・何を本番に出したか＋自動の検査と反映の結果。
+   表 release_log は GitHub の webhook → 関数 release-log が書く。設計書 docs/release-log-design-2026-10.md。
+   表示ロジックの正本は poc/admin_release_log_pure.mjs。ここはその写しで、tests/release_log.test.mjs が一致を確かめる。
+   ============================================================================ */
+function releaseWho(login) {
+  var names = { "trust-artmake": "仁義さん", "aiisceternity-ux": "松村さん" };
+  if (!login) return "（不明）";
+  var k = String(login);
+  return Object.prototype.hasOwnProperty.call(names, k) ? names[k] : k;
+}
+
+function releaseAreaLabel(key) {
+  var labels = {
+    functions: "関数（LINE返信・予約の処理）",
+    pages: "画面（予約ページ・管理画面）",
+    db: "DB",
+    config: "設定・道具",
+    tests: "テスト",
+    docs: "資料",
+  };
+  var k = String(key);
+  return Object.prototype.hasOwnProperty.call(labels, k) ? labels[k] : "その他";
+}
+
+function releaseWorkflowLabel(name) {
+  var labels = {
+    "Quality Gate": "品質検査",
+    "Security Scan": "秘密の検査",
+    "DB Migrate (Supabase)": "DBの反映",
+    "Deploy Supabase Functions": "関数の反映",
+    "Publish Pages to clinic-booking": "画面の反映",
+  };
+  var k = String(name);
+  return Object.prototype.hasOwnProperty.call(labels, k) ? labels[k] : k;
+}
+
+// 本番に反映する自動処理か（成功したら「本番に出た」とみなす3本）。
+function releaseIsDeployWorkflow(name) {
+  return name === "DB Migrate (Supabase)" || name === "Deploy Supabase Functions" || name === "Publish Pages to clinic-booking";
+}
+
+// 日本時間で「10/06(火) 14:05」。読めない値は空文字。
+function formatReleaseTime(iso) {
+  var t = Date.parse(iso);
+  if (!isFinite(t)) return "";
+  var d = new Date(t + 9 * 3600000);
+  var p2 = function (n) { return (n < 10 ? "0" : "") + n; };
+  var wd = ["日", "月", "火", "水", "木", "金", "土"][d.getUTCDay()];
+  return p2(d.getUTCMonth() + 1) + "/" + p2(d.getUTCDate()) + "(" + wd + ") " + p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes());
+}
+
+// 表の行（push と ci が混ざった配列）を、送信1回ごとのまとめにする。新しい送信が上。
+//   state: ok＝結果が来た処理が全部合格／ng＝1つでも失敗／wait＝まだ動いている（または送信から30分以内で結果待ち）
+//          none＝送信から30分過ぎても自動処理の記録が無い
+//   forced：強制送信（履歴の書き換え）だった／manual：人が手動で動かした処理の名前
+//   同じ処理がやり直されたら、いちばん新しい結果で判断する（同じ時刻なら「終わった」を優先）。
+function summarizeReleases(rows, nowMs) {
+  var list = Array.isArray(rows) ? rows : [];
+  var pushes = {}, order = [], ci = {};
+  for (var i = 0; i < list.length; i++) {
+    var r = list[i];
+    if (!r || typeof r !== "object" || typeof r.commit_sha !== "string") continue;
+    if (r.kind === "push") {
+      if (!Object.prototype.hasOwnProperty.call(pushes, r.commit_sha)) { pushes[r.commit_sha] = r; order.push(r.commit_sha); }
+    } else if (r.kind === "ci" && typeof r.workflow === "string") {
+      if (!Object.prototype.hasOwnProperty.call(ci, r.commit_sha)) ci[r.commit_sha] = {};
+      var bySha = ci[r.commit_sha];
+      var prev = Object.prototype.hasOwnProperty.call(bySha, r.workflow) ? bySha[r.workflow] : null;
+      var t = Date.parse(r.happened_at) || 0;
+      var pt = prev ? (Date.parse(prev.happened_at) || 0) : -1;
+      if (!prev || t > pt || (t === pt && r.ci_status === "completed")) bySha[r.workflow] = r;
+    }
+  }
+  var out = [];
+  for (var j = 0; j < order.length; j++) {
+    var p = pushes[order[j]];
+    var runs = Object.prototype.hasOwnProperty.call(ci, p.commit_sha) ? ci[p.commit_sha] : {};
+    var names = Object.keys(runs).sort();
+    var failed = [], failedLinks = [], deployed = [], manual = [], pending = false;
+    for (var k = 0; k < names.length; k++) {
+      var run = runs[names[k]];
+      if (run.trigger === "workflow_dispatch") manual.push(releaseWorkflowLabel(run.workflow));
+      if (run.ci_status !== "completed") { pending = true; continue; }
+      var c = run.conclusion;
+      if (c === "success") {
+        if (releaseIsDeployWorkflow(run.workflow)) deployed.push(releaseWorkflowLabel(run.workflow));
+      } else if (c === "cancelled" || c === "skipped" || c === "neutral" || c === "stale") {
+        // 止めた・対象外は失敗にしない
+      } else {
+        failed.push(releaseWorkflowLabel(run.workflow));
+        failedLinks.push(run.run_url || "");
+      }
+    }
+    var at = Date.parse(p.happened_at) || 0;
+    var state;
+    if (failed.length) state = "ng";
+    else if (pending) state = "wait";
+    else if (names.length) state = "ok";
+    else state = (nowMs - at) <= 30 * 60000 ? "wait" : "none";
+    var areas = Array.isArray(p.areas) ? p.areas : [];
+    out.push({
+      sha7: p.commit_sha.slice(0, 7),
+      at: at,
+      when: formatReleaseTime(p.happened_at),
+      who: releaseWho(p.actor),
+      title: p.title || "（題名なし）",
+      more: typeof p.commit_count === "number" && p.commit_count > 1 ? p.commit_count - 1 : 0,
+      areaLabels: areas.map(releaseAreaLabel),
+      state: state,
+      failed: failed,
+      failedLinks: failedLinks,
+      deployed: deployed,
+      forced: p.forced === true,
+      manual: manual,
+    });
+  }
+  out.sort(function (a, b) { return b.at - a.at; });
+  return out;
+}
+function showReleaseLog(el){
+  if (el && typeof setActiveNav === 'function') setActiveNav(el);
+  if (typeof hideAllViews === 'function') hideAllViews();
+  var sv = document.getElementById('setView'); if (sv) sv.style.display = 'block';
+  var sub = document.getElementById('setSubTabs'); if (sub) sub.style.display = 'none';
+  var sb = document.getElementById('setBody'); if (!sb) return;
+  if (window.IS_PLATFORM_ADMIN !== true){
+    sb.innerHTML = '<div class="set-ph">更新履歴は全体管理者だけが見られます。</div>';
+    return;
+  }
+  sb.innerHTML = '<div class="set-ph">読み込み中…</div>';
+  // ① 新しい送信50件（受け取った順。git の時刻は送った人が変えられるので使わない）
+  // ② その送信に紐づく自動処理の結果 ③ 最後に記録を受け取った日時（記録が止まったことに気づくため）
+  var lastIso = null;
+  sbGet('release_log?select=created_at&order=created_at.desc&limit=1')
+    .then(function(last){ lastIso = (Array.isArray(last) && last[0]) ? last[0].created_at : null;
+      return sbGet('release_log?select=kind,commit_sha,title,actor,commit_count,areas,forced,happened_at&kind=eq.push&order=created_at.desc&limit=50'); })
+    .then(function(pushes){
+      pushes = Array.isArray(pushes) ? pushes : [];
+      var shas = [];
+      pushes.forEach(function(p){ if (p && /^[0-9a-f]{40}$/.test(p.commit_sha) && shas.indexOf(p.commit_sha) < 0) shas.push(p.commit_sha); });
+      if (!shas.length){ renderReleaseLog(sb, [], lastIso); return; }
+      return sbGet('release_log?select=kind,commit_sha,workflow,ci_status,conclusion,run_url,trigger,happened_at&kind=eq.ci&commit_sha=in.(' + shas.join(',') + ')&order=happened_at.asc&limit=2000')
+        .then(function(cis){ renderReleaseLog(sb, summarizeReleases(pushes.concat(Array.isArray(cis) ? cis : []), Date.now()), lastIso); });
+    })
+    .catch(function(e){
+      sb.innerHTML = '<div class="set-ph">更新履歴を読めませんでした（' + esc(e && e.message ? e.message : e) + '）。<br>表がまだ本番に無い場合は、反映が済んでいるか確認してください。</div>';
+    });
+}
+function renderReleaseLog(sb, items, lastIso){
+  var last = lastIso ? formatReleaseTime(lastIso) : '';
+  var head = '<div class="set-card"><div class="rl-head">📝 更新履歴（本番に出したもの）</div>'
+    + '<div class="rl-note">新しい順に最大50件。✅＝自動の検査と反映が全部合格／❌＝失敗あり（名前を押すと GitHub の記録が開きます）／⏳＝結果待ち。🚀は本番に反映された部分です。</div>'
+    + '<div class="rl-note">最後に受け取った記録：' + esc(last || 'まだありません') + '。送ったのにここに出ないときは、GitHub の通知設定（Webhooks）が止まっていないか確認してください。</div>';
+  if (!items.length){
+    sb.innerHTML = head + '<div class="set-ph">まだ記録がありません。GitHub から次の送信が届くと、ここに並びます。</div></div>';
+    return;
+  }
+  var STATE = { ok:'✅ 全部合格', ng:'❌ 失敗あり', wait:'⏳ 結果待ち', none:'— 自動処理の記録なし' };
+  var html = items.map(function(it){
+    var st = STATE[it.state] || '';
+    var fail = it.failed.map(function(name, i){
+      var u = it.failedLinks[i];
+      return u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(name) + '</a>' : esc(name);
+    }).join('、');
+    var chips = it.areaLabels.map(function(a){ return '<span class="rl-chip">' + esc(a) + '</span>'; }).join('');
+    return '<div class="rl-item rl-' + esc(it.state) + '">'
+      + '<div class="rl-top"><b>' + esc(it.when) + '</b>　' + esc(it.who) + '　<span class="rl-sha">' + esc(it.sha7) + '</span></div>'
+      + (it.forced ? '<div class="rl-forced">⚠ 強制送信（履歴の書き換え）。前の状態に戻した可能性があります</div>' : '')
+      + '<div class="rl-title">' + esc(it.title) + (it.more ? ' <span class="rl-more">ほか' + esc(it.more) + '件</span>' : '') + '</div>'
+      + (chips ? '<div class="rl-chips">' + chips + '</div>' : '')
+      + '<div class="rl-state">' + esc(st) + (fail ? '：' + fail : '') + (it.deployed.length ? '　🚀 ' + esc(it.deployed.join('・')) : '')
+      + (it.manual.length ? '　🖐 手動：' + esc(it.manual.join('・')) : '') + '</div>'
+      + '</div>';
+  }).join('');
+  sb.innerHTML = head + html + '</div>';
 }
 /* 後方互換：旧 showSettings は「お店の基本」を開く（gotoSubtab等から呼ばれても安全に着地）。 */
 function showSettings(el){ openSettings('store', el); }
