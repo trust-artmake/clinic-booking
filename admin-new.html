@@ -580,6 +580,9 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .acq-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 2px 10px}
 .acq-tab{font-size:12.5px;padding:6px 12px;border:1px solid #d4dbda;border-radius:999px;background:#fff;color:#557;cursor:pointer;font-weight:700}
 .acq-tab.active{background:#0b5c55;color:#fff;border-color:#0b5c55}
+.acq-custom{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 10px;font-size:13px;color:#445}
+.acq-custom input[type=date]{font-size:13px;padding:4px 6px;border:1px solid #d4dbda;border-radius:8px}
+.acq-custom-msg{color:#a33;font-size:12.5px}
 .acq-tbl{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e6eceb;border-radius:12px;overflow:hidden;font-size:13px}
 .acq-tbl th,.acq-tbl td{padding:9px 10px;border-bottom:1px solid #f0f0f0;text-align:right}
 .acq-tbl th:first-child,.acq-tbl td:first-child{text-align:left}
@@ -1074,6 +1077,14 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
     <button type="button" class="acq-tab" data-ap="last_month" onclick="setAcqPeriod('last_month')">先月</button>
     <button type="button" class="acq-tab" data-ap="this_year" onclick="setAcqPeriod('this_year')">今年</button>
     <button type="button" class="acq-tab" data-ap="last_6m" onclick="setAcqPeriod('last_6m')">直近6ヶ月</button>
+    <button type="button" class="acq-tab" data-ap="custom" onclick="setAcqPeriod('custom')">📆 期間を指定</button>
+  </div>
+  <!-- ★2026-10-06：開始日〜終了日を選んで見る（例：流入リンクの新方式を始めた 10/6 から）。記録は消さず、見る期間だけ変える。 -->
+  <div id="acqCustomRow" class="acq-custom" style="display:none">
+    <label>開始日 <input type="date" id="acqFrom"></label>
+    <label>終了日 <input type="date" id="acqTo"></label>
+    <button type="button" class="acq-tab" onclick="applyAcqCustom()">表示</button>
+    <span id="acqCustomMsg" class="acq-custom-msg"></span>
   </div>
   <div id="acqStats"><div class="placeholder">読み込み中…</div></div>
 </div>
@@ -9093,6 +9104,7 @@ function acqFallbackCopy(text){
 /* ===== ③ 流入分析 ===== */
 /* 期間ラベル */
 function acqPeriodLabel(p){
+  if(p === 'custom') return acqCustomLabel(ACQ_CUSTOM.from, ACQ_CUSTOM.to);
   return p === 'this_month' ? '今月'
        : p === 'last_month' ? '先月'
        : p === 'this_year'  ? '今年'
@@ -9102,6 +9114,11 @@ function acqPeriodLabel(p){
 /* 期間 → [fromISO, toISO)。JST(+09:00) のISO文字列で半開区間 [from, to)。
    ローカル時刻の年月日から JST 文字列を組み立てる（端末TZに依存しない）。 */
 function acqRange(p){
+  if(p === 'custom'){
+    var cr = acqCustomRange(ACQ_CUSTOM.from, ACQ_CUSTOM.to);
+    if(cr) return cr;
+    p = 'this_month';   // 期間が正しくなければ今月で（集計そのものは止めない）
+  }
   var now = new Date();
   var y = now.getFullYear(), m = now.getMonth();   // m=0..11
   function iso(yy, mm, dd){   // mm は 1..12
@@ -9128,9 +9145,71 @@ function acqRange(p){
 }
 
 function setAcqPeriod(p){
+  var row = document.getElementById('acqCustomRow');
+  if(p === 'custom'){
+    // 入力欄を出す。前回この端末で選んだ期間があればそれ、無ければ今月1日〜今日。
+    if(row) row.style.display = 'flex';
+    var f = document.getElementById('acqFrom'), t = document.getElementById('acqTo');
+    var d = new Date(), pad = function(n){ return (n<10?'0':'')+n; };
+    var today = d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+    if(f && !f.value) f.value = ACQ_CUSTOM.from || (d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01');
+    if(t && !t.value) t.value = ACQ_CUSTOM.to || today;
+    applyAcqCustom();
+    return;
+  }
+  if(row) row.style.display = 'none';
   ACQ_PERIOD = p;
   var ts = document.querySelectorAll('#acqView .acq-tab[data-ap]');
   for(var i=0;i<ts.length;i++){ ts[i].classList.toggle('active', ts[i].getAttribute('data-ap') === p); }
+  loadAcqStats();
+}
+
+/* ★2026-10-06：期間を指定（開始日〜終了日）。正本は poc/admin_acq_period_pure.mjs（tests で一致を確認）。 */
+var ACQ_CUSTOM = { from:'', to:'' };
+try{
+  var acqSaved = JSON.parse(localStorage.getItem('acq_custom_v1') || 'null');
+  if(acqSaved && typeof acqSaved.from === 'string' && typeof acqSaved.to === 'string') ACQ_CUSTOM = { from:acqSaved.from, to:acqSaved.to };
+}catch(e){}
+function acqYmdParts(s){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s == null ? "" : s));
+  if (!m) return null;
+  var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (y < 2020 || y > 2100 || mo < 1 || mo > 12 || d < 1) return null;
+  var last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (d > last) return null;
+  return { y: y, m: mo, d: d };
+}
+function acqCustomRange(fromStr, toStr){
+  var a = acqYmdParts(fromStr), b = acqYmdParts(toStr);
+  if (!a || !b) return null;
+  var fromUtc = Date.UTC(a.y, a.m - 1, a.d), toUtc = Date.UTC(b.y, b.m - 1, b.d);
+  if (fromUtc > toUtc) return null;
+  if ((toUtc - fromUtc) / 86400000 > 366 * 3) return null;
+  var next = new Date(toUtc + 86400000);
+  var p2 = function (n) { return (n < 10 ? "0" : "") + n; };
+  var iso = function (y, mo, d) { return y + "-" + p2(mo) + "-" + p2(d) + "T00:00:00+09:00"; };
+  return [iso(a.y, a.m, a.d), iso(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate())];
+}
+function acqCustomLabel(fromStr, toStr){
+  if (!acqCustomRange(fromStr, toStr)) return "期間を指定";
+  var a = acqYmdParts(fromStr), b = acqYmdParts(toStr);
+  if (a.y === b.y && a.m === b.m && a.d === b.d) return a.m + "/" + a.d;
+  if (a.y === b.y) return a.m + "/" + a.d + "〜" + b.m + "/" + b.d;
+  return a.y + "/" + a.m + "/" + a.d + "〜" + b.y + "/" + b.m + "/" + b.d;
+}
+function applyAcqCustom(){
+  var f = document.getElementById('acqFrom'), t = document.getElementById('acqTo'), msg = document.getElementById('acqCustomMsg');
+  var from = f ? f.value : '', to = t ? t.value : '';
+  if(!acqCustomRange(from, to)){
+    if(msg) msg.textContent = '日付を確かめてください（開始日は終了日より前・最長3年まで）。';
+    return;   // 正しくない期間では集計を呼ばない
+  }
+  if(msg) msg.textContent = '';
+  ACQ_CUSTOM = { from:from, to:to };
+  try{ localStorage.setItem('acq_custom_v1', JSON.stringify(ACQ_CUSTOM)); }catch(e){}
+  ACQ_PERIOD = 'custom';
+  var ts = document.querySelectorAll('#acqView .acq-tab[data-ap]');
+  for(var i=0;i<ts.length;i++){ ts[i].classList.toggle('active', ts[i].getAttribute('data-ap') === 'custom'); }
   loadAcqStats();
 }
 
