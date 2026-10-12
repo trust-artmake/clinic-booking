@@ -4102,8 +4102,31 @@ function checkoutSummaryRows(summary) {
     {label:'未会計（見込み）',amount:summary.unchecked_amount,count:summary.unchecked_count}
   ];
 }
+// Only presentation/CSV here. All financial calculation belongs to settlement_calculate in PostgreSQL.
+function settlementCsv(data, kind) {
+  const rows=[];
+  if (kind==='payout') {
+    rows.push(['対象月','担当','通常売上','自己集客件数','自己集客売上','歩合支払い','教育費（会社別払い）','教育費受取先','出勤日数','交通費','調整','支払い合計','出勤日数の変更理由']);
+    for (const l of data.lines||[]) rows.push([data.month,l.artist_name,l.normal_sales,l.self_count,l.self_sales,l.payout,l.education_fee,data.education_recipient,l.attendance_days,l.travel_total,l.adjustment,l.payout_total,l.travel_reason]);
+    rows.push([],['担当','区分','率','対象売上','歩合支払い']);
+    for (const l of data.lines||[]) for (const g of l.rate_groups||[]) rows.push([l.artist_name,g.self_acquired?'自己集客':'通常',g.rate,g.sales,g.payout]);
+  } else {
+    rows.push(['対象月','予約番号','来店日','入金日','担当','メニュー','金額','支払い方法','追加／調整']);
+    for (const i of data.items||[]) rows.push([data.month,i.reservation_id,i.visit_date,i.paid_on,i.artist_name,i.menu_name,i.actual_amount,i.payment_method,i.is_addition?String(i.paid_on||'').slice(0,7)+'分の追加':'']);
+    rows.push([],['調整対象','調整番号','金額','理由','直す確定']);
+    for (const a of data.adjustments||[]) rows.push([a.artist_id?'アーティスト':'請求',a.adjustment_id,a.amount,a.reason,a.corrects_settlement]);
+    rows.push([],['売上合計',data.sales_total],['クリニック料',data.clinic_fee],['月額固定',data.monthly_fixed],['診療代',data.consult_total],['請求向け調整（差し引き）',data.billing_adjustment],['請求額',data.invoice_total]);
+  }
+  function cell(value) {
+    let s=value==null?'':String(value);
+    // Prevent spreadsheet formula injection in text; numeric negatives remain numeric.
+    if (typeof value!=='number' && /^[\s\uFEFF]*[=+@-]/.test(s)) s="'"+s;
+    return /[",\r\n]/.test(s)?'"'+s.replaceAll('"','""')+'"':s;
+  }
+  return '\uFEFF'+rows.map(row=>row.map(cell).join(',')).join('\r\n');
+}
 /*</checkout-pure>*/
-return { CHECKOUT_REASONS,CHECKOUT_METHODS,checkoutJstDate,checkoutDefaults,validateCheckout,checkoutYen,checkoutDateLabel,checkoutSummaryRows };
+return { CHECKOUT_REASONS,CHECKOUT_METHODS,checkoutJstDate,checkoutDefaults,validateCheckout,checkoutYen,checkoutDateLabel,checkoutSummaryRows,settlementCsv };
 })();
 // 権限がないエラー（その店の会計を見る立場ではない）。通信失敗などとは分けて扱う。
 function checkoutForbidden(err){
@@ -4112,9 +4135,11 @@ function checkoutForbidden(err){
 function checkoutError(err){
   var s=String(err&&err.message||err||'');
   if(/forbidden|permission|denied/.test(s)) return 'この店舗の会計を入力する権限がありません。';
+  if(/checkout_settled/.test(s)) return '確定済みです。直すときは月末確定の調整行で';
   if(/checkout_disabled/.test(s)) return 'この店舗では会計機能が有効になっていません。';
   if(/checkout_not_visited/.test(s)) return '来店済み・未取消の予約だけ会計を入力できます。';
   if(/checkout_reason_required/.test(s)) return '予約金額との差の理由を選択してください。';
+  if(/checkout_paid_before_start/.test(s)) return '入金日が会計の開始日より前です。開始日より前に受け取ったお金は旧方式で精算済みのため、金額を0円（先払い済み）にするか入金日を直してください';
   if(/checkout_bad_paid_on/.test(s)) return '支払い日は来店日の前後1年以内で入力してください。';
   if(/checkout_bad_/.test(s)) return '金額・理由・支払い日・支払い方法・メモを確認してください。';
   return '会計を保存・確認できませんでした。再読込してお試しください。';
@@ -4227,6 +4252,187 @@ async function loadCheckoutSummary(){
       +(summary.by_artist||[]).map(function(a){return '<h4>'+esc(a.artist_name||'担当未設定')+'</h4>'+lines(a);}).join('')
       +'<p class="dash-note">会計済みは支払い日、未会計は来店日で集計。未会計は会計開始日以降の来店済み・未取消が対象です。</p></div>';}).join('');
   } catch(err){if(seq===CHECKOUT_DASH_SEQ&&scope===checkoutScope()&&host.isConnected)host.textContent=checkoutForbidden(err)?'':'会計の集計を取得できませんでした。再読込してください。';}
+}
+
+/* ===== 段1b 月末確定（計算はDB、ここは表示と操作のみ） ===== */
+var SETTLEMENT_LOAD_SEQ=0;
+function settlementRatePercent(rate){return Number((Number(rate)*100).toFixed(2));}
+function settlementError(err){
+ var s=String(err&&err.message||err||'');
+ if(/settlement_changed/.test(s))return '下書きから内容が変わりました。下書きを再読込して確認してください。';
+ if(/checkout_before_start/.test(s))return '会計開始日より前の入金があります。会計を開いて入金日か金額を直してください。';
+ if(/payout_rate_missing/.test(s))return '歩合率が未設定の会計があります。入金日に有効な率を設定してください。';
+ if(/billing_rate_missing/.test(s))return '対象月末に有効な店の率を設定してください。';
+ if(/settlement_month_open/.test(s))return '日本時間で月が終わってから確定してください。';
+ if(/settlement_previous_required/.test(s))return '会計開始月から順番に確定してください。前の月が未確定です。';
+ if(/settlement_exists/.test(s))return 'この月は確定済みです。再読込してください。';
+ if(/travel_reason_required/.test(s))return '出勤日数を直すときは理由が必要です。';
+ if(/settlement_bad|settlement_before_start|invalid input|check constraint|not-null|out of range/.test(s))return '日付・金額・率・担当・理由の入力を確認してください。';
+ if(/duplicate key/.test(s))return '登録内容が重複しています。再読込して確認してください。';
+ return '月末確定の情報を取得できませんでした。再読込してください。';
+}
+function settlementCurrent(host,state){return !!host&&!!state&&host.isConnected&&host._settlement===state&&state.scope===checkoutScope();}
+function settlementState(){var h=document.getElementById('settlement-panel');return h&&h._settlement;}
+function settlementMonth(){var e=document.getElementById('settlementMonth');return e&&/^\d{4}-\d{2}$/.test(e.value)?e.value+'-01':null;}
+async function loadSettlementPanel(){
+ var host=document.getElementById('settlement-panel');if(!host)return;
+ var seq=++SETTLEMENT_LOAD_SEQ,scope=checkoutScope();host.textContent='';host.style.display='none';host._settlement=null;
+ try{
+  await ensureStoreMap();if(seq!==SETTLEMENT_LOAD_SEQ||scope!==checkoutScope()||!host.isConnected)return;
+  var stores=checkoutStores(),allowed=[];
+  for(var store of stores){
+   try{var settings=await sbRpc('settlement_settings',{p_store:store.id});allowed.push({store:store,settings:settings});}
+   catch(err){if(!checkoutForbidden(err))throw err;}
+  }
+  if(seq!==SETTLEMENT_LOAD_SEQ||scope!==checkoutScope()||!host.isConnected||!allowed.length)return;
+  var state={scope:scope,allowed:allowed,store:allowed[0].store.id,settings:allowed[0].settings,draft:null,travel:{},seq:0,busy:false};host._settlement=state;
+  host.style.display='block';
+  host.innerHTML='<section class="dash-sect"><h3>月末確定</h3><p>全体管理者・オーナー向け。確定後の訂正は次の月の調整行に入れます。</p>'
+   +'<label class="mb-l">店<select id="settlementStore">'+allowed.map(function(x){return '<option value="'+esc(x.store.id)+'">'+esc(x.store.name)+'</option>';}).join('')+'</select></label>'
+   +'<label class="mb-l">対象月<input id="settlementMonth" type="month"></label><button class="rbtn" type="button" data-settlement-load>下書き・確定を読込</button>'
+   +'<p role="status" id="settlementStatus"></p><div id="settlementDraft"></div></section><div id="settlementSettings"></div>';
+  var today=CHECKOUT_PURE.checkoutJstDate(new Date()),d=new Date(today.slice(0,7)+'-01T00:00:00Z');d.setUTCMonth(d.getUTCMonth()-1);
+  host.querySelector('#settlementMonth').value=d.toISOString().slice(0,7);
+  host.querySelector('#settlementStore').onchange=function(){
+   state.store=this.value;state.settings=state.allowed.find(function(x){return x.store.id===state.store;}).settings;
+   state.seq++;state.draft=null;state.travel={};host.querySelector('#settlementDraft').textContent='';host.querySelector('#settlementStatus').textContent='';renderSettlementSettings(host,state);
+  };
+  host.querySelector('#settlementMonth').onchange=function(){state.seq++;state.draft=null;state.travel={};host.querySelector('#settlementDraft').textContent='';host.querySelector('#settlementStatus').textContent='';};
+  host.onclick=function(e){
+   var b=e.target.closest('button');if(!b)return;
+   if(b.hasAttribute('data-settlement-load'))loadSettlementDraft();
+   if(b.hasAttribute('data-settlement-confirm'))confirmSettlement();
+   if(b.hasAttribute('data-settlement-travel'))previewSettlementTravel();
+   if(b.hasAttribute('data-settlement-csv')&&state.draft&&state.draft.id){
+    var blob=new Blob([CHECKOUT_PURE.settlementCsv(state.draft,b.getAttribute('data-settlement-csv'))],{type:'text/csv;charset=utf-8;'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='settlement-'+state.draft.month+'-'+b.getAttribute('data-settlement-csv')+'.csv';a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+   }
+  };
+  renderSettlementSettings(host,state);
+ }catch(err){if(seq===SETTLEMENT_LOAD_SEQ&&scope===checkoutScope()&&host.isConnected){host.style.display=checkoutForbidden(err)?'none':'block';host.textContent=checkoutForbidden(err)?'':settlementError(err);}}
+}
+function settlementHandleError(host,state,err){
+ if(!settlementCurrent(host,state))return;
+ if(checkoutForbidden(err)){host.style.display='none';host.textContent='';host._settlement=null;return;}
+ host.querySelector('#settlementStatus').textContent=settlementError(err);
+}
+async function loadSettlementDraft(){
+ var host=document.getElementById('settlement-panel'),state=settlementState();if(!settlementCurrent(host,state)||state.busy)return;
+ var month=settlementMonth(),store=state.store,seq=++state.seq;state.draft=null;state.travel={};host.querySelector('#settlementDraft').textContent='';
+ host.querySelector('#settlementStatus').textContent='読み込み中…';
+ try{
+  if(!month)throw Error('settlement_bad_month');
+  var saved=await sbRpc('get_settlement',{p_store:store,p_month:month});
+  var draft=saved||await sbRpc('settlement_preview',{p_store:store,p_month:month});
+  if(!settlementCurrent(host,state)||seq!==state.seq)return;
+  state.draft=draft;host.querySelector('#settlementStatus').textContent='';renderSettlementDraft(host,state);
+ }catch(err){if(seq===state.seq)settlementHandleError(host,state,err);}
+}
+function settlementTravelInput(host,state){
+ var travel={};host.querySelectorAll('[data-travel-days]').forEach(function(el){
+  var id=el.getAttribute('data-travel-days'),line=state.draft.lines.find(function(l){return l.artist_id===id;});
+  var reason=Array.from(host.querySelectorAll('[data-travel-reason]')).find(function(r){return r.getAttribute('data-travel-reason')===id;}).value;
+  if(el.value!==String(line.attendance_default)||reason)travel[id]={days:/^\d+$/.test(el.value)?Number(el.value):null,reason:reason};
+ });return travel;
+}
+async function previewSettlementTravel(){
+ var host=document.getElementById('settlement-panel'),state=settlementState();if(!settlementCurrent(host,state)||!state.draft||state.draft.id||state.busy)return;
+ var seq=++state.seq,travel=settlementTravelInput(host,state);state.busy=true;
+ try{
+  var data=await sbRpc('settlement_travel_preview',{p_store:state.store,p_month:state.draft.month,p_travel:travel});
+  if(!settlementCurrent(host,state)||seq!==state.seq)return;
+  state.travel=travel;state.draft=data;host.querySelector('#settlementStatus').textContent='出勤日数と交通費を再計算しました。';renderSettlementDraft(host,state);
+ }catch(err){if(seq===state.seq)settlementHandleError(host,state,err);}finally{state.busy=false;}
+}
+async function confirmSettlement(){
+ var host=document.getElementById('settlement-panel'),state=settlementState();if(!settlementCurrent(host,state)||!state.draft||state.draft.id||state.busy)return;
+ if(state.draft.month!==settlementMonth())return;
+ var entered=settlementTravelInput(host,state);
+ if(JSON.stringify(entered)!==JSON.stringify(state.travel)){host.querySelector('#settlementStatus').textContent='出勤日数を変更しました。「交通費を再計算」を押して確認してください。';return;}
+ if(!window.confirm('この月の支払いと請求を確定します。確定後は元の会計を変更できません。確定しますか？'))return;
+ var seq=++state.seq,draft=state.draft,store=state.store;state.busy=true;host.querySelector('[data-settlement-confirm]').disabled=true;
+ try{
+  // Refresh every displayed component (rates/adjustments included) before writing. The DB also checks count/total under its store lock.
+  var fresh=await sbRpc('settlement_travel_preview',{p_store:store,p_month:draft.month,p_travel:state.travel});
+  if(!settlementCurrent(host,state)||seq!==state.seq)return;
+  if(JSON.stringify(fresh)!==JSON.stringify(draft)){state.draft=fresh;renderSettlementDraft(host,state);throw Error('settlement_changed');}
+  await sbRpc('confirm_settlement',{p_store:store,p_month:draft.month,p_expected_count:draft.checkout_count,p_expected_total:draft.sales_total,p_travel:state.travel,p_expected_digest:draft.digest});
+  var saved=await sbRpc('get_settlement',{p_store:store,p_month:draft.month});
+  if(!settlementCurrent(host,state)||seq!==state.seq)return;
+  if(!saved||!saved.id)throw Error('readback_failed');
+  state.draft=saved;renderSettlementDraft(host,state);host.querySelector('#settlementStatus').textContent='確定済みの明細を再読込しました。';
+  await refreshSettlementSettings(host,state);
+ }catch(err){if(seq===state.seq)settlementHandleError(host,state,err);}finally{
+  state.busy=false;var btn=host.querySelector('[data-settlement-confirm]');if(btn&&state.draft)btn.disabled=!!state.draft.warnings.length;
+ }
+}
+function renderSettlementDraft(host,state){
+ var d=state.draft,y=CHECKOUT_PURE.checkoutYen,locked=!!d.id;
+ function money(label,value){return '<div class="dash-row"><span>'+esc(label)+'</span><strong>'+esc(y(value))+'</strong></div>';}
+ var html='<h4>'+esc(d.month.slice(0,7))+' '+(locked?'確定済み':'下書き')+'</h4><p>会計 '+esc(d.checkout_count)+'件 ／ 入れ忘れ（会計開始から累計）'+esc(d.unchecked_count)+'件（確定時に記録）</p>';
+ (d.warnings||[]).forEach(function(w){html+='<p role="alert">'+esc(settlementError(w))+'</p>';});
+ if((d.before_start_items||[]).length){
+  html+='<table><thead><tr><th>予約番号</th><th>入金日</th><th>金額</th></tr></thead><tbody>';
+  d.before_start_items.forEach(function(i){html+='<tr><td>'+esc(i.reservation_id)+'</td><td>'+esc(i.paid_on)+'</td><td>'+esc(y(i.actual_amount))+'</td></tr>';});
+  html+='</tbody></table>';
+ }
+ html+='<h4>支払い明細</h4>';
+ (d.lines||[]).forEach(function(l){
+  html+='<section class="mb-form"><h4>'+esc(l.artist_name)+'</h4>'+money('通常売上',l.normal_sales)
+   +'<p class="settlement-self" style="background:#fff2cd;padding:10px;font-weight:800">自己集客 '+esc(l.self_count)+'件 ／ '+esc(y(l.self_sales))+'</p>';
+  (l.rate_groups||[]).forEach(function(g){html+='<p>'+esc(g.self_acquired?'自己集客':'通常')+' '+esc(g.rate==null?'率未設定':settlementRatePercent(g.rate)+'%')+' ／ 対象 '+esc(y(g.sales))+' → 支払い '+esc(y(g.payout))+'</p>';});
+  html+=money('歩合支払い',l.payout)+money('教育費（会社別払い・受取：'+(d.education_recipient||'未設定')+'）',l.education_fee);
+  if(locked)html+='<p>出勤 '+esc(l.attendance_days)+'日 ／ 1日 '+esc(y(l.travel_per_day))+' ／ 理由 '+esc(l.travel_reason||'—')+'</p>';
+  else html+='<label class="mb-l">出勤日数（初期 '+esc(l.attendance_default)+'日）<input type="number" min="0" max="31" step="1" data-travel-days="'+esc(l.artist_id)+'" value="'+esc(l.attendance_days)+'"></label>'
+   +'<label class="mb-l">日数を直す理由<input maxlength="500" data-travel-reason="'+esc(l.artist_id)+'" value="'+esc(l.travel_reason||'')+'"></label><p>交通費／日：'+esc(y(l.travel_per_day))+'</p>';
+  html+=money('交通費',l.travel_total)+money('調整',l.adjustment)+money('支払い合計',l.payout_total)+'</section>';
+ });
+ if(!locked)html+='<button class="rbtn" type="button" data-settlement-travel>交通費を再計算</button>';
+ html+='<h4>クリニック請求明細</h4>'+money('売上合計',d.sales_total)+money('クリニック料',d.clinic_fee)+money('月額固定',d.monthly_fixed)+money('診療代',d.consult_total)+money('調整（差し引き）',d.billing_adjustment)+money('請求額',d.invoice_total);
+ html+='<div style="overflow-x:auto"><table><thead><tr><th>予約番号</th><th>来店日</th><th>担当</th><th>メニュー</th><th>金額</th><th>支払い方法</th><th>追加／調整</th></tr></thead><tbody>';
+ (d.items||[]).forEach(function(i){html+='<tr>'+[i.reservation_id,i.visit_date,i.artist_name,i.menu_name,y(i.actual_amount),i.payment_method,i.is_addition?i.paid_on.slice(0,7)+'分の追加':''].map(function(v){return '<td>'+esc(v)+'</td>';}).join('')+'</tr>';});
+ (d.adjustments||[]).forEach(function(a){var artist=(d.lines||[]).find(function(l){return l.artist_id===a.artist_id;});html+='<tr><td>'+esc(a.adjustment_id)+'</td><td>—</td><td>'+esc(artist?artist.artist_name:'請求')+'</td><td>'+esc(a.reason)+'</td><td>'+esc(y(a.amount))+'</td><td>—</td><td>調整</td></tr>';});
+ html+='</tbody></table></div>';
+ html+=locked?'<p><button class="rbtn" type="button" data-settlement-csv="payout">支払いCSV</button> <button class="rbtn" type="button" data-settlement-csv="invoice">請求CSV</button></p>':'<p><button class="mb-submit" type="button" data-settlement-confirm'+(d.warnings.length?' disabled':'')+'>確定する</button></p>';
+ host.querySelector('#settlementDraft').innerHTML=html;
+}
+async function refreshSettlementSettings(host,state){
+ var store=state.store,settings=await sbRpc('settlement_settings',{p_store:store});
+ if(!settlementCurrent(host,state)||state.store!==store)return;
+ state.settings=settings;state.allowed.find(function(x){return x.store.id===store;}).settings=settings;renderSettlementSettings(host,state);
+}
+function renderSettlementSettings(host,state){
+ var s=state.settings,y=CHECKOUT_PURE.checkoutYen;
+ function artists(empty){return (empty?'<option value="">請求（＋は差し引き／−は請求に加算）</option>':'')+(s.artists||[]).map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>';}).join('');}
+ function input(label,name,type,attrs){return '<label class="mb-l">'+esc(label)+'<input name="'+name+'" type="'+type+'" '+(attrs||'')+' required></label>';}
+ var html='<section class="dash-sect"><h3>歩合の設定</h3><p>開始日つきで追加します。同じ開始日で入れ直すと新しい方が使われます。確定済みの明細は変わりません。</p>'
+  +'<form data-settlement-form="payout" class="mb-form"><h4>アーティストの率</h4><label class="mb-l">担当<select name="artist">'+artists(false)+'</select></label>'
+  +input('開始日','valid_from','date')+input('通常（%）','normal','number','min="0" max="100" step="0.01"')+input('自己集客（%）','self','number','min="0" max="100" step="0.01"')
+  +input('教育費（%・対象外は0）','education','number','min="0" max="100" step="0.01"')+input('交通費／日（円・なしは0）','travel','number','min="0" max="100000" step="1"')+'<button class="rbtn" type="submit">率を追加</button></form>'
+  +'<form data-settlement-form="billing" class="mb-form"><h4>店の率</h4>'+input('開始日','valid_from','date')+input('クリニック料（%）','clinic','number','min="0" max="100" step="0.01"')
+  +input('月額固定（円）','fixed','number','min="0" max="10000000" step="1"')+input('教育費の受取先（表示名・なしは「なし」）','recipient','text','maxlength="100"')+'<button class="rbtn" type="submit">店の率を追加</button></form><h4>設定の履歴</h4>';
+ (s.payout_rates||[]).forEach(function(r){var a=(s.artists||[]).find(function(a){return a.id===r.artist_id;});html+='<p>'+esc(r.valid_from)+'〜 '+esc(a?a.name:r.artist_id)+' ／ 通常 '+esc(settlementRatePercent(r.normal_rate))+'% ／ 自己集客 '+esc(settlementRatePercent(r.self_rate))+'% ／ 教育費 '+esc(settlementRatePercent(r.education_rate))+'% ／ 交通費 '+esc(y(r.travel_per_day))+'/日</p>';});
+ (s.billing_rates||[]).forEach(function(r){html+='<p>'+esc(r.valid_from)+'〜 クリニック料 '+esc(settlementRatePercent(r.clinic_rate))+'% ／ 固定 '+esc(y(r.monthly_fixed))+' ／ 教育費受取 '+esc(r.education_recipient)+'</p>';});
+ html+='</section><section class="dash-sect"><h3>調整行</h3><p>次の確定に入ります。担当の訂正は元の担当へ−、正しい担当へ＋の2行を追加してください。</p><form data-settlement-form="adjustment" class="mb-form">'
+  +'<label class="mb-l">対象<select name="artist">'+artists(true)+'</select></label>'+input('調整額（±円）','amount','number','min="-10000000" max="10000000" step="1"')+input('理由','reason','text','maxlength="500"')
+  +'<label class="mb-l">直す確定（任意）<select name="corrects"><option value="">指定なし</option>'+(s.settlements||[]).map(function(r){return '<option value="'+esc(r.id)+'">'+esc(r.month)+'</option>';}).join('')+'</select></label><button class="rbtn" type="submit">調整行を追加</button></form>';
+ (s.adjustments||[]).forEach(function(a){var artist=(s.artists||[]).find(function(x){return x.id===a.artist_id;});html+='<p>'+esc(a.settled?'精算済み':'未精算')+' ／ '+esc(artist?artist.name:'請求')+' ／ '+esc(y(a.amount))+' ／ '+esc(a.reason)+'</p>';});
+ html+='</section>';host.querySelector('#settlementSettings').innerHTML=html;
+ host.querySelectorAll('[data-settlement-form]').forEach(function(form){form.onsubmit=async function(e){
+  e.preventDefault();if(!settlementCurrent(host,state)||state.busy)return;
+  var store=state.store,kind=form.getAttribute('data-settlement-form'),v=function(n){return form.elements.namedItem(n).value;},fn,args;
+  if(kind==='payout'){fn='add_payout_rate';args={p_store:store,p_artist:v('artist'),p_valid_from:v('valid_from'),p_normal:Number(v('normal'))/100,p_self:Number(v('self'))/100,p_education:Number(v('education'))/100,p_travel:Number(v('travel'))};}
+  if(kind==='billing'){fn='add_store_billing_rate';args={p_store:store,p_valid_from:v('valid_from'),p_clinic:Number(v('clinic'))/100,p_fixed:Number(v('fixed')),p_recipient:v('recipient')};}
+  if(kind==='adjustment'){fn='add_settlement_adjustment';args={p_store:store,p_artist:v('artist')||null,p_amount:Number(v('amount')),p_reason:v('reason'),p_corrects:v('corrects')||null};}
+  state.busy=true;form.querySelector('button').disabled=true;
+  try{
+   await sbRpc(fn,args);
+   if(!settlementCurrent(host,state)||state.store!==store)return;
+   await refreshSettlementSettings(host,state);
+   if(!settlementCurrent(host,state)||state.store!==store)return;
+   state.seq++;state.draft=null;state.travel={};host.querySelector('#settlementDraft').textContent='';host.querySelector('#settlementStatus').textContent='追加内容を再読込しました。下書きを読み直してください。';
+  }catch(err){settlementHandleError(host,state,err);}finally{state.busy=false;if(form.isConnected)form.querySelector('button').disabled=false;}
+ };});
 }
 
 function handleBoardAction(act, rid){
@@ -5402,6 +5608,7 @@ function loadDash(){
     if(!res||seq!==DASH_LOAD_SEQ||scope!==checkoutScope())return;
     renderDash(res[0] || {}, res[1]);
     loadCheckoutSummary();
+    loadSettlementPanel();
   }).catch(function(err){
     if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
     var msg = String((err && err.message) || err || '');
@@ -5557,7 +5764,7 @@ function renderDash(s, unrecorded){
     { l:'無断キャンセル', v: num(s.noShow) + '件',      c:(num(s.noShow) > 0 ? 'dash-kpi-warn' : '') },
     { l:'問診記入率', v: num(s.questionnaireRate) + '%' }
   ];
-  var html = '<div id="checkout-summary"></div><div class="dash-kpis">' + kpis.map(function(x){
+  var html = '<div id="settlement-panel" style="display:none"></div><div id="checkout-summary"></div><div class="dash-kpis">' + kpis.map(function(x){
     return '<div class="dash-kpi ' + (x.c || '') + '">' +
              '<div class="dash-kpi-v">' + esc(x.v) + '</div>' +
              '<div class="dash-kpi-l">' + esc(x.l) + '</div>' +
