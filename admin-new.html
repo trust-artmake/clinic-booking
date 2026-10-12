@@ -4343,6 +4343,16 @@ function settlementError(err){
 }
 function settlementCurrent(host,state){return !!host&&!!state&&host.isConnected&&host._settlement===state&&state.scope===checkoutScope();}
 function settlementState(){var h=document.getElementById('settlement-panel');return h&&h._settlement;}
+// まだ確定していない一番古い月（会計の開始月から数える）。今月より先には進めない。開始日が無ければ先月。
+function settlementDefaultMonth(startDate,settlements,today){
+ var addMonth=function(m,n){var d=new Date(m+'-01T00:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7);};
+ var current=String(today).slice(0,7);
+ if(!startDate)return addMonth(current,-1);
+ var done={};(settlements||[]).forEach(function(r){done[String(r.month).slice(0,7)]=true;});
+ var m=String(startDate).slice(0,7);
+ while(done[m]&&m<current)m=addMonth(m,1);
+ return m;
+}
 function settlementMonth(){var e=document.getElementById('settlementMonth');return e&&/^\d{4}-\d{2}$/.test(e.value)?e.value+'-01':null;}
 async function loadSettlementPanel(){
  var host=document.getElementById('settlement-panel');if(!host)return;
@@ -4365,10 +4375,11 @@ async function loadSettlementPanel(){
    +'<section id="settlementStep2" class="dash-sect"><h3>STEP 2 下書きを見る</h3><p>支払いと請求の金額、会計の入れ忘れを確認します。</p><button class="rbtn" type="button" data-settlement-load>下書きを見る</button><p role="status" id="settlementStatus"></p><div id="settlementDraft"></div></section>'
    +'<section id="settlementStep3" class="dash-sect"><h3>STEP 3 確定する</h3><p>内容が合っていれば確定し、明細とCSVを保存します。</p><div id="settlementConfirmAction"><button class="mb-submit" type="button" data-settlement-confirm disabled>確定する</button><span id="settlementConfirmReason"></span></div><div id="settlementConfirmed"></div></section>'
    +'<details id="settlementAdjustments" class="dash-sect"><summary>▸ 確定したあとに間違いが見つかったとき（調整行）</summary><div id="settlementAdjustmentForm"></div></details>';
-  var today=CHECKOUT_PURE.checkoutJstDate(new Date()),d=new Date(today.slice(0,7)+'-01T00:00:00Z');d.setUTCMonth(d.getUTCMonth()-1);
-  host.querySelector('#settlementMonth').value=d.toISOString().slice(0,7);
+  var settlementPickMonth=function(){var x=state.allowed.find(function(a){return a.store.id===state.store;});host.querySelector('#settlementMonth').value=settlementDefaultMonth(x&&x.store.checkout_start_date,state.settings&&state.settings.settlements,CHECKOUT_PURE.checkoutJstDate(new Date()));};
+  settlementPickMonth();
   host.querySelector('#settlementStore').onchange=function(){
    state.store=this.value;state.settings=state.allowed.find(function(x){return x.store.id===state.store;}).settings;
+   host.querySelector('#settlementMonth').value=settlementDefaultMonth((state.allowed.find(function(x){return x.store.id===state.store;}).store||{}).checkout_start_date,state.settings&&state.settings.settlements,CHECKOUT_PURE.checkoutJstDate(new Date()));
    resetSettlementDraft(host,state);host.querySelector('#settlementStatus').textContent='';renderSettlementSettings(host,state);
   };
   host.querySelector('#settlementMonth').onchange=function(){resetSettlementDraft(host,state);host.querySelector('#settlementStatus').textContent='';renderSettlementSettings(host,state);};
