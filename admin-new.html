@@ -4009,6 +4009,8 @@ var CHECKOUT_STAFF = [];
 var CHECKOUT_HOME_SEQ = 0;
 var CHECKOUT_DASH_SEQ = 0;
 function checkoutCanEdit(r){
+  // 全体管理者は全店の会計を見て入力できる（仁義さん決定 A・2026-10-12。DB側も is_platform_admin() を許可）
+  if(window.IS_PLATFORM_ADMIN===true) return true;
   return CHECKOUT_STAFF.some(function(s){
     return s.tenant_id===r.tenant_id && (s.role==='owner'||s.role==='admin') && (!s.store_id||s.store_id===r.store_id);
   });
@@ -4103,6 +4105,10 @@ function checkoutSummaryRows(summary) {
 /*</checkout-pure>*/
 return { CHECKOUT_REASONS,CHECKOUT_METHODS,checkoutJstDate,checkoutDefaults,validateCheckout,checkoutYen,checkoutDateLabel,checkoutSummaryRows };
 })();
+// 権限がないエラー（その店の会計を見る立場ではない）。通信失敗などとは分けて扱う。
+function checkoutForbidden(err){
+  return /forbidden|permission denied/.test(String(err&&err.message||err||''));
+}
 function checkoutError(err){
   var s=String(err&&err.message||err||'');
   if(/forbidden|permission|denied/.test(s)) return 'この店舗の会計を入力する権限がありません。';
@@ -4201,7 +4207,9 @@ async function loadHomeCheckout(){
       +(checkoutCanEdit(r)?'<button type="button" class="rbtn" data-checkout-rid="'+esc(r.id)+'">会計を入力</button>':'')+'</div>';}).join('');
     card.querySelector('[data-checkout-list]').onclick=function(){list.style.display=list.style.display==='none'?'block':'none';};
     list.onclick=function(e){var btn=e.target.closest('[data-checkout-rid]');if(btn)openCheckout(btn.getAttribute('data-checkout-rid'));};
-  } catch(err){if(seq===CHECKOUT_HOME_SEQ&&tenant===TENANT_ID&&card.isConnected){card.style.display='block';card.textContent='会計の入れ忘れを確認できませんでした。再読込してください。';}}
+  } catch(err){if(seq===CHECKOUT_HOME_SEQ&&tenant===TENANT_ID&&card.isConnected){
+    if(checkoutForbidden(err)){card.style.display='none';card.textContent='';return;}   // 権限がない人には欄ごと出さない
+    card.style.display='block';card.textContent='会計の入れ忘れを確認できませんでした。再読込してください。';}}
 }
 async function loadCheckoutSummary(){
   var host=document.getElementById('checkout-summary');if(!host)return;
@@ -4218,7 +4226,7 @@ async function loadCheckoutSummary(){
       +(summary.unknown_price_count?'<p>※ 予約金額が未設定の '+esc(summary.unknown_price_count)+'件は見込み額に含まれていません。</p>':'')
       +(summary.by_artist||[]).map(function(a){return '<h4>'+esc(a.artist_name||'担当未設定')+'</h4>'+lines(a);}).join('')
       +'<p class="dash-note">会計済みは支払い日、未会計は来店日で集計。未会計は会計開始日以降の来店済み・未取消が対象です。</p></div>';}).join('');
-  } catch(err){if(seq===CHECKOUT_DASH_SEQ&&scope===checkoutScope()&&host.isConnected)host.textContent='会計の集計を取得できませんでした。再読込してください。';}
+  } catch(err){if(seq===CHECKOUT_DASH_SEQ&&scope===checkoutScope()&&host.isConnected)host.textContent=checkoutForbidden(err)?'':'会計の集計を取得できませんでした。再読込してください。';}
 }
 
 function handleBoardAction(act, rid){
