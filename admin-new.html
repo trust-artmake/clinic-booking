@@ -130,6 +130,9 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .resv-storebar label{font-size:12px;font-weight:700;color:#557}
 .resv-storebar select{flex:1;padding:8px;border:1px solid #d4dbda;border-radius:8px;font-size:13px;background:#fff}
 
+.checkout-dialog{width:min(480px,calc(100vw - 28px));max-height:90vh;overflow:auto;padding:0;border:0;border-radius:14px;color:#253b39}
+.checkout-dialog::backdrop{background:rgba(0,0,0,.4)}
+.checkout-dialog .mb-form{margin:0}
 /* ===== customer タブ CSS ===== */
 /* ============================================================================
    顧客カルテ（CRM）タブ CSS — 接頭辞 .crm- で名前空間を分離（既存 .rcard/.tab/.mb-… と非衝突）
@@ -867,7 +870,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
   <!-- 店舗切替（任意）。全店=owner/admin のみ。staff は自店に固定されるので隠してもよい -->
   <div class="resv-storebar" id="resvStoreBar" style="display:none">
     <label>店舗</label>
-    <select id="resvStore" onchange="loadBoard()">
+    <select id="resvStore" onchange="loadBoard();loadHomeCheckout();loadDash()">
       <option value="all">🏢 全店まとめ</option>
       <option value="kurume">久留米店</option>
       <option value="hakata">博多店</option>
@@ -2147,6 +2150,8 @@ function loadHome(){
   var cc=document.createElement('div'); cc.className='home-card alert'; cc.id='home-clinic-card'; cc.hidden=true;
   body.appendChild(cc);
 
+  var checkoutCardEl=document.createElement('div'); checkoutCardEl.className='home-card'; checkoutCardEl.id='home-checkout-card'; checkoutCardEl.style.display='none'; body.appendChild(checkoutCardEl);
+
   // ② お店の準備（未完了設定）＝manager のみ
   if(isMgr){
     var ac=document.createElement('div'); ac.className='home-card'; ac.id='home-setup-card';
@@ -2177,6 +2182,7 @@ function loadHome(){
   loadHomeReservations();
   loadHomeAttention();
   loadHomeClinicNotice();
+  loadHomeCheckout();
   if(isMgr) loadHomeSetup();
 }
 
@@ -3465,6 +3471,7 @@ function renderTenantHeader(){
 var STORE_MAP = null;        // { kurume:{id,name}, hakata:{id,name}, ... }
 var STORE_MAP_TENANT = null; // STORE_MAP を読み込んだ時点の TENANT_ID。店切替中の古い応答を捨てる。
 var BOARD_PERIOD = 'today';
+var BOARD_LOAD_SEQ = 0;
 var WD = ['日','月','火','水','木','金','土'];
 
 /* poc に無ければ使う簡易ヘルパー（既にあれば重複定義は削ってよい） */
@@ -3484,7 +3491,7 @@ function currentStoreSlug(){
 /* テナント横断は platform_admin(仁義)のみ可能（patch-20）。画面は常に「選択中の店」だけを映すため、
    tenant_id 列を持つテーブルの GET には選択中テナントの絞り込みを必ず重ねる。
    一般スタッフは RLS が自テナントに限定済み＝同じ条件の無害な重ね掛け（挙動不変）。 */
-var TENANT_SCOPED_TABLES = { stores:1, menus:1, artists:1, reviews:1, ref_sources:1, artist_shifts:1, reservations:1, customers:1 };
+var TENANT_SCOPED_TABLES = { reservation_checkouts:1, stores:1, menus:1, artists:1, reviews:1, ref_sources:1, artist_shifts:1, reservations:1, customers:1 };
 /* REST GET（PostgREST）。配列 JSON を返す */
 function sbGet(path){
   var table = String(path).split(/[?&/]/)[0];
@@ -3518,13 +3525,13 @@ function ensureStoreMap(){
   //   public_store_resolve RPC で public_slug を引いて店を解決する設計）。
   //   code は (tenant_id,code) でしか一意でないため、テナント横断の公開リンクには使えない。
   // ★patch-51：liff_id も同時取得。集客タブの「Instagram用LIFFリンク」発行に使う。
-  return sbGet('stores?select=id,name,code,public_slug,liff_id&order=name').then(function(rows){
+  return sbGet('stores?select=id,name,code,public_slug,liff_id,checkout_start_date&order=name').then(function(rows){
     // 店切替の直後に前テナントの応答が遅れて返っても、現在の画面を古い店情報で上書きしない。
     if (loadTenant !== TENANT_ID) return ensureStoreMap();
     STORE_MAP = {};
     STORE_MAP_TENANT = loadTenant;
     (rows||[]).forEach(function(s){
-      if(s.code) STORE_MAP[s.code] = { id:s.id, name:s.name, public_slug:s.public_slug||null, liff_id:s.liff_id||null };
+      if(s.code) STORE_MAP[s.code] = { id:s.id, name:s.name, public_slug:s.public_slug||null, liff_id:s.liff_id||null, checkout_start_date:s.checkout_start_date||null };
     });
     // ★店舗セレクタを「選択中テナントの店」で作り直す（多テナント対応）。
     //   固定の久留米/博多ではなく、実データの店だけを並べる。先頭は常に「全店まとめ」。
@@ -3562,7 +3569,7 @@ function rangeFor(p){
 function showReservations(el){
   if (typeof hideAllViews === 'function') hideAllViews();
   if (el && typeof setActiveNav === 'function') setActiveNav(el);
-  document.getElementById('resvView').style.display = '';
+  document.getElementById('resvView').style.display = 'block';
   loadBoard();
   window.scrollTo({ top:0, behavior:'smooth' });
 }
@@ -3579,10 +3586,13 @@ function setPeriod(p){
    担当絞り込み・問診ステータス絞り込み・店舗スコープは PostgREST フィルタで実現。
    新規/N回目バッジは RPC visit_no を予約ごとに併走で算出。 */
 function loadBoard(){
+  var seq=++BOARD_LOAD_SEQ,tenant=TENANT_ID,scope=null;
   var board = document.getElementById('resvBoard');
   board.innerHTML = '<div class="placeholder">読み込み中…</div>';
 
   ensureStoreMap().then(function(){
+    if(seq!==BOARD_LOAD_SEQ||tenant!==TENANT_ID)return;
+    scope=checkoutScope();
     fillNurseFilterFromServer(); // 絞り込みのアーティスト候補を埋める（非同期・並行）
 
     var slug   = currentStoreSlug();
@@ -3596,7 +3606,7 @@ function loadBoard(){
 
     var path = 'reservations?select=' +
       'id,start_at,end_at,customer_name,phone,status,source,treatment_type,outcome,line_uid,' +
-      'artist_id,menu_id,artists(name,code),menus(name)' +
+      'tenant_id,store_id,price,artist_id,menu_id,artists(name,code),menus(name)' +
       '&status=neq.cancelled' +
       '&start_at=gte.' + from + '&start_at=lt.' + to +
       '&order=start_at';
@@ -3608,6 +3618,7 @@ function loadBoard(){
     if (qStatus === 'q_pending') path += '&status=in.(pending_questionnaire,questionnaire_reminded)';
 
     sbGet(path).then(function(rows){
+      if(seq!==BOARD_LOAD_SEQ||scope!==checkoutScope())return;
       rows = rows || [];
       // 新規/リピート判定（line_uid のある予約のみ RPC で来店回数を取る。電話予約は新規扱い）
       var jobs = rows.map(function(row){
@@ -3616,12 +3627,15 @@ function loadBoard(){
           .then(function(n){ row._visitNo = (typeof n === 'number') ? n : 1; })
           .catch(function(){ row._visitNo = 1; });
       });
-      return Promise.all(jobs).then(function(){ renderBoard(rows); });
+      jobs.push(checkoutHydrate(rows));
+      return Promise.all(jobs).then(function(){ if(seq===BOARD_LOAD_SEQ&&scope===checkoutScope())renderBoard(rows); });
     }).catch(function(err){
+      if(seq!==BOARD_LOAD_SEQ||scope!==checkoutScope())return;
       if (!TOKEN){ if (typeof showLogin==='function') showLogin('もう一度ログインしてください。'); return; }
       board.innerHTML = '<div class="placeholder">取得に失敗しました<br>'+esc(err&&err.message||err)+'</div>';
     });
   }).catch(function(err){
+    if(seq!==BOARD_LOAD_SEQ||tenant!==TENANT_ID)return;
     board.innerHTML = '<div class="placeholder">店舗情報を取得できませんでした<br>'+esc(err&&err.message||err)+'</div>';
   });
 }
@@ -3654,7 +3668,7 @@ function renderBoard(rows){
         var out = it.outcome === 'visited' ? ' <span class="rb-visited">✅来店済み</span>'
                 : it.outcome === 'no_show' ? ' <span class="rb-noshow">⚠️無断キャンセル</span>' : '';
         var rid = esc(it.reservation_id);
-        var acts = '<div class="rc-acts">' +
+        var acts = '<div class="rc-acts">' + checkoutCard(r) +
           /* ★2026-09-22：問診は status が問診待ちの予約にしか付かない（submit_questionnaire）。
              送っても付かない予約には出さない。電話予約も、紐づけ＋問診待ちになれば出る。 */
           ((it.uid && !it.outcome && (it.status === 'pending_questionnaire' || it.status === 'questionnaire_reminded')) ? '<button type="button" class="rbtn" data-act="remind" data-rid="'+rid+'">📨 問診リマインド</button>' : '') +
@@ -3990,8 +4004,171 @@ function openLinkLine(rid){
   run();   /* 開いた時点で、予約の電話番号での一致と最近のお客様を出す */
 }
 
+/* ===== 段1a 会計（純粋ロジックを画面・テストで共有） ===== */
+var CHECKOUT_STAFF = [];
+var CHECKOUT_HOME_SEQ = 0;
+var CHECKOUT_DASH_SEQ = 0;
+function checkoutCanEdit(r){
+  return CHECKOUT_STAFF.some(function(s){
+    return s.tenant_id===r.tenant_id && (s.role==='owner'||s.role==='admin') && (!s.store_id||s.store_id===r.store_id);
+  });
+}
+function checkoutScope(){ return TENANT_ID+'|'+currentStoreSlug(); }
+function checkoutStore(id){
+  return Object.values(STORE_MAP||{}).find(function(s){return s.id===id;});
+}
+function checkoutStores(){
+  var id=storeIdForSlug(currentStoreSlug());
+  return Object.values(STORE_MAP||{}).filter(function(s){return s.checkout_start_date && (!id||s.id===id);});
+}
+function checkoutAccess(){
+  var tenant=TENANT_ID;
+  return sbRpc('current_staff',{}).then(function(rows){
+    if(tenant!==TENANT_ID) throw new Error('店舗が切り替わりました。開き直してください。');
+    CHECKOUT_STAFF=rows||[];
+  }).catch(function(err){CHECKOUT_STAFF=[];throw err;});
+}
+function checkoutHydrate(rows){
+  var enabled=rows.filter(function(r){var s=checkoutStore(r.store_id);return s&&s.checkout_start_date;});
+  if(!enabled.length) return Promise.resolve();
+  return checkoutAccess().then(function(){
+    var jobs=[];
+    for(var i=0;i<enabled.length;i+=50){
+      (function(batch){jobs.push(sbGet('reservation_checkouts?select=reservation_id,actual_amount&reservation_id=in.('+batch.map(function(r){return encodeURIComponent(r.id);}).join(',')+')')
+        .then(function(saved){batch.forEach(function(r){r._checkout=(saved||[]).find(function(c){return c.reservation_id===r.id;})||null;r._checkoutEditable=checkoutCanEdit(r);});}));})(enabled.slice(i,i+50));
+    }
+    return Promise.all(jobs);
+  }).catch(function(){enabled.forEach(function(r){r._checkoutError=true;});});
+}
+function checkoutCard(r){
+  var s=checkoutStore(r.store_id);
+  if(!s||!s.checkout_start_date||r.outcome!=='visited'||r.status==='cancelled') return '';
+  if(r._checkoutError) return '<span>会計を確認できませんでした。再読込してください。</span>';
+  var label=r._checkout ? '会計 ✓ ¥'+Number(r._checkout.actual_amount).toLocaleString('ja-JP') : '会計を入力';
+  if(!r._checkoutEditable) return r._checkout ? '<span>'+esc(label)+'</span>' : '';
+  return '<button type="button" class="rbtn" data-act="checkout" data-rid="'+esc(r.id)+'">'+esc(label)+'</button>';
+}
+function checkoutError(err){
+  var s=String(err&&err.message||err||'');
+  if(/forbidden|permission|denied/.test(s)) return 'この店舗の会計を入力する権限がありません。';
+  if(/checkout_disabled/.test(s)) return 'この店舗では会計機能が有効になっていません。';
+  if(/checkout_not_visited/.test(s)) return '来店済み・未取消の予約だけ会計を入力できます。';
+  if(/checkout_reason_required/.test(s)) return '予約金額との差の理由を選択してください。';
+  if(/checkout_bad_paid_on/.test(s)) return '支払い日は来店日の前後1年以内で入力してください。';
+  if(/checkout_bad_/.test(s)) return '金額・理由・支払い日・支払い方法・メモを確認してください。';
+  return '会計を保存・確認できませんでした。再読込してお試しください。';
+}
+function checkoutRefresh(){
+  loadBoard(); loadHomeCheckout();
+  var dash=document.getElementById('dashView');
+  if(dash&&dash.style.display!=='none') loadDash();
+}
+async function openCheckout(rid, onlyIfEnabled){
+  var scope=checkoutScope();
+  try {
+    await ensureStoreMap();
+    if(scope!==checkoutScope()) return;
+    var fetched=await Promise.all([
+      import('./admin_checkout_pure.mjs'),checkoutAccess(),
+      sbGet('reservations?select=id,tenant_id,store_id,start_at,price,customer_name,status,outcome&id=eq.'+encodeURIComponent(rid))
+    ]);
+    if(scope!==checkoutScope()) return;
+    var pure=fetched[0],r=(fetched[2]||[])[0],store=r&&checkoutStore(r.store_id);
+    var selectedStore=storeIdForSlug(currentStoreSlug());
+    if(r&&selectedStore&&r.store_id!==selectedStore)return;
+    if(!r||!store||!store.checkout_start_date||!checkoutCanEdit(r)){
+      if(!onlyIfEnabled) window.alert('この店舗の会計を入力する権限がないか、会計機能がオフです。');
+      return;
+    }
+    if(r.outcome!=='visited'||r.status==='cancelled') throw new Error('checkout_not_visited');
+    var existing=await sbGet('reservation_checkouts?select=*&reservation_id=eq.'+encodeURIComponent(rid));
+    if(scope!==checkoutScope()) return;
+    var saved=(existing||[])[0],defaults=pure.checkoutDefaults(r,saved);
+    var old=document.getElementById('checkoutDialog'); if(old) old.remove();
+    var dlg=document.createElement('dialog'); dlg.id='checkoutDialog'; dlg.className='checkout-dialog';
+    dlg.setAttribute('aria-label','会計の入力');
+    function options(values){return '<option value="">選択してください</option>'+values.map(function(v){return '<option value="'+esc(v)+'">'+esc(v)+'</option>';}).join('');}
+    dlg.innerHTML='<form class="mb-form" novalidate><h3>会計の入力</h3><p>'+esc(r.customer_name)+' ／ '+esc(store.name)+'</p>'
+      +'<p>来店日：'+esc(pure.checkoutDateLabel(pure.checkoutJstDate(r.start_at)))+'<br>会計時点の予約金額：'+esc(pure.checkoutYen(saved?saved.booked_price:r.price))+'</p>'
+      +'<label class="mb-l" for="checkoutAmount">実際の金額（円）</label><input id="checkoutAmount" name="amount" inputmode="numeric" type="text">'
+      +'<label class="mb-l" for="checkoutReason">差の理由（金額が違う場合は必須）</label><select id="checkoutReason" name="reason">'+options(pure.CHECKOUT_REASONS)+'</select>'
+      +'<label class="mb-l" for="checkoutMethod">支払い方法</label><select id="checkoutMethod" name="method">'+options(pure.CHECKOUT_METHODS)+'</select>'
+      +'<label class="mb-l" for="checkoutPaidOn">支払い日</label><input id="checkoutPaidOn" name="paid_on" type="date">'
+      +'<label class="mb-l" for="checkoutNote">メモ（200字以内）</label><textarea id="checkoutNote" name="note" rows="3"></textarea>'
+      +'<label class="mb-l"><input name="self_acquired" type="checkbox" style="width:auto"> 自己集客</label>'
+      +'<p class="mb-msg ng" role="status"></p><div class="mb-btns"><button type="button" class="mb-cancel">閉じる</button><button type="submit" class="mb-submit">会計を保存</button></div></form>';
+    var form=dlg.querySelector('form'),msg=dlg.querySelector('[role="status"]'),submit=dlg.querySelector('[type="submit"]');
+    Object.keys(defaults).forEach(function(k){if(k==='self_acquired')form.elements[k].checked=defaults[k];else form.elements[k].value=defaults[k];});
+    dlg.querySelector('.mb-cancel').onclick=function(){dlg.close();dlg.remove();};
+    dlg.addEventListener('close',function(){dlg.remove();});
+    form.onsubmit=async function(e){
+      e.preventDefault(); if(submit.disabled) return;
+      if(scope!==checkoutScope()){msg.textContent='店舗が切り替わりました。閉じて開き直してください。';return;}
+      var input={}; Object.keys(defaults).forEach(function(k){input[k]=k==='self_acquired'?form.elements[k].checked:form.elements[k].value;});
+      var errors=pure.validateCheckout(input,saved?saved.booked_price:r.price);
+      if(errors.length){msg.textContent=errors.join(' ');return;}
+      submit.disabled=true; msg.textContent='保存中…';
+      try {
+        await sbRpc('save_checkout',{p_resv:rid,p_amount:Number(input.amount),p_reason:input.reason||null,p_note:input.note,p_method:input.method,p_paid_on:input.paid_on,p_self:input.self_acquired});
+        // 保存の応答だけで完了扱いにせず、DBを読み直す。
+        var verified=await sbGet('reservation_checkouts?select=*&reservation_id=eq.'+encodeURIComponent(rid));
+        var c=(verified||[])[0];
+        if(!c||c.actual_amount!==Number(input.amount)||c.payment_method!==input.method||c.paid_on!==input.paid_on
+          ||c.diff_reason!==(input.reason||null)||c.note!==input.note||c.self_acquired!==input.self_acquired) throw new Error('verification_failed');
+        // close イベントは非同期（画面が裏にあると遅れる）ので、ここで確実に取り除く。
+        dlg.close(); dlg.remove();
+        if(scope===checkoutScope()) checkoutRefresh();
+      } catch(err){msg.textContent=checkoutError(err);submit.disabled=false;}
+    };
+    document.body.appendChild(dlg);dlg.showModal();form.elements.amount.focus();
+  } catch(err){if(scope===checkoutScope())window.alert(checkoutError(err));}
+}
+async function loadHomeCheckout(){
+  var card=document.getElementById('home-checkout-card'); if(!card)return;
+  var seq=++CHECKOUT_HOME_SEQ,tenant=TENANT_ID;
+  card.style.display='none';card.textContent='';
+  try {
+    await ensureStoreMap();var scope=checkoutScope();
+    if(seq!==CHECKOUT_HOME_SEQ||tenant!==TENANT_ID||!card.isConnected)return;
+    var stores=checkoutStores();if(!stores.length)return;
+    card.style.display='block';card.textContent='会計の入れ忘れを確認中…';
+    await checkoutAccess();
+    var results=await Promise.all(stores.map(function(s){return sbRpc('list_unchecked_visits',{p_store:s.id});}));
+    if(seq!==CHECKOUT_HOME_SEQ||scope!==checkoutScope()||tenant!==TENANT_ID||!card.isConnected)return;
+    var rows=[];results.forEach(function(list,i){(list||[]).forEach(function(r){rows.push(Object.assign({},r,{store_name:stores[i].name,tenant_id:TENANT_ID}));});});
+    rows.sort(function(a,b){return a.start_at.localeCompare(b.start_at);});
+    if(!rows.length){card.textContent='✓ 会計の入れ忘れ 0件';return;}
+    var pure=await import('./admin_checkout_pure.mjs');
+    if(seq!==CHECKOUT_HOME_SEQ||scope!==checkoutScope()||!card.isConnected)return;
+    card.innerHTML='<button type="button" class="home-btn" data-checkout-list>会計の入れ忘れ '+esc(rows.length)+'件</button><div class="checkout-list" style="display:none"></div>';
+    var list=card.querySelector('.checkout-list');
+    list.innerHTML=rows.map(function(r){return '<div class="dash-row" style="flex-wrap:wrap"><div>'+esc(pure.checkoutDateLabel(r.visit_date)+' '+r.visit_time)+' ／ '+esc(r.store_name)+'<br>'+esc(r.customer_name)+' ／ '+esc(r.menu_name||'—')+' ／ '+esc(r.artist_name||'—')+' ／ '+esc(pure.checkoutYen(r.price))+'</div>'
+      +(checkoutCanEdit(r)?'<button type="button" class="rbtn" data-checkout-rid="'+esc(r.id)+'">会計を入力</button>':'')+'</div>';}).join('');
+    card.querySelector('[data-checkout-list]').onclick=function(){list.style.display=list.style.display==='none'?'block':'none';};
+    list.onclick=function(e){var btn=e.target.closest('[data-checkout-rid]');if(btn)openCheckout(btn.getAttribute('data-checkout-rid'));};
+  } catch(err){if(seq===CHECKOUT_HOME_SEQ&&tenant===TENANT_ID&&card.isConnected){card.style.display='block';card.textContent='会計の入れ忘れを確認できませんでした。再読込してください。';}}
+}
+async function loadCheckoutSummary(){
+  var host=document.getElementById('checkout-summary');if(!host)return;
+  var seq=++CHECKOUT_DASH_SEQ,scope=checkoutScope();
+  var stores=checkoutStores();if(!stores.length)return;
+  host.textContent='会計を集計中…';
+  try {
+    var range=dashRangeFor(DASH_PERIOD);
+    var pure=await import('./admin_checkout_pure.mjs');
+    var summaries=await Promise.all(stores.map(function(s){return sbRpc('checkout_summary',{p_store:s.id,p_from:range.from.slice(0,10),p_to:range.to.slice(0,10)});}));
+    if(seq!==CHECKOUT_DASH_SEQ||scope!==checkoutScope()||!host.isConnected)return;
+    function lines(s){return pure.checkoutSummaryRows(s).map(function(r){return '<div class="dash-row"><div class="dash-row-l">'+esc(r.label)+'</div><div class="dash-row-v">'+esc(pure.checkoutYen(r.amount))+' ／ '+esc(r.count)+'件</div></div>';}).join('');}
+    host.innerHTML=stores.map(function(s,i){var summary=summaries[i];return '<div class="dash-sect"><h3>'+esc(s.name)+' の会計</h3>'+lines(summary)
+      +(summary.unknown_price_count?'<p>※ 予約金額が未設定の '+esc(summary.unknown_price_count)+'件は見込み額に含まれていません。</p>':'')
+      +(summary.by_artist||[]).map(function(a){return '<h4>'+esc(a.artist_name||'担当未設定')+'</h4>'+lines(a);}).join('')
+      +'<p class="dash-note">会計済みは支払い日、未会計は来店日で集計。未会計は会計開始日以降の来店済み・未取消が対象です。</p></div>';}).join('');
+  } catch(err){if(seq===CHECKOUT_DASH_SEQ&&scope===checkoutScope()&&host.isConnected)host.textContent='会計の集計を取得できませんでした。再読込してください。';}
+}
+
 function handleBoardAction(act, rid){
   if (!rid) return;
+  if (act === 'checkout'){ openCheckout(rid); return; }
   if (act === 'course'){ openCourseChange(rid); return; }
   if (act === 'reschedule'){ openReschedule(rid); return; }   /* 確認は専用フォーム内で行う */
   if (act === 'linkline'){ openLinkLine(rid); return; }       /* 確認は候補を選んだ後に専用フォーム内で行う */
@@ -4011,7 +4188,7 @@ function handleBoardAction(act, rid){
   var m = plan[act]; if (!m) return;
   if (!window.confirm(m.q)) return;
   m.run()
-    .then(function(){ loadBoard(); })
+    .then(function(){ loadBoard(); if (act === 'visited') openCheckout(rid, true); })
     .catch(function(err){ window.alert('できませんでした：' + (err&&err.message||err)); });
 }
 
@@ -4627,6 +4804,7 @@ function selectCustomer(lineUid){
     CRM_CARDS[lineUid] = out[1] || {};
     crmRenderDetail(lineUid, CRM_CARDS[lineUid]);
   }).catch(function(err){
+    if(seq!==DASH_LOAD_SEQ||tenant!==TENANT_ID)return;
     if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
     var msg = String(err && err.message || err || '');
     var body = document.getElementById('crmDetailBody');
@@ -5079,6 +5257,7 @@ function crmSaveEdits(uid){
         ※repeatRate/cancelRate/monthly は dashboard_stats に無いので参照しない。
    ============================================================================ */
 var DASH_PERIOD = 'this_month';
+var DASH_LOAD_SEQ = 0;
 
 /* 円表示・最大値（ローカルヘルパー。dash- 名前空間で衝突回避） */
 function dashYen(n){ return '¥' + (Number(n) || 0).toLocaleString('ja-JP'); }
@@ -5117,7 +5296,7 @@ function dashRangeFor(p){
 function showDashboard(el){
   hideAllViews();
   if (el) setActiveNav(el);
-  document.getElementById('dashView').style.display = '';
+  document.getElementById('dashView').style.display = 'block';
   loadDash();
   window.scrollTo({ top:0, behavior:'smooth' });
 }
@@ -5141,10 +5320,13 @@ document.addEventListener('click', function(e){
 
 /* 集計取得 → 描画 */
 function loadDash(){
+  var seq=++DASH_LOAD_SEQ,tenant=TENANT_ID,scope=null;
   var body = document.getElementById('dashBody');
   body.innerHTML = '<div class="dash-placeholder">読み込み中…</div>';
 
   ensureStoreMap().then(function(){
+    if(seq!==DASH_LOAD_SEQ||tenant!==TENANT_ID)return null;
+    scope=checkoutScope();
     var r = dashRangeFor(DASH_PERIOD);
     document.getElementById('dashPeriod').textContent = r.label + ' の集計';
     var storeId = storeIdForSlug(currentStoreSlug()); // 'all'→null（owner/adminのみRLS許可）
@@ -5154,7 +5336,9 @@ function loadDash(){
       dashFetchUnrecorded(r, storeId).catch(function(){ return null; })
     ]);
   }).then(function(res){
+    if(!res||seq!==DASH_LOAD_SEQ||scope!==checkoutScope())return;
     renderDash(res[0] || {}, res[1]);
+    loadCheckoutSummary();
   }).catch(function(err){
     if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
     var msg = String((err && err.message) || err || '');
@@ -5290,7 +5474,7 @@ document.addEventListener('click', function(e){
   if (!window.confirm((b.getAttribute('data-who') || 'この予約') + ' を「' + label + '」として記録しますか？')) return;
   b.disabled = true;
   sbRpc('set_outcome', { p_resv: rid, p_outcome: outcome })
-    .then(function(){ loadDash(); })
+    .then(function(){ loadDash(); loadHomeCheckout(); if(outcome==='visited') openCheckout(rid,true); })
     .catch(function(err){ b.disabled = false; window.alert('記録できませんでした（' + ((err && err.message) || err) + '）。'); });
 });
 
@@ -5302,7 +5486,7 @@ function renderDash(s, unrecorded){
   // KPIカード（GAS版の体裁・色・KPI名を踏襲。存在キーのみ）
   var num = function(v){ return Number(v) || 0; };
   var kpis = [
-    { l:'売上',     v: dashYen(s.sales),               c:'dash-kpi-main' },
+    { l:checkoutStores().length?'予約金額ベース（参考）':'売上', v: dashYen(s.sales),               c:'dash-kpi-main' },
     { l:'来店数' + (un.length ? '（未記入 ' + un.length + '件）' : ''), v: num(s.visited) + '件', c:(un.length ? 'dash-kpi-warn' : '') },
     { l:'予約数',   v: num(s.reservations) + '件' },
     { l:'平均単価', v: dashYen(s.avgSpend) },
@@ -5310,7 +5494,7 @@ function renderDash(s, unrecorded){
     { l:'無断キャンセル', v: num(s.noShow) + '件',      c:(num(s.noShow) > 0 ? 'dash-kpi-warn' : '') },
     { l:'問診記入率', v: num(s.questionnaireRate) + '%' }
   ];
-  var html = '<div class="dash-kpis">' + kpis.map(function(x){
+  var html = '<div id="checkout-summary"></div><div class="dash-kpis">' + kpis.map(function(x){
     return '<div class="dash-kpi ' + (x.c || '') + '">' +
              '<div class="dash-kpi-v">' + esc(x.v) + '</div>' +
              '<div class="dash-kpi-l">' + esc(x.l) + '</div>' +
@@ -5341,7 +5525,7 @@ function renderDash(s, unrecorded){
   //   クライアントで Number(sales) の降順に再ソートして降順を担保する。
   var byNurse = (Array.isArray(s.byNurse) ? s.byNurse.slice() : [])
     .sort(function(a, b){ return num(b.sales) - num(a.sales); });
-  html += '<div class="dash-sect"><h3>📊 アーティスト別（売上）</h3>';
+  html += '<div class="dash-sect"><h3>📊 アーティスト別（予約金額ベース）</h3>';
   if (byNurse.length){
     var maxN = dashMaxOf(byNurse.map(function(n){ return num(n.sales); }));
     html += byNurse.map(function(n){
