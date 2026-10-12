@@ -4048,6 +4048,61 @@ function checkoutCard(r){
   if(!r._checkoutEditable) return r._checkout ? '<span>'+esc(label)+'</span>' : '';
   return '<button type="button" class="rbtn" data-act="checkout" data-rid="'+esc(r.id)+'">'+esc(label)+'</button>';
 }
+/* ★2026-10-12 会計の補助ロジック。正本は poc/admin_checkout_pure.mjs。
+   公開されるのは admin.html だけ（publish-pages.yml）なので、別ファイルを読み込まずここに写す。
+   tests/admin_checkout_inline.test.mjs が正本と一字一句同じかを確かめる。 */
+var CHECKOUT_PURE = (function(){
+/*<checkout-pure>*/
+// Shared by the real admin UI and node:test. Dates always use Asia/Tokyo boundaries.
+const CHECKOUT_REASONS = ['指名料','クーポン','部位の追加','割引','その他'];
+const CHECKOUT_METHODS = ['現金','カード','QR決済','振込','先払い済み','その他'];
+function checkoutJstDate(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) ? new Date(d.getTime()+9*60*60*1000).toISOString().slice(0,10) : '';
+}
+function validDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '0001-01-01') return false;
+  const d = new Date(value+'T00:00:00Z');
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === value;
+}
+function checkoutDefaults(reservation, saved) {
+  return saved ? {
+    amount:String(saved.actual_amount),reason:saved.diff_reason||'',note:saved.note||'',
+    method:saved.payment_method,paid_on:saved.paid_on,self_acquired:saved.self_acquired === true
+  } : {
+    amount:reservation.price == null ? '' : String(reservation.price),reason:'',note:'',method:'',
+    paid_on:checkoutJstDate(reservation.start_at),self_acquired:false
+  };
+}
+function validateCheckout(input, bookedPrice) {
+  const errors=[];
+  const raw=input?.amount;
+  const amount=Number(raw);
+  if (!['string','number'].includes(typeof raw) || !/^\d+$/.test(String(raw)) || !Number.isSafeInteger(amount) || amount<0 || amount>10000000) errors.push('金額は0〜10,000,000円の整数で入力してください。');
+  const reason=input?.reason || '';
+  if (reason && !CHECKOUT_REASONS.includes(reason)) errors.push('差の理由を選択してください。');
+  if ((bookedPrice == null || amount !== Number(bookedPrice)) && !reason) errors.push('会計時点の予約金額と違う場合は、差の理由が必要です。');
+  if (typeof input?.note !== 'string' || [...input.note].length>200) errors.push('メモは200字以内で入力してください。');
+  if (!CHECKOUT_METHODS.includes(input?.method)) errors.push('支払い方法を選択してください。');
+  if (!validDate(input?.paid_on)) errors.push('支払い日を正しく入力してください。');
+  if (typeof input?.self_acquired !== 'boolean') errors.push('自己集客の指定が正しくありません。');
+  return errors;
+}
+function checkoutYen(value) {
+  return value == null || !Number.isFinite(Number(value)) ? '未設定' : '¥'+Number(value).toLocaleString('ja-JP');
+}
+function checkoutDateLabel(value) { return validDate(value) ? value.replaceAll('-','/') : '—'; }
+// No combined total: cash actually received and outstanding estimates are different measures.
+function checkoutSummaryRows(summary) {
+  return [
+    {label:'会計済みの売上',amount:summary.paid_amount,count:summary.paid_count},
+    {label:'未会計（見込み）',amount:summary.unchecked_amount,count:summary.unchecked_count}
+  ];
+}
+/*</checkout-pure>*/
+return { CHECKOUT_REASONS,CHECKOUT_METHODS,checkoutJstDate,checkoutDefaults,validateCheckout,checkoutYen,checkoutDateLabel,checkoutSummaryRows };
+})();
 function checkoutError(err){
   var s=String(err&&err.message||err||'');
   if(/forbidden|permission|denied/.test(s)) return 'この店舗の会計を入力する権限がありません。';
@@ -4069,7 +4124,7 @@ async function openCheckout(rid, onlyIfEnabled){
     await ensureStoreMap();
     if(scope!==checkoutScope()) return;
     var fetched=await Promise.all([
-      import('./admin_checkout_pure.mjs'),checkoutAccess(),
+      Promise.resolve(CHECKOUT_PURE),checkoutAccess(),
       sbGet('reservations?select=id,tenant_id,store_id,start_at,price,customer_name,status,outcome&id=eq.'+encodeURIComponent(rid))
     ]);
     if(scope!==checkoutScope()) return;
@@ -4138,7 +4193,7 @@ async function loadHomeCheckout(){
     var rows=[];results.forEach(function(list,i){(list||[]).forEach(function(r){rows.push(Object.assign({},r,{store_name:stores[i].name,tenant_id:TENANT_ID}));});});
     rows.sort(function(a,b){return a.start_at.localeCompare(b.start_at);});
     if(!rows.length){card.textContent='✓ 会計の入れ忘れ 0件';return;}
-    var pure=await import('./admin_checkout_pure.mjs');
+    var pure=await Promise.resolve(CHECKOUT_PURE);
     if(seq!==CHECKOUT_HOME_SEQ||scope!==checkoutScope()||!card.isConnected)return;
     card.innerHTML='<button type="button" class="home-btn" data-checkout-list>会計の入れ忘れ '+esc(rows.length)+'件</button><div class="checkout-list" style="display:none"></div>';
     var list=card.querySelector('.checkout-list');
@@ -4155,7 +4210,7 @@ async function loadCheckoutSummary(){
   host.textContent='会計を集計中…';
   try {
     var range=dashRangeFor(DASH_PERIOD);
-    var pure=await import('./admin_checkout_pure.mjs');
+    var pure=await Promise.resolve(CHECKOUT_PURE);
     var summaries=await Promise.all(stores.map(function(s){return sbRpc('checkout_summary',{p_store:s.id,p_from:range.from.slice(0,10),p_to:range.to.slice(0,10)});}));
     if(seq!==CHECKOUT_DASH_SEQ||scope!==checkoutScope()||!host.isConnected)return;
     function lines(s){return pure.checkoutSummaryRows(s).map(function(r){return '<div class="dash-row"><div class="dash-row-l">'+esc(r.label)+'</div><div class="dash-row-v">'+esc(pure.checkoutYen(r.amount))+' ／ '+esc(r.count)+'件</div></div>';}).join('');}
