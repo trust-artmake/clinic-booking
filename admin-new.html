@@ -159,6 +159,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .crm-s-rep{background:#16a34a}
 .crm-s-att{background:#d97706}
 .crm-s-vip{background:#9333ea}
+.crm-s-line{background:#6b7280}
 
 /* 詳細（カルテ） */
 .crm-back{display:none;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e6eceb;color:#222;border-radius:10px;padding:7px 12px;font-weight:800;font-size:13px;cursor:pointer;margin-bottom:10px}
@@ -947,6 +948,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
         <span class="crm-chip" data-f="rep">常連</span>
         <span class="crm-chip" data-f="att">要対応</span>
         <span class="crm-chip" data-f="resv">📅 予約あり</span>
+        <span class="crm-chip" data-f="lineonly">💬 未予約（LINEのみ）</span>
       </div>
     </div>
     <div class="crm-count" id="crmCount"></div>
@@ -1508,6 +1510,7 @@ function chatReason(code){
     chat_inbox_disabled:'この店舗では受信箱がまだ有効ではありません。',
     chat_workflow_disabled:'この店舗では既読・対応開始はまだ有効ではありません。',
     chat_ai_resume_disabled:'この店舗では対応完了によるAI再開はまだ有効ではありません。',
+    completion_requires_manager:'受信箱の対応完了は管理者だけが使えます。スタッフグループLINEで「完了 番号 名前」を送ってください。',
     chat_send_disabled:'この店舗では管理画面返信がまだ有効ではありません。',
     line_uid_missing:'このお客様はLINE送信先を確認できません。',
     channel_not_resolved:'送信チャネルを一意に確認できません。設定を確認してください。',
@@ -1573,8 +1576,11 @@ function chatCanWorkflow(detail){ return !!(detail && detail.workflow_enabled ==
 function chatCanSend(detail){
   return !!(detail && detail.send_enabled === true && detail.status==='in_progress');
 }
+// 受信箱の「対応完了（AI再開）」は管理者（owner/admin/platform_admin）だけ（2026-10-12）。
+// スタッフはLINEの「完了 番号 名前」を使う。最終判定はDB（completion_requires_manager）。
+function chatIsManager(){ return window.IS_MANAGER === true; }
 function chatCanComplete(detail){
-  return !!(detail && detail.workflow_enabled === true && detail.ai_resume_enabled === true && detail.status==='in_progress');
+  return !!(detail && detail.workflow_enabled === true && detail.ai_resume_enabled === true && detail.status==='in_progress' && chatIsManager());
 }
 function chatIsUnread(detail){
   if(!detail || !detail.last_inbound_at) return false;
@@ -1588,7 +1594,9 @@ function chatUpdateModeNote(detail){
   if(chatCanWorkflow(detail)){
     var sendNote=detail.send_enabled===true ? '管理画面返信が有効です。' : '管理画面返信はまだ無効です。';
     note=detail.ai_resume_enabled===true
-      ? '共有既読・対応開始・「対応完了（AI再開）」が有効です。'+sendNote
+      ? (chatIsManager()
+        ? '共有既読・対応開始・「対応完了（AI再開）」が有効です。'+sendNote
+        : '共有既読と「対応を始める」が有効です。対応完了はスタッフグループLINEの「完了 番号 名前」で行ってください。'+sendNote)
       : '共有既読と「対応を始める」が有効です。対応完了によるAI再開はまだ無効です。'+sendNote;
   }
   chatSetText('chatModeNote',note);
@@ -1901,6 +1909,8 @@ function chatRenderWorkflow(host, detail){
       complete.addEventListener('click',chatCompleteHandling); panel.appendChild(complete);
     }else if(detail.ai_resume_enabled!==true){
       panel.appendChild(chatElement('div','chat-workflow-note','対応完了によるAI再開は現在無効です。'));
+    }else{
+      panel.appendChild(chatElement('div','chat-workflow-note','対応が終わったら、スタッフグループLINEで「完了 番号 名前」を送ってください（受信箱の対応完了は管理者のみ）。'));
     }
   }else{
     panel.appendChild(chatElement('div','chat-workflow-note','現在は対応完了の状態です。'));
@@ -4289,16 +4299,23 @@ function humanNeedsAttention(s){ return !humanIsClosed(s); }
 
 /* 来店ステータスの区分（新規/常連/要対応/VIP）。human_status があれば最優先で「要対応」。
    c は customers 行 または 集約 person（visit_count を持つ）。 */
+/* LINEを追加しただけで、予約が1件も無い人（キャンセル済みの予約も含めて0件・来店0回）。2026-10-12
+   一覧の person（resv_count を数えた行）だけが対象。resv_count を持たない行（詳細表示など）は判定しない。 */
+function crmIsLineOnly(c){
+  return !!(c && c.line_uid && c.resv_count === 0 && !(c.visit_count > 0));
+}
 function crmStatusOf(c){
   if (c && humanNeedsAttention(c.human_status)) return 'att';
   var vt = c && (c.customer_type||'');
   if (vt === 'vip') return 'vip';
+  if (crmIsLineOnly(c)) return 'lineonly';
   var vc = (c && typeof c.visit_count === 'number') ? c.visit_count : 0;
   return vc >= 2 ? 'rep' : 'new';
 }
 function crmStatusPill(st){
   var map = { new:{t:'新規',c:'crm-s-new'}, rep:{t:'常連',c:'crm-s-rep'},
-              att:{t:'要対応',c:'crm-s-att'}, vip:{t:'VIP',c:'crm-s-vip'} };
+              att:{t:'要対応',c:'crm-s-att'}, vip:{t:'VIP',c:'crm-s-vip'},
+              lineonly:{t:'LINEのみ',c:'crm-s-line'} };
   var s = map[st] || map.new;
   return '<span class="crm-pill '+s.c+'">'+s.t+'</span>';
 }
@@ -4502,6 +4519,7 @@ function crmVisiblePeople(){
     if (CRM_FILTER === 'rep') return st === 'rep' || st === 'vip';
     if (CRM_FILTER === 'att') return st === 'att';
     if (CRM_FILTER === 'resv') return !!p.next_resv_at;
+    if (CRM_FILTER === 'lineonly') return st === 'lineonly';
     return true;
   });
 }
@@ -4747,7 +4765,8 @@ function crmRenderDetail(uid, res){
                        return v.length ? v[0].start_at : null; })();
 
   // ステータス判定：customer があればそれ、無ければ算出 visit_count を持つ合成オブジェクトで判定。
-  var st = c ? crmStatusOf(c)
+  //   予約件数を渡して、一覧と同じく「LINEのみ（未予約）」も判定する（2026-10-12）。
+  var st = c ? crmStatusOf(Object.assign({}, c, { resv_count: resvs.length }))
              : crmStatusOf({ customer_type:'', human_status:'', visit_count:visitCount });
 
   /* 次回予約（生予約行：menu_id から名称解決） */
