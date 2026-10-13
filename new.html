@@ -678,7 +678,7 @@ function s1(){
       h+='<div class="ac-list">';
       menus.forEach(function(m){
         var c=cm[String(m.menu_id)];
-        var isRet=m.menu_name&&m.menu_name.indexOf('再来')>=0;
+        var isRet=isRetouchMenu(m.menu_name);
         var dm=c?parseInt(isRet?c.duration_retouch_min:c.duration_new_min,10):0;
         var dt=dm>0?Math.floor(dm/60)+'時間'+(dm%60>0?dm%60+'分':''):'';
         // ★patch-48：STEP1は「通常 ¥◯ ／ モニター ¥◯」併記。お客様が両方の価格を一目で把握できる。
@@ -728,12 +728,14 @@ function toggleArt(id){
   st.openArtist=(String(st.openArtist)===String(id))?null:id;
   s1();
 }
+// 新規/リタッチの判定（正本は poc/_pure.mjs の isRetouchMenu・tests/booking_page_pure.test.mjs で一致を確認）。
+function isRetouchMenu(name){var n=String(name||'');return n.indexOf('再来')>=0||n.indexOf('リタッチ')>=0||/[2２]回目/.test(n);}
 // コース確定：アーティスト＋コースを一度に確定し、日付選択（STEP2）へ直行する。
 function pickCourse(nid,nname,mid,mname,price,dur,priceMonitor){
   st.nurseId=nid; st.nurseName=nname;
   st.menuId=mid; st.menuName=mname; st.menuPrice=price; st.menuPriceMonitor=priceMonitor||0; st.menuDur=dur;
   st.monitorChoice=null;  // ★コース選択時は「モニター有無」をリセット＝STEP6で必ず選び直してもらう
-  st.menuType=(mname&&mname.indexOf('再来')>=0)?'retouch':'new';
+  st.menuType=isRetouchMenu(mname)?'retouch':'new';
   st.openArtist=nid;
   st.date=null; st.time=null; st.availDates=null; st.slots=null; st.adErr=false; st.slErr=false;
   st.slCache={};
@@ -1123,7 +1125,7 @@ function doSub(){
   if(btn){btn.disabled=true;btn.textContent='送信中…';}
   // 予約確定は create_public_reservation RPC に集約（店舗・担当・メニューの正当性／席数／重複をDB側で検証）。
   var startISO=st.date+'T'+st.time+':00+09:00';
-  var treatmentType=(st.menuName&&st.menuName.indexOf('再来')>=0)?'retouch':'new';
+  var treatmentType=isRetouchMenu(st.menuName)?'retouch':'new';
   // ★reservation_type は STEP6 でお客様が選んだ「モニター有無」で決定（patch-48 改）。
   //   モニター選択肢が無い（monitor_price 未設定 or 同額）メニューは normal 固定。
   //   DB側 create_public_reservation がこの値で price_monitor/price_normal を切替記録する。
