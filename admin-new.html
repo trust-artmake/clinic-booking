@@ -850,6 +850,19 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 [data-time-off-impact]{margin:12px 0;padding:10px;background:#fff6df;border-radius:8px;overflow-wrap:anywhere;font-size:14px;line-height:1.6}
 [data-time-off-impact] p{margin:4px 0}[data-time-off-impact] button{max-width:100%;text-align:left}
 </style>
+<style>
+/* Confirmation is in the browser top layer, including over checkout dialogs. */
+.ask-confirm{position:fixed;inset:0;width:100%;max-width:none;height:100%;max-height:none;margin:0;padding:16px;border:0;background:transparent;box-sizing:border-box;overflow:auto;color:#21343b}
+.ask-confirm[open]{display:flex;align-items:center;justify-content:center}
+.ask-confirm::backdrop{background:rgba(0,0,0,.45)}
+.ask-confirm-panel{width:100%;max-width:440px;min-width:0;max-height:100%;overflow:hidden;display:flex;flex-direction:column;box-sizing:border-box;background:white;border-radius:16px;padding:20px;box-shadow:0 10px 40px #0003;overflow-wrap:anywhere}
+.ask-confirm h2{flex-shrink:0;font-size:18px;margin:0 0 12px}.ask-confirm p{min-height:0;overflow-y:auto;white-space:pre-wrap;margin:0 0 20px;line-height:1.6}
+.ask-confirm-actions{position:sticky;bottom:0;flex-shrink:0;background:white;display:flex;gap:12px;align-items:stretch}.ask-confirm-actions button{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere;padding:12px 8px;border:1px solid #687b83;border-radius:8px;font:inherit;background:white;color:#21343b;cursor:pointer}
+.ask-confirm-actions [data-confirm-ok]{font-weight:700;background:#0b6e77;color:white;border-color:#0b6e77}.ask-confirm-actions .ask-confirm-danger{background:#b42318;border-color:#b42318}
+#askConfirmNotice{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:10001;width:max-content;max-width:calc(100% - 32px);padding:12px 16px;border-radius:8px;background:#21343b;color:white;font-size:14px;pointer-events:none}
+.ask-confirm button:focus-visible{outline:3px solid #1976d2;outline-offset:3px}
+@media(max-width:600px){.ask-confirm[open]{align-items:flex-end;padding:12px 12px max(12px,env(safe-area-inset-bottom))}.ask-confirm-panel{border-radius:16px 16px 8px 8px}}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -1947,10 +1960,10 @@ function chatSubmitMessage(body,clientMessageId){
   var customerId=CHAT_STATE.detail.customer_id;
   CHAT_STATE.sendBusy=true; CHAT_STATE.sendMessage='送信処理を開始しています…'; chatRenderDetail();
   function attempt(medicalConfirmed){
-    return chatSendRequest(body,clientMessageId,medicalConfirmed).catch(function(error){
+    return chatSendRequest(body,clientMessageId,medicalConfirmed).catch(async function(error){
       if(error && error.code==='medical_confirmation_required' && medicalConfirmed!==true){
         var warning='医療表現の警告があります。内容を責任者として確認し、本文を変更せず送信しますか？';
-        if(window.confirm(warning)) return chatSendRequest(body,clientMessageId,true);
+        if((await askConfirm({title:'', body:warning, ok:'送信する', cancel:'やめる', danger:true}))) return chatSendRequest(body,clientMessageId,true);
       }
       throw error;
     });
@@ -1986,7 +1999,7 @@ function chatSubmitMessage(body,clientMessageId){
   });
 }
 
-function chatSendMessage(){
+async function chatSendMessage(){
   if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanSend(CHAT_STATE.detail) || CHAT_STATE.sendBusy) return;
   var body=String(CHAT_STATE.draftBody || '');
   var count=Array.from(body).length;
@@ -2000,28 +2013,30 @@ function chatSendMessage(){
   }
   var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
   var confirmText='宛先：'+name+'\n\n返信本文：\n'+body+'\n\nこの内容をLINEへ送信しますか？';
-  if(!window.confirm(confirmText)) return;
+  if(!(await askConfirm({title:'', body:confirmText, ok:'送信する', cancel:'やめる', danger:true}))) return;
   chatSubmitMessage(body,CHAT_STATE.draftId);
 }
 
-function chatRetryMessage(message){
+async function chatRetryMessage(message){
   if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanSend(CHAT_STATE.detail) || CHAT_STATE.sendBusy) return;
   if(!message || (message.delivery_status!=='pending' && message.delivery_status!=='retryable') || !message.client_message_id || !message.body) return;
   var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
   var retryAction=message.delivery_status==='pending' ? '送信状態を復旧' : '再試行';
-  if(!window.confirm('宛先：'+name+'\n\n同じ送信ID・同じ本文で'+retryAction+'しますか？\n\n'+message.body)) return;
+  if(!(await askConfirm({title:'', body:'宛先：'+name+'\n\n同じ送信ID・同じ本文で'+retryAction+'しますか？\n\n'+message.body, ok:message.delivery_status==='pending'?'送信状態を復旧する':'送り直す', cancel:'やめる', danger:true}))) return;
   CHAT_STATE.draftBody=message.body; CHAT_STATE.draftId=message.client_message_id;
   chatSubmitMessage(message.body,message.client_message_id);
 }
 
-function chatResolveFailedDelivery(message,resolution){
+async function chatResolveFailedDelivery(message,resolution){
   if(!CHAT_STATE || !CHAT_STATE.detail || CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy) return;
   if(!message || message.delivery_status!=='failed' || message.delivery_resolution || !message.client_message_id) return;
   if(resolution!=='reply_not_needed' && resolution!=='replied_outside_system') return;
   var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
   var reasonLabel=resolution==='reply_not_needed' ? '返信不要' : '別経路で返信済み';
   var prompt='宛先：'+name+'\n\nこの送信失敗を「'+reasonLabel+'」として記録しますか？\n担当者と時刻が監査記録に残ります。';
-  if(!window.confirm(prompt)) return;
+  if(!(await askConfirm({title:'', body:prompt, ok:reasonLabel+'として記録する', cancel:'やめる', danger:false}))) return;
+  if(!CHAT_STATE || !CHAT_STATE.detail || CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy) return;
+  if(!message || message.delivery_status!=='failed' || message.delivery_resolution || !message.client_message_id) return;
   var customerId=CHAT_STATE.detail.customer_id;
   CHAT_STATE.workflowBusy='resolve_failed_delivery';
   CHAT_STATE.workflowMessage='送信失敗を確認中…';
@@ -2146,14 +2161,16 @@ function chatStartHandling(){
   });
 }
 
-function chatCompleteHandling(){
+async function chatCompleteHandling(){
   if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanComplete(CHAT_STATE.detail)) return;
   if(CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload) return;
   var customerId=CHAT_STATE.detail.customer_id;
   var expectedVersion=CHAT_STATE.detail.version;
   var expectedInbound=CHAT_STATE.detail.last_inbound_at;
   if(!Number.isSafeInteger(expectedVersion) || typeof expectedInbound!=='string' || !expectedInbound) return;
-  if(!window.confirm('対応を完了すると、次回のお客様メッセージからAI対応を再開します。対応完了にしますか？')) return;
+  if(!(await askConfirm({title:'', body:'対応を完了すると、次回のお客様メッセージからAI対応を再開します。対応完了にしますか？', ok:'対応完了にする', cancel:'やめる', danger:false}))) return;
+  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanComplete(CHAT_STATE.detail) || CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload) return;
+  if(CHAT_STATE.detail.customer_id!==customerId || CHAT_STATE.detail.version!==expectedVersion || CHAT_STATE.detail.last_inbound_at!==expectedInbound) return;
   CHAT_STATE.workflowBusy='complete_handling'; CHAT_STATE.workflowMessage='対応完了を記録しています…'; chatRenderDetail();
   chatCall('complete_handling', {
     customer_id:customerId,
@@ -3264,10 +3281,10 @@ function lsecLinkChannel(){
 }
 
 /* 削除：manage-tenant clear_line_secrets。確認の後に実行し、状態を再読込。 */
-function lsecClear(kind){
+async function lsecClear(kind){
   if (!LSEC_TENANT) { lsecMsg("対象の店舗が選べていません。"); return; }
   var name = kind === "token" ? "チャネルアクセストークン" : "チャネルシークレット";
-  if (!window.confirm(name + "を削除します。よろしいですか？")) return;
+  if (!(await askConfirm({title:'', body:name + "を削除します。よろしいですか？", ok:'削除する', cancel:'やめる', danger:true}))) return;
   lsecMsg("削除中…", true);
   fetch(SB_URL + "/functions/v1/manage-tenant", {
     method:"POST",
@@ -3288,8 +3305,8 @@ function showLogin(msg){ var ov=document.getElementById("login"); if(ov) ov.styl
 /* ★ログアウト：Supabase Auth の signout → ローカルセッション破棄 → 画面を初期化してログイン表示。
    ・多院所属者が「別アカウントで入り直す」導線。単店ユーザーにも常設バーから提供。
    ・トークンを捨てれば次回 sbRpc/fetch は 401 で弾かれる安全側。 */
-function doLogout(){
-  if (!window.confirm('ログアウトしますか？\n（保存していない入力は失われます）')) return;
+async function doLogout(){
+  if (!(await askConfirm({title:'', body:'ログアウトしますか？\n（保存していない入力は失われます）', ok:'ログアウトする', cancel:'やめる', danger:false}))) return;
   try {
     // 1) Supabase に signout を投げる（リフレッシュトークンの撤回。失敗してもクライアント側のクリアは続行）。
     if (TOKEN){
@@ -3378,8 +3395,8 @@ function enterDashboard(tid){
 }
 function openTenant(tid){ enterDashboard(tid); }
 /* コンソール（親）。扱えるテナントを setup 状況つきで一覧表示。 */
-function showConsole(){
-  if(!navMayLeave('move'))return;
+async function showConsole(){
+  if(navDirty()&&!await navMayLeave('move'))return;
   navReset();NAV_CONSOLE=true;
   var nv=document.getElementById('nav'); if(nv) nv.style.display='none';
   var sub=document.getElementById('subnav'); if(sub) sub.style.display='none';
@@ -3556,7 +3573,7 @@ function provMsg(text, ok){
 }
 
 /* 入力を取り manage-tenant action=provision へ送信。成功で新テナントに切替→セットアップ画面へ。 */
-function provExec(){
+async function provExec(){
   var btn = document.getElementById("provExecBtn");
   var templateId  = (document.getElementById("provTemplateSelect")||{}).value || "";
   var newTenant   = ((document.getElementById("provTenantName")||{}).value || "").trim();
@@ -3569,7 +3586,7 @@ function provExec(){
   }
   if (btn) btn.disabled = true;
   provMsg("作成中…", true);
-  if (!window.confirm("新しい店を複製して作成します。よろしいですか？")){
+  if (!(await askConfirm({title:'', body:"新しい店を複製して作成します。よろしいですか？", ok:'作成する', cancel:'やめる', danger:false}))){
     if (btn) btn.disabled = false;
     return;
   }
@@ -3800,21 +3817,21 @@ function calendarArtistLight(id,key) {
 function calendarTitle(row) {
  const menu=String(row.menus?.name||row.menu_name||''),course=String(row.course_name||'');
  const text=menu+' '+course, set=/[2２]回\s*(セット|コース)/.test(text);
- const kind=row.treatment_type==='new'?'新規':row.treatment_type==='retouch'?'リタッチ':'';
- const second=/[2２]回目/.test(text)||(set&&row.treatment_type==='retouch');
+ const second=/リタッチ|[2２]回目/.test(text)||(set&&row.price===0);
+ const kind=second?(row.price===0?'2回目':'リタッチ'):row.treatment_type==='new'?'新規':row.treatment_type==='retouch'?'リタッチ':'';
  const paid=row._checkout?.payment_method==='先払い済み'||(row.price===0&&second);
  const amount=paid?'支払い済み':row.price===0?'済':row.price!=null&&Number.isFinite(Number(row.price))?'¥'+Number(row.price).toLocaleString('ja-JP'):'';
  const special=/カウンセリング|パッチテスト/.test(menu)?menu:kind;
- return [row.customer_name||'（名前なし）',special,amount,set?'(2回セット)':''].filter(Boolean).join(' ');
+ return [row.customer_name||'（名前なし）',special,amount,set&&!second?'(2回セット)':''].filter(Boolean).join(' ');
 }
 function calendarBandTitle(row) {
  const menu=String(row.menus?.name||row.menu_name||''),course=String(row.course_name||'');
  const text=menu+' '+course,set=/[2２]回\s*(セット|コース)/.test(text);
- const second=/[2２]回目/.test(text)||(set&&row.treatment_type==='retouch');
+ const second=/リタッチ|[2２]回目/.test(text)||(set&&row.price===0);
  const paid=row._checkout?.payment_method==='先払い済み'||(row.price===0&&second);
- const kind=/カウンセリング/.test(menu)?'相談':/パッチテスト/.test(menu)?'パッチ':row.treatment_type==='new'?'新':row.treatment_type==='retouch'?'リ':'';
+ const kind=/カウンセリング/.test(menu)?'相談':/パッチテスト/.test(menu)?'パッチ':second?(row.price===0?'2回目':'リ'):row.treatment_type==='new'?'新':row.treatment_type==='retouch'?'リ':'';
  const amount=paid||row.price===0?'済':row.price!=null&&Number.isFinite(Number(row.price))?String(Number(row.price)):'';
- return [row.customer_name||'（名前なし）',kind+amount+(set?'(2)':'')].filter(Boolean).join(' ');
+ return [row.customer_name||'（名前なし）',kind+amount+(set&&!second?'(2)':'')].filter(Boolean).join(' ');
 }
 function calendarMonthOverflow(rows) {return {visible:rows.slice(0,5),more:Math.max(0,rows.length-5)};}
 function calendarInitial(name) {return Array.from(String(name||'').trim())[0]||'?';}
@@ -4042,7 +4059,7 @@ function calendarOffBand(o){return '<span class="calendar-band calendar-time-off
 function calendarOffButton(o,style){return '<button type="button" class="calendar-time-off" data-time-off="'+esc(o.id)+'" style="--artist-color:'+esc(CALENDAR_PURE.calendarArtistColor(o.artist_id,o.calendar_color))+';'+esc(style||'')+'">'+esc((o.all_day?'終日 ':o.label?CALENDAR_PURE.calendarJstTime(o.start_at)+'〜'+CALENDAR_PURE.calendarJstTime(o.end_at)+' ':'')+CALENDAR_PURE.calendarTimeOffTitle(o))+'</button>';}
 async function deleteCalendarTimeOff(id,date){
  var row=CALENDAR_TIME_OFF.find(function(o){return o.id===id;});if(!row)return;
- if(!window.confirm(CALENDAR_PURE.calendarTimeOffTitle(row)+'\nこの休み・不在を削除しますか？予約ページの空き枠に戻ります。'))return;
+ if(!(await askConfirm({title:'', body:CALENDAR_PURE.calendarTimeOffTitle(row)+'\nこの休み・不在を削除しますか？予約ページの空き枠に戻ります。', ok:'削除する', cancel:'やめる', danger:true})))return;
  var scope=checkoutScope(),sheetSeq=CALENDAR_SHEET_SEQ,boardSeq=BOARD_LOAD_SEQ,buttons=Array.from(document.querySelectorAll('[data-time-off]')).filter(function(b){return b.getAttribute('data-time-off')===id;});
  function current(){return scope===checkoutScope()&&sheetSeq===CALENDAR_SHEET_SEQ&&boardSeq===BOARD_LOAD_SEQ;}
  if(buttons.some(function(b){return b.disabled;}))return;buttons.forEach(function(b){b.disabled=true;});
@@ -4166,7 +4183,7 @@ async function openCalendarReservation(id){
  body.innerHTML='<h2>'+esc(CALENDAR_PURE.calendarTitle(row))+'</h2><p class="calendar-summary">'+esc(calendarDateLabel(CALENDAR_PURE.calendarJstDate(row.start_at)))+' '+esc(CALENDAR_PURE.calendarJstTime(row.start_at))+' → '+esc(CALENDAR_PURE.calendarJstDate(row.end_at)!==CALENDAR_PURE.calendarJstDate(row.start_at)?CALENDAR_PURE.calendarJstDate(row.end_at)+' ':'')+esc(CALENDAR_PURE.calendarJstTime(row.end_at))+' ／ 担当：'+esc(row.artists&&row.artists.name||'未設定')+'<br>メニュー：'+esc(row.menus&&row.menus.name||'—')+' ／ 金額：'+esc(row.price==null?'未設定':'¥'+Number(row.price).toLocaleString('ja-JP'))+' ／ 状態：'+esc(row.outcome==='visited'?'来店済み':row.outcome==='no_show'?'無断キャンセル':row.status==='questionnaire_done'?'問診済み':row.status==='pending_questionnaire'||row.status==='questionnaire_reminded'?'問診待ち':'予約済み')+'</p>'+calendarMarks(row)+'<div class="calendar-actions">'+
   '<button type="button" class="rbtn" data-calendar-action="visited">来店済み</button>'+checkoutCard(row).replace('data-act="checkout"','data-calendar-action="checkout"')+
   (!row.outcome?'<button type="button" class="rbtn" data-calendar-action="reschedule">日時変更</button>':'')+'<button type="button" class="rbtn" data-calendar-action="cancel">キャンセル</button><button type="button" class="rbtn" data-calendar-action="chart">カルテ</button></div><div data-calendar-next style="display:none"></div><div data-calendar-caution></div><h3>前回のメモ</h3><div data-calendar-history>読み込み中…</div><h3>施術メモ</h3><div data-calendar-editor>読み込み中…</div>';
- pane.addEventListener('click',function(e){var b=e.target.closest('[data-calendar-action]');if(!b||!current())return;var act=b.getAttribute('data-calendar-action');if(!navMayLeave('move'))return;handleBoardAction(act,id,true);});
+ pane.addEventListener('click',async function(e){var b=e.target.closest('[data-calendar-action]');if(!b||!current())return;var act=b.getAttribute('data-calendar-action');if(!CONFIRM_PURE.confirmBoardAction(act)&&navDirty()&&!await navMayLeave('move'))return;if(!current())return;handleBoardAction(act,id,true);});
  var caution=body.querySelector('[data-calendar-caution]');
  // Reuse the existing chart RPC; never render another store's customer record.
  var customerJob=row.line_uid?sbRpc('get_customer',{p_line_uid:row.line_uid,p_tenant:TENANT_ID}).then(function(data){
@@ -4522,8 +4539,8 @@ function openReschedule(rid){
                 '\n\nお客様へのLINE：'+(notify ? '送る' : '送らない');
         body.querySelector('.rs-ok').disabled=true;
         var warning=await calendarBookingTimeOffWarning(r.store_id,r.artist_id,dv+'T'+tv+':00+09:00',r.menu_id,r.treatment_type,Math.max(1,Math.round((Date.parse(r.end_at)-Date.parse(r.start_at))/60000)));
-        if(!ov.isConnected||scope!==checkoutScope())return;
-        if (!window.confirm((warning?warning+'\n\n':'')+q)){body.querySelector('.rs-ok').disabled=false;return;}
+        if(!ov.isConnected||scope!==checkoutScope()){body.querySelector('.rs-ok').disabled=false;return;}
+        if (!(await askConfirm({title:'', body:(warning?warning+'\n\n':'')+q, ok:'変更する', cancel:'やめる', danger:false}))){body.querySelector('.rs-ok').disabled=false;return;}
         msg.style.color = '#5a6b73'; msg.textContent = '変更しています…';
         body.querySelector('.rs-ok').disabled = true;
         /* ★常にJSTとして解釈する（+09:00明示）。端末のタイムゾーン設定が海外でもズレない。 */
@@ -4585,12 +4602,12 @@ function openCourseChange(rid){
     var menu=body.querySelector('.cc-menu'),price=body.querySelector('.cc-price'),reason=body.querySelector('.cc-reason'),save=body.querySelector('.cc-save'),msg=body.querySelector('.cc-msg');
     menu.value=r.menu_id; price.value=r.price==null?'':r.price;
     menu.onchange=function(){var m=choices.find(function(x){return x.id===menu.value;});price.value=m&&m.price!=null?m.price:'';};
-    save.onclick=function(){
+    save.onclick=async function(){
       var m=choices.find(function(x){return x.id===menu.value;});
       if(!m){msg.textContent='変更後のコースを選んでください。';return;}
       if(!/^\d+$/.test(price.value)||Number(price.value)>10000000){msg.textContent='金額を0円以上の整数で入力してください。';return;}
       if(!reason.value.trim()){msg.textContent='変更理由を入力してください。';return;}
-      if(!window.confirm('コースと予約金額を変更します。\n\n変更前：'+r.menu_name+' ／ '+yen(r.price)+'\n変更後：'+m.name+' ／ '+yen(price.value)+'\n理由：'+reason.value.trim()+'\n\nLINE通知：送らない'))return;
+      if(!(await askConfirm({title:'', body:'コースと予約金額を変更します。\n\n変更前：'+r.menu_name+' ／ '+yen(r.price)+'\n変更後：'+m.name+' ／ '+yen(price.value)+'\n理由：'+reason.value.trim()+'\n\nLINE通知：送らない', ok:'変更する', cancel:'やめる', danger:false})))return;
       busy=true; save.disabled=true; close.disabled=true; menu.disabled=true; price.disabled=true; reason.disabled=true;
       msg.textContent='保存しています…';
       sbRpc('change_reservation_course',{p_resv:rid,p_menu:m.id,p_price:Number(price.value),p_reason:reason.value.trim(),p_version:r.version})
@@ -4673,9 +4690,9 @@ function openLinkLine(rid){
         +'</div>';
     }).join('');
     [].forEach.call(list.querySelectorAll('.ll-pick'),function(b){
-      b.onclick=function(){
+      b.onclick=async function(){
         var uid=b.getAttribute('data-uid'), nm=b.getAttribute('data-name')||uid;
-        if(!window.confirm('この電話予約を「'+nm+'」さんと紐づけますか？\n\n紐づけると、この予約のまま同意書を送れるようになります。\nまだ来ていない予約なら問診票も送れます。\nこの操作でLINEへの送信はしません。'))return;
+        if(!(await askConfirm({title:'', body:'この電話予約を「'+nm+'」さんと紐づけますか？\n\n紐づけると、この予約のまま同意書を送れるようになります。\nまだ来ていない予約なら問診票も送れます。\nこの操作でLINEへの送信はしません。', ok:'紐づける', cancel:'やめる', danger:false})))return;
         busy=true; msg.textContent='紐づけています…'; close.disabled=true; search.disabled=true;
         [].forEach.call(list.querySelectorAll('.ll-pick'),function(x){x.disabled=true;});
         sbRpc('link_manual_reservation',{p_resv:rid,p_line_uid:uid})
@@ -4885,7 +4902,8 @@ async function openCheckout(rid, onlyIfEnabled){
     var form=dlg.querySelector('form'),msg=dlg.querySelector('[role="status"]'),submit=dlg.querySelector('[type="submit"]');
     Object.keys(defaults).forEach(function(k){if(k==='self_acquired')form.elements[k].checked=defaults[k];else form.elements[k].value=defaults[k];});
     dlg.querySelector('.mb-cancel').onclick=function(){navClose('checkout');};
-    dlg.addEventListener('cancel',function(e){e.preventDefault();navClose('checkout');});
+    dlg.addEventListener('close',function(){pending.finish(false);});
+  dlg.addEventListener('cancel',function(e){e.preventDefault();navClose('checkout');});
     dlg.addEventListener('close',function(){dlg.remove();});
     form.onsubmit=async function(e){
       e.preventDefault(); if(submit.disabled) return;
@@ -5129,7 +5147,11 @@ async function confirmSettlement(){
  if(state.draft.month!==settlementMonth()||settlementConfirmReason(state))return;
  var entered=settlementTravelInput(host,state);
  if(JSON.stringify(entered)!==JSON.stringify(state.travel)){host.querySelector('#settlementStatus').textContent='出勤日数を変更しました。「交通費を再計算」を押して確認してください。';return;}
- if(!window.confirm('この月の支払いと請求を確定します。確定後は元の会計を変更できません。確定しますか？'))return;
+ var confirmedDraft=state.draft,confirmedTravel=JSON.stringify(state.travel);
+ if(!(await askConfirm({title:'', body:'この月の支払いと請求を確定します。確定後は元の会計を変更できません。確定しますか？', ok:'確定する', cancel:'やめる', danger:true})))return;
+ if(!settlementCurrent(host,state)||!state.draft||state.draft.id||state.busy)return;
+ if(state.draft.month!==settlementMonth()||settlementConfirmReason(state))return;
+ if(state.draft!==confirmedDraft||JSON.stringify(state.travel)!==confirmedTravel||JSON.stringify(settlementTravelInput(host,state))!==JSON.stringify(state.travel))return;
  var seq=++state.seq,draft=state.draft,store=state.store;state.busy=true;host.querySelector('[data-settlement-confirm]').disabled=true;
  try{
   // Refresh every displayed component (rates/adjustments included) before writing. The DB also checks count/total under its store lock.
@@ -5221,7 +5243,7 @@ function renderSettlementSettings(host,state){
  };});
 }
 
-function handleBoardAction(act, rid, fromSheet){
+async function handleBoardAction(act, rid, fromSheet){
   function proceed(run){if(fromSheet){navForms().forEach(navMarkClean);return navClose('sheet',run);}return run();}
   if (!rid) return;
   if (act === 'checkout'){ return proceed(function(){return openCheckout(rid);}); }
@@ -5243,7 +5265,7 @@ function handleBoardAction(act, rid, fromSheet){
                run:function(){ return sbRpc('set_outcome', { p_resv:rid, p_outcome:'no_show' }); } }
   };
   var m = plan[act]; if (!m) return;
-  if (!window.confirm(m.q)) return;
+  if (!(await askConfirm(Object.assign({title:'',body:m.q+(fromSheet&&navDirty()?'\n\n書きかけのメモは消えます。':'')},CONFIRM_PURE.confirmBoardAction(act))))) return;
   return proceed(function(){
     var requestNav=NAV_SEQ,scope=checkoutScope();
     return m.run().then(function(){
@@ -5409,7 +5431,7 @@ async function submitManualBooking(){
   btn.disabled = true; btn.textContent = '登録中…'; mbSetMsg('登録中…', true);
   var warning=await calendarBookingTimeOffWarning(storeId,nurseId,startISO,menuId,payload.p_treatment_type,60);
   if(scope!==checkoutScope()){btn.disabled=false;btn.textContent='この内容で登録';return;}
-  if(warning&&!window.confirm(warning)){btn.disabled=false;btn.textContent='この内容で登録';mbSetMsg('登録を中止しました。');return;}
+  if(warning&&!(await askConfirm({title:'', body:warning, ok:'登録する', cancel:'やめる', danger:false}))){btn.disabled=false;btn.textContent='この内容で登録';mbSetMsg('登録を中止しました。');return;}
   return sbRpc('create_manual_reservation', payload)
     .then(function(newId){
       btn.disabled = false; btn.textContent = 'この内容で登録';
@@ -6240,7 +6262,7 @@ function crmHumanRpcError(err){
      要対応へ＝line_crm_karte_start_handling／対応完了へ＝line_crm_karte_complete_handling（LINE「完了 N」と同じ経路）。
    ・要対応→対応不要（AI再開を経ない戻し）は受け付けない。
    ・要対応中は理由だけ編集できる。 */
-function crmSaveEdits(uid){
+async function crmSaveEdits(uid){
   if (!uid) return;
   var card = CRM_CARDS[uid] || {};
   var cust = card.customer || {};
@@ -6264,7 +6286,7 @@ function crmSaveEdits(uid){
     if (humanSel === HUMAN_STATUS_ATT) {
       humanRpc = function(){ return sbRpc('line_crm_karte_start_handling', { p_tenant: TENANT_ID, p_customer: cust.id, p_reason: reasonVal || null }); };
     } else if (humanSel === HUMAN_STATUS_DONE && expectedHuman === HUMAN_STATUS_ATT) {
-      if (!window.confirm('対応完了にすると、次のお客様メッセージからAIの自動返信が再開します。対応完了にしますか？')) return;
+      if (!(await askConfirm({title:'', body:'対応完了にすると、次のお客様メッセージからAIの自動返信が再開します。対応完了にしますか？', ok:'対応完了にする', cancel:'やめる', danger:false}))) return;
       humanRpc = function(){ return sbRpc('line_crm_karte_complete_handling', { p_tenant: TENANT_ID, p_customer: cust.id }); };
     } else {
       crmEditMsg('「対応不要」には戻せません。AIを再開するときは「対応完了」を選んでください。');
@@ -6516,7 +6538,7 @@ function downloadVisitedCsv(btn){
     else window.alert('CSVを作れませんでした（' + msg + '）。');
   }).then(function(){ if (btn) btn.disabled = false; });
 }
-document.addEventListener('click', function(e){
+document.addEventListener('click', async function(e){
   var b = e.target.closest ? e.target.closest('[data-act="dash-visited-csv"]') : null;
   if (!b) return;
   var view = document.getElementById('dashView');
@@ -6545,7 +6567,7 @@ function dashFetchUnrecorded(r, storeId){
   return sbGet(q).then(function(rows){ return dashPickUnrecorded(rows, nowIso); });
 }
 /* 未記入一覧の「来店済み」「無断キャンセル」ボタン（RPC set_outcome 経由・予約管理タブと同じ関所） */
-document.addEventListener('click', function(e){
+document.addEventListener('click', async function(e){
   var b = e.target.closest ? e.target.closest('[data-act="dash-mark-visited"],[data-act="dash-mark-noshow"]') : null;
   if (!b) return;
   var view = document.getElementById('dashView');
@@ -6553,7 +6575,7 @@ document.addEventListener('click', function(e){
   var rid = b.getAttribute('data-rid'); if (!rid) return;
   var outcome = b.getAttribute('data-act') === 'dash-mark-visited' ? 'visited' : 'no_show';
   var label = outcome === 'visited' ? '来店済み' : '無断キャンセル';
-  if (!window.confirm((b.getAttribute('data-who') || 'この予約') + ' を「' + label + '」として記録しますか？')) return;
+  if (!(await askConfirm({title:'', body:(b.getAttribute('data-who') || 'この予約') + ' を「' + label + '」として記録しますか？', ok:label+'として記録する', cancel:'やめる', danger:false}))) return;
   b.disabled = true;
   sbRpc('set_outcome', { p_resv: rid, p_outcome: outcome })
     .then(function(){ loadDash(); loadHomeCheckout(); if(outcome==='visited') openCheckout(rid,true); })
@@ -6693,7 +6715,7 @@ function bindAiCandidateActions(){
   var body = document.getElementById('aiBody');
   if (!body || body._aiCandBound) return;
   body._aiCandBound = true;
-  body.addEventListener('click', function(e){
+  body.addEventListener('click', async function(e){
     var btn = e.target.closest('[data-act]');
     if (!btn || !body.contains(btn)) return;
     var act = btn.getAttribute('data-act');
@@ -6824,7 +6846,7 @@ function bindAiCandidateActions(){
         window.alert('提案文が1,000文字を超えています（' + newText.length + '文字）。FAQは1,000文字以内にしてください。切り詰めずに保存を止めました。');
         return;
       }
-      if (!window.confirm('この提案文を保存しますか？\n（承認済み・有効の候補は、内容を変えて保存すると「承認待ち」に戻り、もう一度承認・反映が必要になります）')) return;
+      if (!(await askConfirm({title:'', body:'この提案文を保存しますか？\n（承認済み・有効の候補は、内容を変えて保存すると「承認待ち」に戻り、もう一度承認・反映が必要になります）', ok:'保存する', cancel:'やめる', danger:false}))) return;
       btn.disabled = true;
       sbRpc('ai_reply_improvement_candidate_update_text', { p_id: Number(cid), p_proposed_text: newText, p_tenant: TENANT_ID })
         .then(function(){ loadAiReport(); })
@@ -6833,6 +6855,7 @@ function bindAiCandidateActions(){
     }
     var statusMap = { approve: 'approved', reject: 'rejected', apply: 'active', rollback: 'rolled_back' };
     var labelMap = { approve: '承認', reject: '却下', apply: '反映（有効化）', rollback: '戻す' };
+    var okMap = { approve:'承認する', reject:'却下する', apply:'反映する', rollback:'元に戻す' };
     var ns = statusMap[act];
     if (!ns) return;
     // 反映・承認の前に、提案文の未保存編集を検出して止める（編集したのに保存し忘れ→古い汎用ひな型が
@@ -6852,7 +6875,7 @@ function bindAiCandidateActions(){
         }
       }
     }
-    if (!window.confirm('この候補を「' + (labelMap[act] || act) + '」しますか？')) return;
+    if (!(await askConfirm({title:'', body:'この候補を「' + (labelMap[act] || act) + '」しますか？', ok:okMap[act], cancel:'やめる', danger:false}))) return;
     btn.disabled = true;
     sbRpc('ai_reply_improvement_candidate_set_status', { p_id: Number(cid), p_status: ns, p_tenant: TENANT_ID })
       .then(function(){ loadAiReport(); })
@@ -7332,7 +7355,7 @@ function addReview(){
 /* 一覧のクリック委譲（注入対策で data-* から取得）。公開切替・削除を実行。
    reviewList が未挿入でも落ちないよう document へフォールバックする。 */
 (function bindReviewListDelegation(){
-  function onReviewListClick(e){
+  async function onReviewListClick(e){
     var btn = e.target.closest('button.rbtn[data-rev-act]');
     if(!btn) return;
     // reviewList 配下のボタンのみ対象（document フォールバック時の誤爆防止）
@@ -7342,7 +7365,7 @@ function addReview(){
     var id  = btn.getAttribute('data-rev-id');
     if(!id) return;
     if(act === 'del'){
-      if(!window.confirm('この口コミを削除しますか？')) return;
+      if(!(await askConfirm({title:'', body:'この口コミを削除しますか？', ok:'削除する', cancel:'やめる', danger:true}))) return;
       runReviewOp(sbDelete('reviews', 'id=eq.' + encodeURIComponent(id)));
     } else if(act === 'hide'){
       runReviewOp(sbUpdate('reviews', 'id=eq.' + encodeURIComponent(id), { is_shown: false }));
@@ -7847,8 +7870,8 @@ function setAddMenu(){
 }
 
 /* メニュー削除。予約や担当割り当てで使われていると外部キー制約で削除不可→停止を案内。 */
-function setDeleteMenu(mid){
-  if (!window.confirm('このメニューを削除しますか？\n（予約や担当割り当てで使われている場合は削除できません。その場合は「停止」にしてください）')) return;
+async function setDeleteMenu(mid){
+  if (!(await askConfirm({title:'', body:'このメニューを削除しますか？\n（予約や担当割り当てで使われている場合は削除できません。その場合は「停止」にしてください）', ok:'削除する', cancel:'やめる', danger:true}))) return;
   sbDelete('menus','id=eq.'+encodeURIComponent(mid))
     .then(function(){ setMsg('set-menuMsg','✅ 削除しました。', true); setLoadMenus(); })
     .catch(function(err){
@@ -8202,8 +8225,8 @@ function setApproveCasePhoto(aid, pid, approve){
     .catch(function(){ setMsg('set-cpMsg-'+aid,'処理に失敗しました。通信状況をご確認ください。', false); });
 }
 /* 症例写真の削除（バケットの実体と行を両方消す＝Edge Function 側で実施）。 */
-function setDeleteCasePhoto(aid, pid){
-  if (!window.confirm('この症例写真を削除します。よろしいですか？\n※紹介ページからも消えます。')) return;
+async function setDeleteCasePhoto(aid, pid){
+  if (!(await askConfirm({title:'', body:'この症例写真を削除します。よろしいですか？\n※紹介ページからも消えます。', ok:'削除する', cancel:'やめる', danger:true}))) return;
   setMsg('set-cpMsg-'+aid,'削除しています…', true);
   setCasePhotoCall({ action:'delete_case_photo', photo_id:pid })
     .then(function(d){
@@ -8268,16 +8291,16 @@ function setUploadArtistPhoto(aid, dataUrl){
     .catch(function(){ setMsg('set-artistMsg','写真の更新に失敗しました。通信状況をご確認ください。', false); });
 }
 /* 写真を消す：profile_photo_url を null に戻す（manager の RLS で許可。Storage実体は残るが配信されない）。 */
-function setSaveArtistPhoto(aid, dataUrl){
-  if (dataUrl === null && !window.confirm('このアーティストの写真を消して、頭文字アイコンに戻します。よろしいですか？')) return;
+async function setSaveArtistPhoto(aid, dataUrl){
+  if (dataUrl === null && !(await askConfirm({title:'', body:'このアーティストの写真を消して、頭文字アイコンに戻します。よろしいですか？', ok:'削除する', cancel:'やめる', danger:true}))) return;
   sbUpdate('artists','id=eq.'+encodeURIComponent(aid), { profile_photo_url: dataUrl })
     .then(function(){ setMsg('set-artistMsg', dataUrl===null?'✅ 写真を消しました。':'✅ 写真を更新しました（予約ページにも反映されます）。', true); setLoadArtists(); })
     .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-artistMsg', setReason(err), false); });
 }
 
-function setToggleArtist(aid, to){
+async function setToggleArtist(aid, to){
   var active = (to === '1');
-  if (!active && !window.confirm('このアーティストを予約導線から外します（停止）。よろしいですか？\n※登録データは残ります。いつでも再稼働できます。')) return;
+  if (!active && !(await askConfirm({title:'', body:'このアーティストを予約導線から外します（停止）。よろしいですか？\n※登録データは残ります。いつでも再稼働できます。', ok:'外す', cancel:'やめる', danger:true}))) return;
   sbUpdate('artists','id=eq.'+encodeURIComponent(aid), { is_active: active })
     .then(function(){ setLoadArtists(); })
     .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-artistMsg', setReason(err), false); });
@@ -8518,9 +8541,9 @@ function setLoadAiContext(){
         var m = (j && j.mode) || 'off'; msel.value = m;
         if (cur) cur.textContent = '現在：' + judgeModeLabel(m) + (j && j.trippedAt ? '（自動停止中：' + crmDate(j.trippedAt) + ' に影モードへ戻りました）' : '');
       }).catch(function(){ if (cur) cur.textContent = '現在：取得できませんでした'; });
-      document.getElementById('set-judge-save').onclick = function(){
+      document.getElementById('set-judge-save').onclick = async function(){
         var m = msel.value;
-        if (m === 'enforce' && !window.confirm('本番ONにすると、検査役が「おかしい」と判定した返信はお客様に送らず有人対応に回ります。影モードで確認済みですか？')) return;
+        if (m === 'enforce' && !(await askConfirm({title:'', body:'本番ONにすると、検査役が「おかしい」と判定した返信はお客様に送らず有人対応に回ります。影モードで確認済みですか？', ok:'本番ONにする', cancel:'やめる', danger:true}))) return;
         if (msg){ msg.textContent = '保存中…'; msg.className = 'crm-emsg crm-ok'; }
         sbRpc('ai_judge_set_mode', { p_tenant: TENANT_ID, p_mode: m }).then(function(){
           if (msg){ msg.textContent = '✅ 保存しました：' + judgeModeLabel(m); msg.className = 'crm-emsg crm-ok'; }
@@ -9117,9 +9140,9 @@ function setUploadRichMenuImage(file){
   reader.readAsDataURL(file);
 }
 
-function setDeleteRichMenuImage(){
+async function setDeleteRichMenuImage(){
   if (!SET_AI_CTX_STORE) return;
-  if (!confirm('リッチメニュー画像を外します。ボタン範囲の入力内容は残ります。よろしいですか？')) return;
+  if (!(await askConfirm({title:'', body:'リッチメニュー画像を外します。ボタン範囲の入力内容は残ります。よろしいですか？', ok:'外す', cancel:'やめる', danger:true}))) return;
   fetch(SB_URL + '/functions/v1/manage-rich-menu-image', {
     method:'POST',
     headers:Object.assign({ 'Content-Type':'application/json' }, hdr()),
@@ -9133,7 +9156,7 @@ function setDeleteRichMenuImage(){
     .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-aictxRmMsg', setReason(err), false); });
 }
 
-function setSaveAiContextRichMenu(){
+async function setSaveAiContextRichMenu(){
   if (!TENANT_ID || !SET_AI_CTX_STORE){ setMsg('set-aictxRmMsg','店舗が選ばれていません。', false); return; }
   setCollectAiContextRichMenu();
   // バリデーション：label 必須／action_type が uri のとき action_value は http(s) のみ／8件以内
@@ -9148,7 +9171,7 @@ function setSaveAiContextRichMenu(){
     }
     rmNormalizeArea(r);
   }
-  if (rmHasOverlap() && !confirm('重なっているボタン範囲があります。このまま保存しますか？')){
+  if (rmHasOverlap() && !(await askConfirm({title:'', body:'重なっているボタン範囲があります。このまま保存しますか？', ok:'保存する', cancel:'やめる', danger:false}))){
     return;
   }
   // 操作を3群に分ける
@@ -9516,11 +9539,11 @@ function shOnInputChange(target){
 }
 
 /* ───────── 保存／月送り／モーダル開閉 ───────── */
-function setShiftSaveWeekly(){
+async function setShiftSaveWeekly(){
   var src = shiftState.weeklyDraft || shiftState.server.weekly;
   var has3=false;
   Object.keys(src).forEach(function(d){ if ((src[d].ranges||[]).length>2) has3=true; });
-  if (has3 && !confirm('区間3つ目以降は消えます。続行しますか？')) return;
+  if (has3 && !(await askConfirm({title:'', body:'区間3つ目以降は消えます。続行しますか？', ok:'保存する', cancel:'やめる', danger:true}))) return;
   var v=shWeeklyDraftToPayload(src);
   if (!v.ok){ setMsg('set-shiftWMsg', v.error, false); return; }
   var btn=document.querySelector('[data-act="shsavew"]'); if (btn){ btn.disabled=true; btn.textContent='保存中…'; }
@@ -9558,9 +9581,9 @@ function setShiftCloseModal(){
   var ov=document.getElementById('shDateOverlay'); if (ov) ov.remove();
 }
 
-function setShiftSaveDate(){
+async function setShiftSaveDate(){
   var dd=shiftState.dateDraft; if (!dd) return;
-  if ((dd.ranges||[]).length>2 && !confirm('区間3つ目以降は消えます。続行しますか？')) return;
+  if ((dd.ranges||[]).length>2 && !(await askConfirm({title:'', body:'区間3つ目以降は消えます。続行しますか？', ok:'保存する', cancel:'やめる', danger:true}))) return;
   var v=shDateDraftToPayload(dd);
   if (!v.ok){ setMsg('set-shmodMsg', v.error, false); return; }
   var btn=document.querySelector('[data-act="shmodsave"]'); if (btn){ btn.disabled=true; btn.textContent='保存中…'; }
@@ -9581,9 +9604,9 @@ function setShiftSaveDate(){
     });
 }
 
-function setShiftRestoreDate(){
+async function setShiftRestoreDate(){
   var dd=shiftState.dateDraft; if (!dd) return;
-  if (!confirm(dd.date+' を曜日パターンに戻します（その日の例外を削除）。続行しますか？')) return;
+  if (!(await askConfirm({title:'', body:dd.date+' を曜日パターンに戻します（その日の例外を削除）。続行しますか？', ok:'曜日パターンに戻す', cancel:'やめる', danger:true}))) return;
   var btn=document.querySelector('[data-act="shmodrestore"]'); if (btn){ btn.disabled=true; btn.textContent='処理中…'; }
   sbRpc('save_artist_shifts_date', { p_artist:shiftState.aid, p_date:dd.date, p_payload:[] })
     .then(function(){
@@ -9615,9 +9638,9 @@ function setShiftMonthShift(delta){
 
 /* draft が残っているとき、別画面/別アーティストへの遷移直前に呼ぶ。
    true: 続行（draft 破棄）／false: 中止（draft 保持） */
-function setShiftConfirmDiscard(){
+async function setShiftConfirmDiscard(){
   if (shiftState.weeklyDraft===null && shiftState.dateDraft===null) return true;
-  return confirm('未保存のシフトがあります。破棄しますか？');
+  return (await askConfirm({title:'', body:'未保存のシフトがあります。破棄しますか？', ok:'移動する（書いた内容を消す）', cancel:'書き続ける', danger:true}));
 }
 
 /* ============================================================================
@@ -9634,17 +9657,17 @@ function setMsg(id, text, ok){
   var root = document.getElementById('setView');
   if (!root || root.getAttribute('data-setbound')) return;
   root.setAttribute('data-setbound','1');
-  root.addEventListener('click', function(e){
+  root.addEventListener('click', async function(e){
     var b = e.target.closest('[data-act]'); if (!b) return;
     var act = b.getAttribute('data-act');
     // サブタブ切替（旧・内部チップ。後方互換で残置）。シフト編集中にdraftがあれば破棄確認。
     if (act === 'setsec'){
-      if (!setShiftConfirmDiscard()) return;
+      if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
       setSettingsSection(b.getAttribute('data-sp')); return;
     }
     // 第2段チップ（メニューとアーティスト内：💉メニュー/👩‍⚕️アーティスト/🗓シフト）
     if (act === 'setsub'){
-      if (!setShiftConfirmDiscard()) return;
+      if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
       setSettingsSub(b.getAttribute('data-sp2')); return;
     }
     // メニュー
@@ -9677,11 +9700,11 @@ function setMsg(id, text, ok){
     if (act === 'ssave'){ setSaveStore(b.getAttribute('data-store')); return; }
     // シフト（カレンダー化／設計：docs/shift-calendar-redesign.md）
     if (act === 'shedit'){
-      if (!setShiftConfirmDiscard()) return;
+      if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
       setLoadShiftEditor(b.getAttribute('data-aid'), b.getAttribute('data-name')); return;
     }
     if (act === 'shback'){
-      if (!setShiftConfirmDiscard()) return;
+      if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
       setLoadShiftIndex(); return;
     }
     if (act === 'shsavew'){ setShiftSaveWeekly(); return; }
@@ -9881,7 +9904,7 @@ function stpStartEdit(sid){
     })
   };
 }
-function stpNewScenario(){
+async function stpNewScenario(){
   // ★保存先テナントの最終確認ダイアログ（2026-06-18 真因対策）。
   //   背景：ステップ配信は「画面の店名」と「保存される TENANT_ID」が別ロジックで管理されており、
   //   ごく稀に表示の店と保存先テナントがズレるケースがあった（小倉店表示で久留米店に保存される事故）。
@@ -9894,7 +9917,7 @@ function stpNewScenario(){
     }
     return '不明な店';
   })();
-  if (!confirm('「' + tname + '」に新しい友達追加シナリオを作成します。\n\nこの店で作成して合っていますか？\n（違う店ならキャンセルして、画面を一度閉じて開き直してから操作してください）')) return;
+  if (!(await askConfirm({title:'', body:'「' + tname + '」に新しい友達追加シナリオを作成します。\n\nこの店で作成して合っていますか？\n（違う店なら「やめる」を押して、画面を一度閉じて開き直してから操作してください）', ok:'作成する', cancel:'やめる', danger:false}))) return;
   if (createTenant !== TENANT_ID) {
     stpTopMsg('店が切り替わりました。もう一度「新しいシナリオ」を押してください。', false);
     return;
@@ -10257,8 +10280,8 @@ function stpToggleActive(s){
   stpCall('scenario_save', { scenario:{ id:s.id, name:s.name, trigger_type:s.trigger_type, ab_group:s.ab_group||'', is_active:!s.is_active, send_hour_from:s.send_hour_from, send_hour_to:s.send_hour_to } })
     .then(function(d){ if(!d.ok){ stpTopMsg(stpReason(d.reason), false); return; } stpTopMsg(!s.is_active?'配信を開始しました ✅':'配信を停止しました', true); stpReload(); });
 }
-function stpDeleteScenario(s){
-  if(!window.confirm('「'+(s.name||'(無題)')+'」を削除します。よろしいですか？')) return;
+async function stpDeleteScenario(s){
+  if(!(await askConfirm({title:'', body:'「'+(s.name||'(無題)')+'」を削除します。よろしいですか？', ok:'削除する', cancel:'やめる', danger:true}))) return;
   stpCall('scenario_delete', { scenario_id:s.id }).then(function(d){
     if(!d.ok){ stpTopMsg(stpReason(d.reason), false); return; }
     if(STP.editing===s.id){ STP.editing=null; STP.draft=null; }
@@ -10289,12 +10312,12 @@ var STP_TPL_RESV = [
   { days:0, hours:4, content:'{{店名}}です🤍\n本日 {{予約日時}} にお待ちしております☺️\nお気をつけてお越しください。お困りのことがあれば、このトークにご連絡ください💬' }
 ];
 var STP_TPL = { std: STP_TPL_STD, lite: STP_TPL_LITE, resv: STP_TPL_RESV };
-function stpApplyTemplate(kind){
+async function stpApplyTemplate(kind){
   if(!STP.draft) return;
   var tpl = STP_TPL[kind] || STP_TPL.std;
   var label = (kind==='lite') ? '軽め版2通' : (kind==='resv') ? 'リマインド2通' : '標準版7通';
   var hasQr=STP.draft.steps.some(function(x){ return !!x.quick_reply; });
-  if(STP.draft.steps.length && !window.confirm('いまのメッセージを、'+label+'で置きかえます。'+(hasQr?'\n1タップ質問のボタン設定も消えます。':'')+'よろしいですか？')) return;
+  if(STP.draft.steps.length && !(await askConfirm({title:'', body:'いまのメッセージを、'+label+'で置きかえます。'+(hasQr?'\n1タップ質問のボタン設定も消えます。':'')+'よろしいですか？', ok:'置きかえる', cancel:'やめる', danger:true}))) return;
   STP.draft.steps = tpl.map(function(t){ return { days:t.days, hours:t.hours, content:t.content, image_urls:[], quick_reply:null }; });
   stpRenderList();
   stpTopMsg(label+'を入れました。文面を調整して「保存する」を押してください💡', true);
@@ -10527,7 +10550,7 @@ function addRefSource(){
 
 /* ===== 一覧のクリック委譲（注入対策で data-* から取得）===== */
 (function bindAcqListDelegation(){
-  function onAcqListClick(e){
+  async function onAcqListClick(e){
     var b = e.target.closest('button[data-aq]');
     if(!b) return;
     var listEl = document.getElementById('acqList');
@@ -10537,7 +10560,7 @@ function addRefSource(){
     var id = b.getAttribute('data-id');
     if(!id) return;
     if(act === 'del'){
-      if(!window.confirm('この流入元を削除しますか？（過去予約の記録は残ります）')) return;
+      if(!(await askConfirm({title:'', body:'この流入元を削除しますか？（過去予約の記録は残ります）', ok:'削除する', cancel:'やめる', danger:true}))) return;
       runAcqOp(sbDelete('ref_sources', 'id=eq.' + encodeURIComponent(id)));
     } else if(act === 'hide'){
       runAcqOp(sbUpdate('ref_sources', 'id=eq.' + encodeURIComponent(id), { is_shown: false }));
@@ -11280,7 +11303,7 @@ function usrRowMsg(id, t, ok){
 
 /* 一覧のクリック委譲（注入対策で data-* から取得）。保存・有効/無効トグル */
 (function bindUsrListDelegation(){
-  function onClick(e){
+  async function onClick(e){
     var btn = e.target.closest('button[data-usr-act]');
     if (!btn) return;
     var listEl = document.getElementById('usrList');
@@ -11312,7 +11335,7 @@ function usrRowMsg(id, t, ok){
     } else if (act === 'toggle'){
       var toActive = btn.getAttribute('data-usr-active') !== '1';  // 今が有効なら無効化
       var q = toActive ? 'このスタッフを「有効」にしますか？' : 'このスタッフを「無効」にしますか？\n（ログインできなくなります）';
-      if (!window.confirm(q)) return;
+      if (!(await askConfirm({title:'', body:q, ok:toActive?'有効にする':'無効にする', cancel:'やめる', danger:!toActive}))) return;
       usrSaveRow(card, id, btn, { activeOverride: toActive });
     }
   }
@@ -11406,13 +11429,13 @@ function usrGenResetPassword(staffId){
   if (input){ input.value = out; input.focus(); }
 }
 
-function usrResetPassword(card, id, btn){
+async function usrResetPassword(card, id, btn){
   var panel = document.getElementById('usr-reset-' + id);
   if (!panel) return;
   var input = panel.querySelector('.usr-reset-pw');
   var pw = (input && input.value || '').trim();
   if (!usrPasswordLooksStrong(pw)){ usrRowMsg(id, '暗証番号は12文字以上・3種類以上にしてください（🎲サイコロが安全です）。', false); return; }
-  if (!window.confirm('このスタッフの暗証番号を再発行します。\n本人に新しい暗証番号を必ず伝えてください。\n進めてよろしいですか？')) return;
+  if (!(await askConfirm({title:'', body:'このスタッフの暗証番号を再発行します。\n本人に新しい暗証番号を必ず伝えてください。\n進めてよろしいですか？', ok:'再発行する', cancel:'やめる', danger:true}))) return;
   if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
 
   btn.disabled = true;
@@ -11539,7 +11562,7 @@ function usrAddStaffCall(email, name, role, storeId, pass, allowExisting){
       return { ok: res.ok, status: res.status, body: j };
     });
   })
-  .then(function(r){
+  .then(async function(r){
     btn.disabled = false; btn.textContent = label;
     var b = r.body || {};
     if (r.ok && b.ok && b.user_id){
@@ -11559,7 +11582,7 @@ function usrAddStaffCall(email, name, role, storeId, pass, allowExisting){
     }
     // ★既存メアド（email_exists）：allow_existing_user=false の初回呼びでだけ確認モーダルを出す。
     if (b.reason === 'email_exists' && !allowExisting){
-      if (window.confirm('このメールアドレスは既存ユーザーです。\nこのテナント（今開いている店）にも追加しますか？\n（本人の暗証番号は変えません＝今のパスワードのままでこの店にもログインできます）')){
+      if ((await askConfirm({title:'', body:'このメールアドレスは既存ユーザーです。\nこのテナント（今開いている店）にも追加しますか？\n（本人の暗証番号は変えません＝今のパスワードのままでこの店にもログインできます）', ok:'追加する', cancel:'やめる', danger:false}))){
         usrAddStaffCall(email, name, role, storeId, pass, true);   // 既存ユーザー所属追加でリトライ
         return;
       }
@@ -11619,7 +11642,7 @@ async function chatOpenChart(customerId){
   if(!current()||state!==CHAT_STATE||state.selectedCustomerId!==customerId)return;
   var uid=rows&&rows[0]&&rows[0].line_uid;
   if(!uid)throw Error('missing');
-  navVisit(function(){gotoSubtab('resv','showCustomers');selectCustomer(uid);NAV_RETURN_TO='受信箱';});
+  return await navVisit(function(){gotoSubtab('resv','showCustomers');selectCustomer(uid);NAV_RETURN_TO='受信箱';});
  }catch(err){if(current())chatSetText('chatDetailMsg','カルテを開けませんでした');}
 }
 function chartOpenChat(customerId){
@@ -11673,7 +11696,7 @@ async function openReservationFromAnywhere(id){
   if(!slug||!Array.from(document.getElementById('resvStore').options).some(function(o){return o.value===slug;}))throw Error('store');
   await ensureMyArtistIds();if(!current())return;
   var moved=false;
-  navVisit(function(){
+  await navVisit(function(){
    NAV_SETUP=true;try{gotoSubtab('resv','showReservations');}finally{NAV_SETUP=false;}
    document.getElementById('resvStore').value=slug;
    document.getElementById('resvNurse').value='';document.getElementById('resvStatus').value='';
@@ -11699,6 +11722,90 @@ document.addEventListener('click',function(e){
  else if(b.hasAttribute('data-chart-chat'))chartOpenChat(b.dataset.chartChat);
  else openReservationFromAnywhere(b.dataset.openReservation);
 });
+
+var CONFIRM_PURE=(function(){
+/*<confirm-dialog-pure>*/
+// Button labels describe the action, never the ambiguous native OK/Cancel pair.
+function confirmBoardAction(action) {
+ const labels={cancel:'予約を取り消す',visited:'来店済みとして記録する',noshow:'無断キャンセルとして記録する',remind:'送信する',consent:'送信する'};
+ if(!Object.hasOwn(labels,action))return null;
+ return {ok:labels[action],cancel:'やめる',danger:['cancel','remind','consent'].includes(action)};
+}
+function confirmLeaveOptions(reason) {
+ const moving=reason==='move';
+ return {title:'',body:moving?'書いた内容が消えます。移動しますか？':'書いた内容が消えます。戻りますか？',
+  ok:moving?'移動する（書いた内容を消す）':'戻る（書いた内容を消す）',cancel:'書き続ける',danger:true};
+}
+/*</confirm-dialog-pure>*/
+return {confirmBoardAction,confirmLeaveOptions};
+})();
+// Shared confirmation: only one pending decision; a stale screen always resolves false.
+var ASK_CONFIRM_PENDING=null,ASK_CONFIRM_NOTICE_TIMER;
+function confirmIdentity(){
+ // Identity only: rotating an access token for the same person is not a new login.
+ // This is a UI staleness check, never an authorization check.
+ if(!TOKEN)return '';
+ try{var payload=JSON.parse(atob(TOKEN.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));if(typeof payload.sub==='string'&&payload.sub)return payload.sub;}catch(e){}
+ return TOKEN; // Unknown identity: fail closed when the token changes.
+}
+function confirmCancelledNotice(){
+ var notice=document.getElementById('askConfirmNotice');
+ if(!notice){notice=document.createElement('div');notice.id='askConfirmNotice';notice.setAttribute('role','status');document.body.appendChild(notice);}
+ notice.textContent='画面が変わったため中止しました。もう一度操作してください';
+ clearTimeout(ASK_CONFIRM_NOTICE_TIMER);ASK_CONFIRM_NOTICE_TIMER=setTimeout(function(){notice.remove();},4000);
+}
+function confirmContext(){
+ return JSON.stringify([TENANT_ID,confirmIdentity(),NAV_SEQ,NAV_EPOCH,CURRENT_GROUP,currentStoreSlug(),
+  CALENDAR_SHEET_SEQ,CRM_SELECTED,CHAT_STATE&&CHAT_STATE.selectedCustomerId,SET_SECTION,SET_SUB,
+  document.getElementById('settlementMonth')&&document.getElementById('settlementMonth').value,
+  typeof LSEC_TENANT==='undefined'?'':LSEC_TENANT,typeof SET_AI_CTX_STORE==='undefined'?'':SET_AI_CTX_STORE,
+  typeof shiftState==='undefined'?null:[shiftState.aid,shiftState.dateDraft&&shiftState.dateDraft.date],
+  typeof STP==='undefined'?null:STP.editing]);
+}
+function cancelPendingConfirm(){if(ASK_CONFIRM_PENDING)ASK_CONFIRM_PENDING.finish(false,true);}
+function askConfirm(options){
+ if(ASK_CONFIRM_PENDING)return Promise.resolve(false);
+ var context=confirmContext(),previous=document.activeElement;
+ var owners=Array.from(document.querySelectorAll('[role="dialog"],dialog[open],#shDateOverlay,#rsModal,#provOverlay'));
+ var fields=owners.flatMap(function(el){return Array.from(el.querySelectorAll('input,select,textarea'));});
+ var fieldValues=fields.map(function(el){return [el.value,el.checked];});
+ var chatState=CHAT_STATE,shiftDraft=shiftState.dateDraft,weeklyDraft=shiftState.weeklyDraft,scenarioDraft=STP.draft;
+ var dlg=document.createElement('dialog');dlg.id='askConfirmDialog';dlg.className='ask-confirm';
+ dlg.setAttribute('aria-modal','true');dlg.setAttribute('aria-labelledby','askConfirmTitle');dlg.setAttribute('aria-describedby','askConfirmBody');
+ var panel=document.createElement('section');panel.className='ask-confirm-panel';
+ var title=document.createElement('h2');title.id='askConfirmTitle';title.textContent=options.title||'';title.hidden=!options.title;
+ if(!options.title){dlg.removeAttribute('aria-labelledby');dlg.setAttribute('aria-label','確認');}
+ var body=document.createElement('p');body.id='askConfirmBody';body.textContent=options.body||'';
+ var actions=document.createElement('div');actions.className='ask-confirm-actions';
+ var cancel=document.createElement('button');cancel.type='button';cancel.dataset.confirmCancel='';cancel.textContent=options.cancel||'やめる';
+ var ok=document.createElement('button');ok.type='button';ok.dataset.confirmOk='';ok.textContent=options.ok||'続ける';ok.className=options.danger?'ask-confirm-danger':'';
+ actions.append(cancel,ok);panel.append(title,body,actions);dlg.append(panel);
+ function current(){return context===confirmContext()&&chatState===CHAT_STATE&&shiftDraft===shiftState.dateDraft&&weeklyDraft===shiftState.weeklyDraft&&scenarioDraft===STP.draft&&owners.every(function(el){return el.isConnected;})&&fields.every(function(el,i){return el.isConnected&&el.value===fieldValues[i][0]&&el.checked===fieldValues[i][1];});}
+ return new Promise(function(resolve){
+  var settled=false,timer;
+  var pending={finish:function(value,automatic){
+   if(settled)return;settled=true;var valid=current(),accepted=!!value&&valid;clearInterval(timer);
+   if(typeof dlg.close==='function'&&dlg.open)dlg.close();dlg.remove();
+   ASK_CONFIRM_PENDING=null;
+   if(automatic||!valid)confirmCancelledNotice();
+   if(previous&&previous.isConnected&&current())previous.focus();
+   resolve(accepted);
+  }};
+  ASK_CONFIRM_PENDING=pending;
+  cancel.onclick=function(){pending.finish(false);};ok.onclick=function(){pending.finish(true);};
+  dlg.addEventListener('close',function(){pending.finish(false);});
+  dlg.addEventListener('cancel',function(e){e.preventDefault();pending.finish(false);});
+  dlg.addEventListener('click',function(e){if(e.target===dlg)pending.finish(false);});
+  dlg.addEventListener('keydown',function(e){
+   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();pending.finish(false);}
+   if(e.key==='Tab'){e.preventDefault();(document.activeElement===cancel?ok:cancel).focus();}
+  });
+  document.body.appendChild(dlg);
+  if(typeof dlg.showModal==='function')dlg.showModal();else dlg.setAttribute('open','');
+  cancel.focus();
+  timer=setInterval(function(){if(!current())pending.finish(false);},50);
+ });
+}
 
 var NAV_PURE=(function(){
 /*<nav-history-pure>*/
@@ -11763,6 +11870,7 @@ function navListState(state){
  return NAV_PURE.navSnapshot(Object.assign({},state,navScope(),{sheet:null,detail:null,chat:null,modal:'',modalId:'',chartFrom:'',returnTo:''}));
 }
 function navReset(keepView){
+ cancelPendingConfirm();NAV_CONFIRM_BACK=false;NAV_BACK_APPROVED=false;
  NAV_CONSOLE=false;
  NAV_SEQ++;NAV_BACK_PENDING=false;NAV_AFTER_CLOSE=null;NAV_ENTRIES.clear();NAV_CHART_FROM='';NAV_RETURN_TO='';NAV_SCOPE_STORE=currentStoreSlug();NAV_EPOCH=String(Date.now())+'-'+String(NAV_SEQ);NAV_INDEX=0;
  closeCalendarSheets();navRawCloseManualBooking();var dlg=document.getElementById('checkoutDialog');if(dlg)dlg.remove();
@@ -11775,26 +11883,28 @@ function navFormValue(root){return JSON.stringify(Array.from(root.querySelectorA
 function navMarkClean(root){if(root)root._navBaseline=navFormValue(root);}
 function navForms(){return Array.from(document.querySelectorAll('#calendarReservationSheet form,#calendarTimeOffSheet form,#checkoutDialog form')).concat(document.getElementById('mbForm').style.display!=='none'?[document.getElementById('mbForm')]:[]);}
 function navDirty(){if(CURRENT_GROUP==='chat'&&CHAT_STATE&&String(CHAT_STATE.draftBody||''))return true;return navForms().some(function(form){return !form._navSaving&&form._navBaseline!==undefined&&form._navBaseline!==navFormValue(form);});}
-function navMayLeave(reason){return !navDirty()||window.confirm(reason==='move'?'書いた内容が消えます。移動しますか？':'書いた内容が消えます。戻りますか？');}
-function navVisit(action){
+async function navMayLeave(reason){return !navDirty()||(await askConfirm(CONFIRM_PURE.confirmLeaveOptions(reason)));}
+function navVisit(action,approved){
  if(NAV_QUIET||NAV_DEPTH)return action();
  if(NAV_BACK_PENDING)return;
  if(!NAV_CURRENT) {NAV_EPOCH=String(Date.now());NAV_INDEX=0;navWrite(navCapture(),true);}
  if(NAV_CURRENT.tenant!==String(TENANT_ID)||NAV_CURRENT.store!==navScope().store)navReset();
- if(!navMayLeave('move'))return;
+ if(!approved&&navDirty())return navMayLeave('move').then(function(ok){if(ok)return navVisit(action,true);});
+ cancelPendingConfirm();
  navRememberScroll();
  if(CURRENT_GROUP==='chat'&&CHAT_STATE){CHAT_STATE.draftBody='';CHAT_STATE.draftId=null;}
  NAV_SEQ++;NAV_DEPTH++;
  var result;try{result=action();}finally{NAV_DEPTH--;var next=navCapture();if(!NAV_PURE.navSame(next,NAV_CURRENT)){NAV_INDEX++;navWrite(next,false);}}
  return result;
 }
-function navClose(kind,after){
+function navClose(kind,after,approved){
  if(NAV_BACK_PENDING)return;
  var owns=NAV_PURE.navMatchesScope(NAV_CURRENT,navScope())&&NAV_INDEX>0;
  if(owns&&((kind==='sheet'&&NAV_CURRENT.sheet)||(kind==='detail'&&NAV_CURRENT.detail)||(kind===NAV_CURRENT.modal))){
   NAV_AFTER_CLOSE=after||null;NAV_BACK_PENDING=true;history.back();return;
  }
- if(!navMayLeave())return;
+ if(!approved&&navDirty())return navMayLeave().then(function(ok){if(ok)return navClose(kind,after,true);});
+ cancelPendingConfirm();
  if(kind==='sheet')closeCalendarSheets();
  if(kind==='detail')crmBackToList();
  if(kind==='manual')navRawCloseManualBooking();
@@ -11813,11 +11923,16 @@ function navReturnButton(){
  document.getElementById('crmDetail').prepend(b);
 }
 document.addEventListener('click',function(e){if(e.target.closest('[data-nav-reservation-back]'))navClose('detail');if(e.target.closest('[data-nav-cross-back]')&&!NAV_BACK_PENDING){NAV_BACK_PENDING=true;history.back();}});
+var NAV_STORE_APPROVED=false;
 document.getElementById('resvStore').addEventListener('change',function(e){
- if(!navMayLeave('move')){this.value=NAV_CURRENT.viewStore;e.stopImmediatePropagation();return;}
+ if(!NAV_STORE_APPROVED&&navDirty()){
+  var select=this,next=select.value;select.value=NAV_CURRENT.viewStore;e.stopImmediatePropagation();
+  navMayLeave('move').then(function(ok){if(!ok)return;select.value=next;NAV_STORE_APPROVED=true;try{select.dispatchEvent(new Event('change',{bubbles:true}));}finally{NAV_STORE_APPROVED=false;}});return;
+ }
  navReset(true);
 },true);
 async function navReplay(target){
+ cancelPendingConfirm();
  var seq=++NAV_SEQ,scope=navScope(),valid=NAV_PURE.navMatchesScope(target,scope);
  var next=valid?NAV_PURE.navSnapshot(target):NAV_PURE.navSnapshot(Object.assign(scope,{group:'home',tab:'showHome'}));
  var group=NAV_GROUPS.find(function(g){return g.key===next.group&&navAllowed(g.mgr);});
@@ -11855,13 +11970,22 @@ async function navReplay(target){
  }finally{NAV_QUIET=false;}
  navWrite(next,true);window.scrollTo({left:next.scrollX,top:next.scrollY,behavior:'instant'});
 }
+var NAV_CONFIRM_BACK=false,NAV_BACK_APPROVED=false;
 window.addEventListener('popstate',async function(e){
  NAV_BACK_PENDING=false;if(!NAV_CURRENT)return;
  var after=NAV_AFTER_CLOSE;NAV_AFTER_CLOSE=null;
  if(NAV_CONSOLE){hideAllViews();document.getElementById('consoleView').style.display='block';navWrite(NAV_CURRENT,true);return;}
  var entry=e.state&&NAV_ENTRIES.get(e.state.navToken),target=entry&&entry.state;
  var sameScope=NAV_PURE.navMatchesScope(target,navScope());
- if(!navMayLeave()){navWrite(NAV_CURRENT,false);return;}
+ if(NAV_CONFIRM_BACK){navWrite(NAV_CURRENT,false);return;}
+ if(!NAV_BACK_APPROVED&&navDirty()){
+  // The browser already moved. Restore the current entry before asking.
+  navWrite(NAV_CURRENT,false);cancelPendingConfirm();NAV_CONFIRM_BACK=true;
+  var accepted=await navMayLeave();NAV_CONFIRM_BACK=false;
+  if(accepted){NAV_BACK_APPROVED=true;NAV_AFTER_CLOSE=after;NAV_BACK_PENDING=true;history.back();}
+  return;
+ }
+ NAV_BACK_APPROVED=false;
  NAV_INDEX=sameScope?entry.index:0;
  navRememberScroll();
  var replay=navReplay(sameScope?target:navListState(NAV_CURRENT)),replaySeq=NAV_SEQ;
