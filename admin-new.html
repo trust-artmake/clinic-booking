@@ -802,13 +802,19 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .calendar-sheet textarea,.calendar-sheet input:not([type=radio]){display:block;width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:9px;border:1px solid #aabfba;border-radius:6px}
 .calendar-sheet fieldset{min-width:0;border:0;padding:4px 0;margin:0}.calendar-sheet legend{font-size:13px;font-weight:700}.calendar-choices{display:flex;flex-wrap:wrap;gap:4px}.calendar-sheet .calendar-choice{display:block;margin:0;cursor:pointer}.calendar-choice input{position:absolute;opacity:0;width:1px;height:1px}.calendar-choice span{display:flex;align-items:center;justify-content:center;min-height:40px;box-sizing:border-box;border:1px solid #aac1bb;padding:6px 9px;border-radius:20px;font-size:13px}.calendar-choice input:checked+span{background:#d8eee9;border-color:#136b5e}.calendar-choice input:focus-visible+span{outline:2px solid #136b5e}
 .calendar-note{border-left:3px solid #bfd9d1;padding:10px;margin:10px 0;background:#f5f9f7;font-size:14px;overflow-wrap:anywhere}.calendar-note p{margin:7px 0}.calendar-note-body{white-space:pre-wrap;overflow-wrap:anywhere}
-.calendar-summary{font-size:13px;line-height:1.5;margin:8px 0}.calendar-actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.calendar-actions .rbtn{min-height:40px}.calendar-sheet input[name=color]{width:9em;max-width:100%}.calendar-sheet .rbtn{white-space:normal}
+.calendar-summary{font-size:13px;line-height:1.5;margin:8px 0}.calendar-actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.calendar-actions .rbtn{min-height:40px}.calendar-sheet input[name=color]{width:22em;max-width:100%}.calendar-sheet .rbtn{white-space:normal}
 
 
+.calendar-sheet input[type=hidden]{display:none}
+.calendar-note-chip{font:inherit;font-size:13px;min-height:40px;padding:6px 9px;border:1px solid #aac1bb;border-radius:20px;background:#fff;color:#243834;cursor:pointer;max-width:100%}
+.calendar-note-chip[aria-pressed=true]{background:#d8eee9;border-color:#136b5e}.calendar-note-chip:focus-visible{outline:2px solid #136b5e}
+[data-calendar-next]{margin:12px 0;padding:12px;background:#fff4d6;border-left:4px solid #bd851b;border-radius:6px;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
 .calendar-time-off-band{background:var(--artist-color);color:#fff;font-weight:700}
 .calendar-time-off{display:block;box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--artist-color);border-left:4px solid var(--artist-color);border-radius:5px;background:repeating-linear-gradient(135deg,#eef1f3 0,#eef1f3 5px,#fff 5px,#fff 10px);color:#243834;padding:7px;margin:4px 0;font:inherit;font-size:12px;text-align:left;overflow:hidden;overflow-wrap:anywhere;cursor:pointer}
 .calendar-day-heading .calendar-time-off{font-size:10px;padding:3px}.calendar-sheet .calendar-time-off{min-height:44px;font-size:14px}
 .calendar-sheet select{width:100%;min-width:0;box-sizing:border-box;font:inherit;padding:9px}.calendar-sheet input[type=checkbox]{display:inline-block;width:auto}
+[data-time-off-impact]{margin:12px 0;padding:10px;background:#fff6df;border-radius:8px;overflow-wrap:anywhere;font-size:14px;line-height:1.6}
+[data-time-off-impact] p{margin:4px 0}[data-time-off-impact] button{max-width:100%;text-align:left}
 </style>
 </head>
 <body>
@@ -3606,13 +3612,13 @@ function ensureStoreMap(){
   //   public_store_resolve RPC で public_slug を引いて店を解決する設計）。
   //   code は (tenant_id,code) でしか一意でないため、テナント横断の公開リンクには使えない。
   // ★patch-51：liff_id も同時取得。集客タブの「Instagram用LIFFリンク」発行に使う。
-  return sbGet('stores?select=id,name,code,public_slug,liff_id,checkout_start_date,business_hours_start,business_hours_end&order=name').then(function(rows){
+  return sbGet('stores?select=id,name,code,public_slug,liff_id,checkout_start_date,business_hours_start,business_hours_end,slot_interval_min&order=name').then(function(rows){
     // 店切替の直後に前テナントの応答が遅れて返っても、現在の画面を古い店情報で上書きしない。
     if (loadTenant !== TENANT_ID) return ensureStoreMap();
     STORE_MAP = {};
     STORE_MAP_TENANT = loadTenant;
     (rows||[]).forEach(function(s){
-      if(s.code) STORE_MAP[s.code] = { id:s.id, name:s.name, public_slug:s.public_slug||null, liff_id:s.liff_id||null, checkout_start_date:s.checkout_start_date||null, business_hours_start:s.business_hours_start, business_hours_end:s.business_hours_end };
+      if(s.code) STORE_MAP[s.code] = { id:s.id, name:s.name, public_slug:s.public_slug||null, liff_id:s.liff_id||null, checkout_start_date:s.checkout_start_date||null, business_hours_start:s.business_hours_start, business_hours_end:s.business_hours_end, slot_interval_min:s.slot_interval_min };
     });
     // ★店舗セレクタを「選択中テナントの店」で作り直す（多テナント対応）。
     //   固定の久留米/博多ではなく、実データの店だけを並べる。先頭は常に「全店まとめ」。
@@ -3731,8 +3737,51 @@ function calendarTimeOffTitle(row) {
  const end=calendarJstTime(row.end_at),differentDay=calendarJstDate(row.end_at)!==calendarJstDate(row.start_at);
  return name+' '+calendarJstTime(row.start_at)+'〜'+(end==='00:00'?'':(differentDay?calendarJstDate(row.end_at)+' ':'')+end+' ')+'×';
 }
+
+// Same half-open overlap and future-only rule as booking computeSlots; no network/DB.
+function calendarTimeOffImpact(input) {
+ const minute=value=>{
+  if(!/^\d{2}:\d{2}(:\d{2})?$/.test(String(value)))throw Error('Invalid business hours');
+  const [h,m]=value.split(':').map(Number);if(h>23||m>59)throw Error('Invalid business hours');return h*60+m;
+ };
+ const open=minute(input.open),close=minute(input.close),interval=Number(input.interval??30);
+ const from=Date.parse(input.from+'T00:00:00+09:00'),to=Date.parse(input.to+'T00:00:00+09:00'),now=Number(input.now);
+ if(!Number.isFinite(from)||!Number.isFinite(to)||!Number.isFinite(now)||to<=from||to-from>32*86400000||
+  calendarJstDate(from)!==input.from||calendarJstDate(to)!==input.to||close<=open||!Number.isInteger(interval)||interval<=0)throw Error('Invalid impact input');
+ const durations=(input.menus||[]).flatMap(m=>[m.duration_new_min,m.duration_retouch_min]).map(Number).filter(n=>Number.isFinite(n)&&n>0);
+ const duration=durations.length?Math.min(...durations):60;
+ const ranges=rows=>{
+  if(!Array.isArray(rows))throw Error('Missing intervals');
+  return rows.map(r=>{const s=Date.parse(r.start_at),e=Date.parse(r.end_at);if(!Number.isFinite(s)||!Number.isFinite(e)||s>=e)throw Error('Invalid interval');return [s,e];});
+ };
+ const busy=ranges(input.busy),off=ranges(input.timeOff),available=[],days=[];
+ const overlaps=(s,e,rs)=>rs.some(r=>s<r[1]&&e>r[0]);
+ const hm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+ for(let day=from;day<to;day+=86400000){
+  const date=calendarJstDate(day),times=[];
+  for(let m=open;m+duration<=close;m+=interval){
+   const s=day+m*60000,e=s+duration*60000;
+   if(s<=now||overlaps(s,e,busy))continue;
+   available.push([s,e]);if(overlaps(s,e,off))times.push(hm(m));
+  }
+  days.push({date,times,count:times.length});
+ }
+ const count=days.reduce((sum,d)=>sum+d.count,0);let suggestion=null;
+ if(count&&!input.allDay&&days.length===1&&off.length===1){
+  // Distance first, then earlier time. Never move outside business hours or beyond 3h.
+  for(let distance=interval;distance<=180&&!suggestion;distance+=interval){
+   for(const direction of [-1,1]){
+    const s=off[0][0]+distance*direction*60000,e=off[0][1]+distance*direction*60000;
+    if(s<from+open*60000||e>from+close*60000)continue;
+    const lost=available.filter(r=>r[0]<e&&r[1]>s).length;
+    if(lost<count){suggestion={start:calendarJstTime(s),end:calendarJstTime(e),count:lost};break;}
+   }
+  }
+ }
+ return {count,days,suggestion};
+}
 /*</artist-calendar-pure>*/
-return {calendarJstDate,calendarJstTime,calendarAddDays,calendarRange,calendarMove,calendarMonthDays,calendarArtistColor,calendarRows,calendarLayout,calendarPalette,calendarArtistLight,calendarTitle,calendarBandTitle,calendarMonthOverflow,calendarInitial,calendarTimeOffRows,calendarTimeOffTitle};
+return {calendarJstDate,calendarJstTime,calendarAddDays,calendarRange,calendarMove,calendarMonthDays,calendarArtistColor,calendarRows,calendarLayout,calendarPalette,calendarArtistLight,calendarTitle,calendarBandTitle,calendarMonthOverflow,calendarInitial,calendarTimeOffRows,calendarTimeOffTitle,calendarTimeOffImpact};
 })();
 /* ===== 段2 アーティストカレンダー ===== */
 var CALENDAR_VIEW = 'month';
@@ -3912,14 +3961,72 @@ async function deleteCalendarTimeOff(id,date){
   var status=document.querySelector('[data-time-off-day-status]')||document.getElementById('calendarNotice');status.textContent='削除結果を確認できませんでした。再読込してください。';
  }}finally{buttons.forEach(function(b){if(b.isConnected)b.disabled=false;});}
 }
+// Read-only preview. A failure must never prevent the existing save action.
+function calendarTimeOffImpactPreview(form,current){
+ var notice=form.querySelector('[data-time-off-impact]'),timer,version=0,cache=null,suggestion=null;
+ var val=function(n){return form.elements.namedItem(n).value;};
+ function active(){return current()&&!form.querySelector('[type=submit]').disabled;}
+ function clear(){notice.textContent='';notice.style.display='none';suggestion=null;}
+ function schedule(event){
+  if(event&&['artist','allDay','startDate','endDate','startTime','endTime'].indexOf(event.target.name)<0)return;
+  clearTimeout(timer);version++;clear();if(!active())return;
+  var request=version;timer=setTimeout(function(){calculate(request);},250);
+ }
+ async function calculate(request){
+  if(!active()||request!==version)return;
+  var artist=CALENDAR_ARTISTS.find(function(a){return a.id===val('artist');}),allDay=form.elements.namedItem('allDay').checked;
+  if(!artist||!val('startDate')||!val('endDate'))return;
+  var start=val('startDate')+'T'+(allDay?'00:00':val('startTime'))+':00+09:00';
+  var end=(allDay?CALENDAR_PURE.calendarAddDays(val('endDate'),1):val('endDate'))+'T'+(allDay?'00:00':val('endTime'))+':00+09:00';
+  var s=Date.parse(start),e=Date.parse(end);
+  if(!Number.isFinite(s)||!Number.isFinite(e)||e<=s||e-s>31*86400000)return;
+  var from=CALENDAR_PURE.calendarJstDate(s),to=CALENDAR_PURE.calendarAddDays(CALENDAR_PURE.calendarJstDate(e-1),1);
+  try{
+   // Artist's store matters when the board is showing all stores.
+   var store=checkoutStore(artist.store_id);if(!store)throw Error('Store unavailable');
+   var key=JSON.stringify([artist.id,store.id,from,to]);
+   if(!cache||cache.key!==key){
+    cache={key:key,promise:Promise.all([
+     sbRpc('busy_ranges',{p_artist:artist.id,p_store:store.id,p_from:from+'T00:00:00+09:00',p_to:to+'T00:00:00+09:00'}),
+     sbGet('artist_menus?select=duration_new_min,duration_retouch_min&artist_id=eq.'+encodeURIComponent(artist.id))
+    ])};
+   }
+   var pending=cache,data=await pending.promise;
+   if(!active()||request!==version)return;
+   if(!Array.isArray(data[0])||!Array.isArray(data[1]))throw Error('Invalid preview response');
+   var result=CALENDAR_PURE.calendarTimeOffImpact({from:from,to:to,open:store.business_hours_start,close:store.business_hours_end,
+    interval:store.slot_interval_min,menus:data[1],busy:data[0],timeOff:[{start_at:start,end_at:end}],now:Date.now(),allDay:allDay});
+   clear();if(!result.count)return;
+   var multiple=result.days.length>1,summary=multiple?'⚠ この休みで、お客様が予約できる時間が '+result.days.length+'日間で '+result.count+' 減ります':allDay?'⚠ お客様が予約できる時間が、この日は '+result.count+' 減ります':'⚠ この休みで、お客様が予約できる時間が '+result.count+'つ 減ります';
+   notice.innerHTML='<p>'+esc(summary)+'</p>'+
+    (!allDay&&!multiple?'<p>'+esc('予約できなくなる時間：'+result.days[0].times.map(function(t){return t+'〜';}).join(' / '))+'</p>':'');
+   suggestion=result.suggestion;
+   if(suggestion)notice.innerHTML+='<button type="button" class="rbtn" data-time-off-suggestion>'+esc('💡 '+suggestion.start+'〜にずらすと、'+(suggestion.count?suggestion.count+'つで済みます':'減りません'))+'</button>';
+   notice.style.display='block';
+  }catch(err){
+   if(cache===pending)cache=null;
+   if(!active()||request!==version)return;
+   clear();notice.textContent='予約できる時間への影響を確認できませんでした';notice.style.display='block';
+  }
+ }
+ notice.addEventListener('click',function(event){
+  if(!event.target.closest('[data-time-off-suggestion]')||!suggestion||!active())return;
+  form.elements.namedItem('startTime').value=suggestion.start;form.elements.namedItem('endTime').value=suggestion.end;
+  // Suggestions always fit inside one business day, including an original end at next midnight.
+  form.elements.namedItem('endDate').value=val('startDate');schedule();
+ });
+ form.addEventListener('input',schedule);form.addEventListener('change',schedule);
+ form.addEventListener('submit',function(){clearTimeout(timer);version++;clear();});schedule();
+}
 function openCalendarTimeOff(date){
  closeCalendarSheets();var seq=CALENDAR_SHEET_SEQ,scope=checkoutScope(),pane=calendarSheet('calendarTimeOffSheet','休み・不在'),body=pane.querySelector('.calendar-sheet-content');
  function current(){return pane.isConnected&&seq===CALENDAR_SHEET_SEQ&&scope===checkoutScope();}
  if(!CALENDAR_ARTISTS.length){body.innerHTML='<h2>休み・不在</h2><p>担当を選べません。店舗の担当を確認して再読込してください。</p>';return;}
  var own=CALENDAR_SELF&&CALENDAR_SELF.ids||[],selected=CALENDAR_ARTISTS.find(function(a){return own.indexOf(a.id)>=0;});
  var initial=selected?selected.id:document.getElementById('resvNurse').value;
- body.innerHTML='<h2>休み・不在</h2><p>この時間は予約ページで選べなくなります。最長31日。</p><form><label>担当<select name="artist" required><option value="">選んでください</option>'+CALENDAR_ARTISTS.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===initial?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')+'</select></label><label><input type="checkbox" name="allDay" checked> 終日</label><label>開始日<input type="date" name="startDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">開始時刻<input type="time" name="startTime" value="09:00"></label><label>終了日（終日のときはこの日まで）<input type="date" name="endDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">終了時刻<input type="time" name="endTime" value="18:00"></label><label>メモ（任意）<input name="label" maxlength="50" placeholder="例：久留米出張"></label><button type="submit" class="rbtn">休み・不在を保存</button><p role="status" data-time-off-status></p></form>';
+ body.innerHTML='<h2>休み・不在</h2><p>この時間は予約ページで選べなくなります。最長31日。</p><form><label>担当<select name="artist" required><option value="">選んでください</option>'+CALENDAR_ARTISTS.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===initial?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')+'</select></label><label><input type="checkbox" name="allDay" checked> 終日</label><label>開始日<input type="date" name="startDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">開始時刻<input type="time" name="startTime" value="09:00"></label><label>終了日（終日のときはこの日まで）<input type="date" name="endDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">終了時刻<input type="time" name="endTime" value="18:00"></label><label>メモ（任意）<input name="label" maxlength="50" placeholder="例：久留米出張"></label><div role="status" aria-live="polite" data-time-off-impact style="display:none"></div><button type="submit" class="rbtn">休み・不在を保存</button><p role="status" data-time-off-status></p></form>';
  var form=body.querySelector('form'),button=form.querySelector('button[type=submit]'),status=form.querySelector('[data-time-off-status]'),saved=false;
+ calendarTimeOffImpactPreview(form,current);
  form.elements.namedItem('allDay').addEventListener('change',function(){form.querySelectorAll('[data-time-off-clock]').forEach(function(el){el.style.display=form.elements.namedItem('allDay').checked?'none':'block';});});
  form.addEventListener('submit',async function(e){
   e.preventDefault();if(!current()||button.disabled||saved)return;
@@ -3945,12 +4052,19 @@ function openCalendarTimeOff(date){
 }
 
 function treatmentNoteHtml(n){
- var content='<p>'+esc([n.color_code&&('色番号：'+n.color_code),n.shape,n.asymmetry&&('左右差：'+n.asymmetry),n.density&&('濃さ：'+n.density)].filter(Boolean).join(' ／ '))+'</p><div class="calendar-note-body">'+esc(n.body||'')+'</div>';
+ var content='<p>'+esc([n.color_code&&('色：'+n.color_code),n.technique&&('技法：'+n.technique),n.shape&&('形：'+n.shape),n.asymmetry&&('左右差：'+n.asymmetry),n.density&&('濃さ：'+n.density)].filter(Boolean).join(' ／ '))+'</p>'+(n.next_note?'<div class="calendar-note-body">次回やること：'+esc(n.next_note)+'</div>':'')+'<div class="calendar-note-body">'+esc(n.body||'')+'</div>';
  if(n.match_reason==='name')content='<details><summary>⚠ 名前だけ一致（別の方の可能性があります）</summary>'+content+'</details>';
  return '<article class="calendar-note"><b>'+esc(CALENDAR_PURE.calendarJstDate(n.reservation_date||n.start_at||undefined)||'日付不明')+' ／ '+esc(n.artist_name||'担当未設定')+' ／ '+esc(n.menu_name||'')+'</b>'+content+'</article>';
 }
 function calendarNoteChoices(name,label,choices,value){
- return '<fieldset><legend>'+esc(label)+'</legend><div class="calendar-choices">'+[''].concat(choices).map(function(v){return '<label class="calendar-choice"><input type="radio" name="'+esc(name)+'" value="'+esc(v)+'"'+((value||'')===v?' checked':'')+'><span>'+esc(v||'未選択')+'</span></label>';}).join('')+'</div></fieldset>';
+ return '<fieldset><legend>'+esc(label)+'</legend><input type="hidden" name="'+esc(name)+'" value="'+esc(value||'')+'"><div class="calendar-choices">'+choices.map(function(v){return '<button type="button" class="calendar-note-chip" data-note-choice="'+esc(name)+'" data-value="'+esc(v)+'" aria-pressed="'+(value===v?'true':'false')+'">'+esc(v)+'</button>';}).join('')+'</div></fieldset>';
+}
+function calendarPreviousNextHtml(notes,row){
+ var previous=notes.filter(function(n){return n.reservation_id!==row.id&&Date.parse(n.reservation_date||n.start_at)<Date.parse(row.start_at)&&String(n.next_note||'').trim();}).sort(function(a,b){var wa=a.match_reason==='name'?1:0,wb=b.match_reason==='name'?1:0;if(wa!==wb)return wa-wb;return Date.parse(b.reservation_date||b.start_at)-Date.parse(a.reservation_date||a.start_at);})[0];// LINE・電話で一致した本人のメモを、名前だけ一致より優先する
+ if(!previous)return '';
+ var date=CALENDAR_PURE.calendarJstDate(previous.reservation_date||previous.start_at),parts=date.split('-');
+ var content='<div class="calendar-note-body">📌 前回（'+esc(Number(parts[1])+'/'+Number(parts[2]))+'）の次回やること：'+esc(previous.next_note)+'</div>';
+ return previous.match_reason==='name'?'<details><summary>⚠ 名前だけ一致（別の方の可能性があります）</summary>'+content+'</details>':content;
 }
 async function openCalendarReservation(id){
  var row=CALENDAR_ROWS.find(function(r){return r.id===id;});if(!row)return;
@@ -3958,7 +4072,7 @@ async function openCalendarReservation(id){
  function current(){return pane.isConnected&&seq===CALENDAR_SHEET_SEQ&&scope===checkoutScope();}
  body.innerHTML='<h2>'+esc(CALENDAR_PURE.calendarTitle(row))+'</h2><p class="calendar-summary">'+esc(calendarDateLabel(CALENDAR_PURE.calendarJstDate(row.start_at)))+' '+esc(CALENDAR_PURE.calendarJstTime(row.start_at))+' → '+esc(CALENDAR_PURE.calendarJstDate(row.end_at)!==CALENDAR_PURE.calendarJstDate(row.start_at)?CALENDAR_PURE.calendarJstDate(row.end_at)+' ':'')+esc(CALENDAR_PURE.calendarJstTime(row.end_at))+' ／ 担当：'+esc(row.artists&&row.artists.name||'未設定')+'<br>メニュー：'+esc(row.menus&&row.menus.name||'—')+' ／ 金額：'+esc(row.price==null?'未設定':'¥'+Number(row.price).toLocaleString('ja-JP'))+' ／ 状態：'+esc(row.outcome==='visited'?'来店済み':row.outcome==='no_show'?'無断キャンセル':row.status==='questionnaire_done'?'問診済み':row.status==='pending_questionnaire'||row.status==='questionnaire_reminded'?'問診待ち':'予約済み')+'</p>'+calendarMarks(row)+'<div class="calendar-actions">'+
   '<button type="button" class="rbtn" data-calendar-action="visited">来店済み</button>'+checkoutCard(row).replace('data-act="checkout"','data-calendar-action="checkout"')+
-  (!row.outcome?'<button type="button" class="rbtn" data-calendar-action="reschedule">日時変更</button>':'')+'<button type="button" class="rbtn" data-calendar-action="cancel">キャンセル</button><button type="button" class="rbtn" data-calendar-action="chart">カルテ</button></div><div data-calendar-caution></div><h3>前回のメモ</h3><div data-calendar-history>読み込み中…</div><h3>施術メモ</h3><div data-calendar-editor>読み込み中…</div>';
+  (!row.outcome?'<button type="button" class="rbtn" data-calendar-action="reschedule">日時変更</button>':'')+'<button type="button" class="rbtn" data-calendar-action="cancel">キャンセル</button><button type="button" class="rbtn" data-calendar-action="chart">カルテ</button></div><div data-calendar-next style="display:none"></div><div data-calendar-caution></div><h3>前回のメモ</h3><div data-calendar-history>読み込み中…</div><h3>施術メモ</h3><div data-calendar-editor>読み込み中…</div>';
  pane.addEventListener('click',function(e){var b=e.target.closest('[data-calendar-action]');if(!b||!current())return;var act=b.getAttribute('data-calendar-action');closeCalendarSheets();if(act==='chart')calendarOpenChart(id);else handleBoardAction(act,id);});
  var caution=body.querySelector('[data-calendar-caution]');
  // Reuse the existing chart RPC; never render another store's customer record.
@@ -3968,16 +4082,31 @@ async function openCalendarReservation(id){
  var notesJob=sbRpc('get_treatment_notes',{p_resv:id}).then(function(notes){
   if(!current())return;notes=notes||[];var own=notes.find(function(n){return n.reservation_id===id;})||{};
   body.querySelector('[data-calendar-history]').innerHTML=notes.filter(function(n){return n.reservation_id!==id;}).slice(0,3).map(treatmentNoteHtml).join('')||'<p>前回のメモはありません</p>';
-  var editor=body.querySelector('[data-calendar-editor]');editor.innerHTML='<form><label>自由メモ<textarea name="body" maxlength="2000" rows="3">'+esc(own.body||'')+'</textarea></label><label>色番号<input name="color" maxlength="50" value="'+esc(own.color_code||'')+'"></label>'+calendarNoteChoices('shape','形',['平行','アーチ','ストレート','ふんわり','その他'],own.shape)+calendarNoteChoices('asym','左右差',['あり','整えた','なし'],own.asymmetry)+calendarNoteChoices('density','濃さ',['薄め','ふつう','濃いめ'],own.density)+'<button type="submit" class="rbtn">施術メモを保存</button><p role="status" data-note-status></p></form>';
-  var form=editor.querySelector('form');form.addEventListener('submit',async function(e){
-   e.preventDefault();if(!current())return;var button=form.querySelector('button'),status=form.querySelector('[data-note-status]');if(button.disabled)return;
-   var value=function(name){return form.elements.namedItem(name).value;};button.disabled=true;status.textContent='保存中…';
-   try{await sbRpc('save_treatment_note',{p_resv:id,p_body:value('body'),p_color:value('color')||null,p_shape:value('shape')||null,p_asym:value('asym')||null,p_density:value('density')||null});
+  var next=body.querySelector('[data-calendar-next]');next.innerHTML=calendarPreviousNextHtml(notes,row);next.style.display=next.innerHTML?'block':'none';
+  var legacy=[own.shape&&['ストレート','ふんわり','その他'].includes(own.shape)&&('以前の形：'+own.shape),own.asymmetry&&('左右差：'+own.asymmetry),own.density&&('濃さ：'+own.density)].filter(Boolean).join(' ／ ');
+  var editor=body.querySelector('[data-calendar-editor]');editor.innerHTML=(legacy?'<p>'+esc(legacy)+'</p>':'')+'<form><label>色<input name="color" maxlength="100" placeholder="例：ブラウン1／ちょこ＋かーき" value="'+esc(own.color_code||'')+'"></label><div class="calendar-choices">'+['ブラウン1','ブラウン2','ブラウン3','Gブラウン','ダーク','ちょこ','かーき','ゴールド'].map(function(color){return '<button type="button" class="calendar-note-chip" data-note-color="'+esc(color)+'">'+esc(color)+'</button>';}).join('')+'</div>'+calendarNoteChoices('technique','技法',['毛並み','パウダー','ミックス'],own.technique)+calendarNoteChoices('shape','形',['平行','アーチ','平行アーチ','自眉に沿って'],own.shape)+'<label>次回やること<textarea name="next" maxlength="500" rows="2" placeholder="例：左の眉山を確認／もう少し明るく">'+esc(own.next_note||'')+'</textarea></label><label>自由メモ<textarea name="body" maxlength="2000" rows="3" placeholder="肌・痛み・紹介・会話のことなど何でも">'+esc(own.body||'')+'</textarea></label><button type="submit" class="rbtn">施術メモを保存</button><p role="status" data-note-status></p></form>';
+  var form=editor.querySelector('form');
+  form.addEventListener('click',function(e){
+   var chip=e.target.closest('[data-note-color],[data-note-choice]');if(!chip||chip.disabled)return;
+   if(chip.hasAttribute('data-note-color')){
+    var color=form.elements.namedItem('color'),value=color.value?color.value+'＋'+chip.getAttribute('data-note-color'):chip.getAttribute('data-note-color');
+    if(Array.from(value).length>100){form.querySelector('[data-note-status]').textContent='色は100文字以内で入力してください。';return;}color.value=value;
+   }else{
+    var name=chip.getAttribute('data-note-choice'),input=form.elements.namedItem(name),value=chip.getAttribute('data-value');input.value=input.value===value?'':value;
+    form.querySelectorAll('[data-note-choice]').forEach(function(b){if(b.getAttribute('data-note-choice')===name)b.setAttribute('aria-pressed',String(b.getAttribute('data-value')===input.value));});
+   }
+  });
+  form.addEventListener('submit',async function(e){
+   e.preventDefault();if(!current())return;var button=form.querySelector('button[type="submit"]'),status=form.querySelector('[data-note-status]');if(button.disabled)return;
+   var value=function(name){return form.elements.namedItem(name).value;};
+   var payload={p_resv:id,p_body:value('body'),p_color:value('color')||null,p_shape:value('shape')||null,p_asym:own.asymmetry||null,p_density:own.density||null,p_technique:value('technique')||null,p_next:value('next')||null};
+   form.querySelectorAll('input,textarea,button').forEach(function(el){el.disabled=true;});status.textContent='保存中…';
+   try{await sbRpc('save_treatment_note',payload);
     if(!current())return;var saved=await sbRpc('get_treatment_notes',{p_resv:id});if(!current())return;
     var confirmed=(saved||[]).find(function(n){return n.reservation_id===id;});
-    if(!confirmed||confirmed.body!==value('body')||(confirmed.color_code||'')!==value('color')||(confirmed.shape||'')!==value('shape')||(confirmed.asymmetry||'')!==value('asym')||(confirmed.density||'')!==value('density'))throw Error('保存結果を確認できませんでした。開き直して確認してください。');
+    if(!confirmed||confirmed.body!==payload.p_body||(confirmed.color_code||null)!==payload.p_color||(confirmed.shape||null)!==payload.p_shape||(confirmed.asymmetry||null)!==payload.p_asym||(confirmed.density||null)!==payload.p_density||(confirmed.technique||null)!==payload.p_technique||(confirmed.next_note||null)!==payload.p_next)throw Error('保存結果を確認できませんでした。開き直して確認してください。');
     row._hasNote=true;status.textContent='保存内容を確認しました。';
-   }catch(err){if(current())status.textContent='保存を完了できませんでした：'+String(err&&err.message||err);}finally{if(current())button.disabled=false;}
+   }catch(err){if(current())status.textContent='保存を完了できませんでした：'+String(err&&err.message||err);}finally{if(current())form.querySelectorAll('input,textarea,button').forEach(function(el){el.disabled=false;});}
   });
  }).catch(function(){if(current()){body.querySelector('[data-calendar-history]').textContent='メモを取得できませんでした。開き直してください。';body.querySelector('[data-calendar-editor]').textContent='取得できるまで保存できません。';}});
  await Promise.all([customerJob,notesJob]);
