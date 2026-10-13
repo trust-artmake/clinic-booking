@@ -4081,7 +4081,9 @@ function loadBoard(){
     return page(0,[]).then(function(rows){
       if(seq!==BOARD_LOAD_SEQ||scope!==checkoutScope())return;
       rows = CALENDAR_PURE.calendarRows(rows,dates[0],dates[1],nurseId);
-      if(CALENDAR_VIEW!=='list'){return Promise.all([checkoutHydrate(rows),calendarNoteFlags(rows,dates),calendarFetchTimeOff(storeId,dates)]).then(function(parts){if(seq===BOARD_LOAD_SEQ&&scope===checkoutScope()){CALENDAR_TIME_OFF=parts[2];renderArtistCalendar(rows);}});}
+      if(CALENDAR_VIEW!=='list'){var offFailed=false;return Promise.all([checkoutHydrate(rows),calendarNoteFlags(rows,dates),calendarFetchTimeOff(storeId,dates).catch(function(){offFailed=true;return [];})]).then(function(parts){if(seq===BOARD_LOAD_SEQ&&scope===checkoutScope()){CALENDAR_TIME_OFF=parts[2];renderArtistCalendar(rows);
+        // 休み・不在が読めなくても予約のカレンダーは出す（2026-10-13 全体管理者で一面エラーになった）
+        var notice=document.getElementById('calendarNotice');if(offFailed&&notice){notice.textContent='⚠ 休み・不在を読み込めませんでした（予約は表示しています）。再読込してください。';notice.style.display='block';}}});}
       // 新規/リピート判定（line_uid のある予約のみ RPC で来店回数を取る。電話予約は新規扱い）
       var jobs = rows.map(function(row){
         if (row.source === 'manual' || !row.line_uid) { row._visitNo = 1; return Promise.resolve(); }
