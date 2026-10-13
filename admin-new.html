@@ -27,6 +27,11 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 </script>
 <title>管理ダッシュボード（Supabase版）</title>
 <style>
+.nav-link{max-width:100%;white-space:normal;overflow-wrap:anywhere;margin:4px 4px 8px 0}
+.nav-history-row{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:4px 0;overflow-wrap:anywhere;white-space:normal}
+.nav-history-row:hover{background:#f0fdfa}
+.chat-nav-links{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.chat-nav-links>*{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 
   :root{ --g:#0b5c55; --line:#e6eceb; --sub:#889; }
   *{box-sizing:border-box}
@@ -1411,7 +1416,7 @@ function sbUpsert(table, rows){
 }
 
 // ===== ビュー切替（全タブ共通）=====
-function hideAllViews(){ ["homeView","chatView","resvView","custView","dashView","settlementView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
+function hideAllViews(){ ["consoleView","homeView","chatView","resvView","custView","dashView","settlementView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
 // 小タブ(#subnav)の中で「いま表示中」をハイライト。el が無い（プログラム呼び出し）ときは現状維持。
 function setActiveNav(el){ if(!el) return; var bs=document.querySelectorAll("#subnav button"); for(var i=0;i<bs.length;i++) bs[i].classList.toggle("active", bs[i]===el); }
 
@@ -1480,10 +1485,10 @@ function showGroup(key, el){
   tabs.forEach(function(t){
     var sb = document.createElement('button');
     sb.textContent = t.label; sb.setAttribute('data-fn', t.fn);
-    sb.onclick = function(){ if(typeof window[t.fn] === 'function') window[t.fn](sb); };
+    sb.onclick = function(){ navVisit(function(){ NAV_CHART_FROM=''; NAV_RETURN_TO=''; closeCalendarSheets(); navRawCloseManualBooking(); if(typeof window[t.fn] === 'function') window[t.fn](sb); }); };
     sub.appendChild(sb);
   });
-  sub.style.display = tabs.length ? '' : 'none';
+  sub.style.display = tabs.length ? 'flex' : 'none';
   var first = sub.querySelector('button'); if(first) first.click();   // 先頭タブを自動表示
 }
 
@@ -1511,7 +1516,7 @@ function showHome(el){
   if(el && typeof setActiveNav==='function') setActiveNav(el);
   var v=document.getElementById('homeView'); if(v) v.style.display='';
   loadHome();
-  window.scrollTo({top:0,behavior:'smooth'});
+  if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 
 /* CS3A CHAT INBOX SCRIPT START */
@@ -1736,7 +1741,8 @@ function chatRenderList(){
 function chatLoadList(reset){
   if(!CHAT_STATE || CHAT_STATE.tenantId!==TENANT_ID) chatResetState();
   if(CHAT_STATE.loadingList) return;
-  var requestTenant=TENANT_ID;
+  var requestTenant=TENANT_ID,state=CHAT_STATE,requestScope=checkoutScope();
+  function current(){return state===CHAT_STATE&&requestTenant===TENANT_ID&&requestScope===checkoutScope();}
   var params={ limit:50 };
   var store=document.getElementById('chatStoreFilter'); if(store && store.value) params.store_id=store.value;
   if(!reset && CHAT_STATE.listCursor){
@@ -1755,7 +1761,7 @@ function chatLoadList(reset){
   CHAT_STATE.loadingList=true; chatSetText('chatListMsg','読み込み中…');
   var more=document.getElementById('chatMore'); if(more) more.disabled=true;
   chatCall('list_conversations', params).then(function(data){
-    if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.tenantId!==requestTenant) return;
+    if(!current())return;
     var rows=Array.isArray(data) ? data : [];
     var seen=Object.create(null);
     CHAT_STATE.items.forEach(function(row){ if(row && row.customer_id) seen[row.customer_id]=true; });
@@ -1766,11 +1772,11 @@ function chatLoadList(reset){
     CHAT_STATE.listHasMore=rows.length===50 && !!CHAT_STATE.listCursor;
     chatRenderList();
   }).catch(function(error){
-    if(requestTenant!==TENANT_ID) return;
+    if(!current())return;
     chatSetText('chatListMsg',chatReason(error && error.code));
     if(!CHAT_STATE.items.length){ var host=document.getElementById('chatList'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','受信箱を表示できませんでした。')); } }
   }).finally(function(){
-    if(requestTenant!==TENANT_ID || !CHAT_STATE) return;
+    if(!current())return;
     CHAT_STATE.loadingList=false; var button=document.getElementById('chatMore'); if(button) button.disabled=false;
   });
 }
@@ -1785,6 +1791,8 @@ function chatRenderDetail(){
     ? ' ・ '+(detail.assigned_staff_name ? detail.assigned_staff_name+'さん対応中' : '担当者対応中') : '';
   var meta=chatElement('div','chat-detail-meta',chatStoreName(detail.store_id)+' ・ '+chatStatusLabel(detail.status)+assigned);
   host.appendChild(meta);
+  chatRenderLinks(host,detail);
+  navReturnButton();
   chatRenderWorkflow(host, detail);
   if(!CHAT_STATE.messages.length){ host.appendChild(chatElement('div','chat-empty','メッセージはありません。')); }
   CHAT_STATE.messages.forEach(function(message){
@@ -2114,13 +2122,15 @@ function chatCompleteHandling(){
 }
 
 function chatLoadDetail(customerId, reset){
-  if(!customerId || !CHAT_STATE || CHAT_STATE.loadingDetail) return;
-  var requestTenant=TENANT_ID;
+  if(!customerId || !CHAT_STATE || (!reset&&CHAT_STATE.loadingDetail)) return;
+  var requestTenant=TENANT_ID,state=CHAT_STATE,requestScope=checkoutScope(),requestNav=NAV_SEQ,requestSeq=(state.detailSeq||0)+1;state.detailSeq=requestSeq;
+  function current(){return state===CHAT_STATE&&requestSeq===state.detailSeq&&requestTenant===TENANT_ID&&requestScope===checkoutScope()&&requestNav===NAV_SEQ&&CURRENT_GROUP==='chat';}
   if(reset){
     var changingCustomer=!!CHAT_STATE.selectedCustomerId && CHAT_STATE.selectedCustomerId!==customerId;
     if(changingCustomer){
       CHAT_STATE.sendBusy=false; CHAT_STATE.sendMessage=''; CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null;
     }
+    CHAT_STATE.links=null;CHAT_STATE.linksSeq=(CHAT_STATE.linksSeq||0)+1;
     CHAT_STATE.selectedCustomerId=customerId; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
     CHAT_STATE.detailCursor=null; CHAT_STATE.detailHasMore=false;
     CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false; chatUpdateModeNote(null);
@@ -2134,8 +2144,8 @@ function chatLoadDetail(customerId, reset){
     params.before_id=CHAT_STATE.detailCursor.before_id;
   }
   CHAT_STATE.loadingDetail=true; var older=document.getElementById('chatOlder'); if(older) older.disabled=true;
-  chatCall('get_conversation', params).then(function(data){
-    if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+  return chatCall('get_conversation', params).then(function(data){
+    if(!current())return;
     if(!data || typeof data!=='object' || !Array.isArray(data.messages)) throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
     var incoming=data.messages;
     var combined=reset ? incoming : incoming.concat(CHAT_STATE.messages);
@@ -2150,10 +2160,11 @@ function chatLoadDetail(customerId, reset){
       ? { before_at:first.created_at, before_id:first.id } : null;
     CHAT_STATE.detailHasMore=incoming.length===100 && !!CHAT_STATE.detailCursor;
     chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+    if(reset)chatLoadLinks(customerId);
     if(reset) chatScrollToLatest();
     if(reset) chatMaybeMarkRead(CHAT_STATE.detail);
   }).catch(function(error){
-    if(requestTenant!==TENANT_ID || !CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    if(!current())return;
     var reason=chatReason(error && error.code);
     if(reset){
       chatSetText('chatDetailMsg',reason);
@@ -2161,8 +2172,9 @@ function chatLoadDetail(customerId, reset){
     } else if(CHAT_STATE.detail) chatRenderDetail();
     if(!reset) chatSetText('chatDetailMsg','過去の会話を読み込めませんでした。 '+reason);
   }).finally(function(){
-    if(requestTenant!==TENANT_ID || !CHAT_STATE) return;
+    if(!current())return;
     CHAT_STATE.loadingDetail=false; var button=document.getElementById('chatOlder'); if(button) button.disabled=false;
+    navReturnButton();
   });
 }
 
@@ -2187,10 +2199,14 @@ function chatRefresh(){ chatLoadList(true); }
 function showChatInbox(el){
   if(typeof hideAllViews==='function') hideAllViews();
   if(el && typeof setActiveNav==='function') setActiveNav(el);
-  var view=document.getElementById('chatView'); if(view) view.style.display='';
-  if(!CHAT_STATE || CHAT_STATE.tenantId!==TENANT_ID) chatResetState();
-  chatPopulateStoreFilter().catch(function(){ return null; }).then(function(){ chatLoadList(true); });
-  window.scrollTo({top:0,behavior:'smooth'});
+  document.getElementById('chatView').style.display='block';
+  chatResetState();
+  var state=CHAT_STATE,scope=checkoutScope();
+  chatPopulateStoreFilter().catch(function(){return null;}).then(function(){
+    if(state!==CHAT_STATE||scope!==checkoutScope()||CURRENT_GROUP!=='chat')return;
+    chatLoadList(!state.selectedCustomerId);
+  });
+  if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 
 (function bindChatInbox(){
@@ -2226,7 +2242,7 @@ function loadHome(){
   var nxt=document.createElement('div'); nxt.className='home-next'; nxt.id='home-next'; nxt.textContent='次の予約：読み込み中…'; card.appendChild(nxt);
   var acts=document.createElement('div'); acts.className='home-actions';
   var b1=document.createElement('button'); b1.className='home-btn'; b1.textContent='予約を見る'; b1.onclick=function(){ if(typeof gotoSubtab==='function') gotoSubtab('resv','showReservations'); };
-  var b2=document.createElement('button'); b2.className='home-btn ghost'; b2.textContent='要対応を見る'; b2.onclick=function(){ if(typeof gotoSubtab==='function') gotoSubtab('resv','showCustomers'); };
+  var b2=document.createElement('button'); b2.className='home-btn ghost'; b2.textContent='要対応を見る'; b2.onclick=function(){ homeOpenAttention(); };
   acts.appendChild(b1); acts.appendChild(b2); card.appendChild(acts);
   body.appendChild(card);
 
@@ -2332,16 +2348,18 @@ function loadHomeClinicNotice(){
 
 // 今日の予約件数＋次の予約（reservations を当日範囲で取得＝loadBoard と同じ作り）
 function loadHomeReservations(){
+  var requestScope=checkoutScope(),requestNav=NAV_SEQ;
   if(typeof ensureStoreMap!=='function' || typeof sbGet!=='function'){ return; }
   ensureStoreMap().then(function(){
     var storeId=(typeof storeIdForSlug==='function' && typeof currentStoreSlug==='function') ? storeIdForSlug(currentStoreSlug()) : null;
     var r=rangeFor('today');
     var from=encodeURIComponent(ymd(r[0])+'T00:00:00+09:00');
     var to  =encodeURIComponent(ymd(r[1])+'T00:00:00+09:00');
-    var path='reservations?select=start_at,customer_name,artists(name)&status=neq.cancelled&start_at=gte.'+from+'&start_at=lt.'+to+'&order=start_at';
+    var path='reservations?select=id,start_at,customer_name,artists(name)&status=neq.cancelled&start_at=gte.'+from+'&start_at=lt.'+to+'&order=start_at';
     if(storeId) path+='&store_id=eq.'+storeId;
     return sbGet(path);
   }).then(function(rows){
+    if(requestScope!==checkoutScope()||requestNav!==NAV_SEQ||CURRENT_GROUP!=='home')return;
     rows=Array.isArray(rows)?rows:[];
     var te=document.getElementById('home-today'); if(te) te.textContent=rows.length;
     var ne=document.getElementById('home-next'); if(!ne) return;
@@ -2354,7 +2372,8 @@ function loadHomeReservations(){
     var b=document.createElement('b'); b.textContent=hhmm(next.start_at);
     ne.appendChild(document.createTextNode('次の予約：')); ne.appendChild(b);
     ne.appendChild(document.createTextNode(' '+nm+' 様'+who));
-  }).catch(function(){ var te=document.getElementById('home-today'); if(te) te.textContent='—'; var ne=document.getElementById('home-next'); if(ne) ne.textContent='次の予約：取得できませんでした'; });
+    if(next.id){var link=document.createElement('button');link.type='button';link.className='nav-history-row';link.dataset.openReservation=next.id;while(ne.firstChild)link.appendChild(ne.firstChild);ne.appendChild(link);}
+  }).catch(function(){ if(requestScope!==checkoutScope()||requestNav!==NAV_SEQ||CURRENT_GROUP!=='home')return;var te=document.getElementById('home-today'); if(te) te.textContent='—'; var ne=document.getElementById('home-next'); if(ne) ne.textContent='次の予約：取得できませんでした'; });
 }
 
 // 要対応の人数（顧客カルテの「要対応」バッジと同条件＝humanNeedsAttention）。
@@ -2723,7 +2742,7 @@ function setupJumpTo(fnName){
     if (p && p.style.display !== "none" && typeof p.scrollIntoView === "function"){
       p.scrollIntoView({ behavior:"smooth", block:"start" });
     } else if (typeof window !== "undefined"){
-      window.scrollTo({ top: document.body.scrollHeight, behavior:"smooth" });
+      if(!NAV_QUIET)window.scrollTo({ top: document.body.scrollHeight, behavior:"smooth" });
     }
     return;
   }
@@ -3289,11 +3308,14 @@ function enterDashboard(tid){
 function openTenant(tid){ enterDashboard(tid); }
 /* コンソール（親）。扱えるテナントを setup 状況つきで一覧表示。 */
 function showConsole(){
+  if(!navMayLeave('move'))return;
+  navReset();NAV_CONSOLE=true;
   var nv=document.getElementById('nav'); if(nv) nv.style.display='none';
+  var sub=document.getElementById('subnav'); if(sub) sub.style.display='none';
   var th=document.getElementById('tenantHeader'); if(th) th.style.display='none';
   if(typeof hideAllViews==='function') hideAllViews();
   var cv=document.getElementById('consoleView'); if(!cv) return;
-  cv.style.display='';
+  cv.style.display='block';
   var list=document.getElementById('consoleList'); if(list) list.innerHTML='<div class="console-empty">読み込み中…</div>';
   var pb=document.getElementById('provOpenBtn'); if(pb) pb.onclick=showDuplicateDialog; // 複製ボタン（onclick代入＝重複登録なし）
   sbRpc('list_tenant_setup_status', {})
@@ -3789,7 +3811,7 @@ var CALENDAR_ANCHOR = '';
 var CALENDAR_ROWS = [];
 var CALENDAR_TIME_OFF = [];
 var CALENDAR_ARTISTS = [];
-var CALENDAR_SELF = null;
+var CALENDAR_SELF = null, CALENDAR_LINK_FILTER_SEQ = -1;
 function resetArtistCalendar(){
   closeCalendarSheets();CALENDAR_SELF=null;CALENDAR_ROWS=[];CALENDAR_TIME_OFF=[];CALENDAR_ARTISTS=[];CALENDAR_VIEW='month';CALENDAR_ANCHOR='';BOARD_LOAD_SEQ++;
   var sel=document.getElementById('resvNurse');if(sel)sel.innerHTML='<option value="">全アーティスト</option>';
@@ -3891,7 +3913,7 @@ document.getElementById('resvView').addEventListener('click',function(e){
   if(b.hasAttribute('data-calendar-view')){setCalendarView(b.getAttribute('data-calendar-view'));return;}
   if(b.hasAttribute('data-calendar-all')){if(CALENDAR_SELF)CALENDAR_SELF.touched=true;document.getElementById('resvNurse').value='';loadBoard();return;}
   if(b.hasAttribute('data-calendar-move')){
-    var n=b.getAttribute('data-calendar-move');CALENDAR_ANCHOR=n==='today'?CALENDAR_PURE.calendarJstDate(new Date()):CALENDAR_PURE.calendarMove(CALENDAR_VIEW,CALENDAR_ANCHOR,Number(n));loadBoard();return;
+    navVisit(function(){var n=b.getAttribute('data-calendar-move');CALENDAR_ANCHOR=n==='today'?CALENDAR_PURE.calendarJstDate(new Date()):CALENDAR_PURE.calendarMove(CALENDAR_VIEW,CALENDAR_ANCHOR,Number(n));loadBoard();});return;
   }
   if(b.hasAttribute('data-time-off')){deleteCalendarTimeOff(b.getAttribute('data-time-off'));return;}
   if(b.hasAttribute('data-calendar-day')){openCalendarDay(b.getAttribute('data-calendar-day'));return;}
@@ -3908,9 +3930,9 @@ function calendarSheet(id,title){
  var pane=document.createElement('section');pane.id=id;pane.className='calendar-sheet';pane.setAttribute('role','dialog');pane.setAttribute('aria-modal','true');pane.setAttribute('aria-label',title);pane.tabIndex=-1;
  pane.innerHTML='<button type="button" class="rbtn calendar-sheet-close" data-calendar-close aria-label="閉じる">閉じる ×</button><div class="calendar-sheet-content"></div>';
  overlay.appendChild(pane);document.body.appendChild(overlay);pane.focus();
- overlay.addEventListener('click',function(e){if(e.target===overlay||e.target.closest('[data-calendar-close]'))closeCalendarSheets();});
+ overlay.addEventListener('click',function(e){if(e.target===overlay||e.target.closest('[data-calendar-close]'))navClose('sheet');});
  pane.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){closeCalendarSheets();return;}
+  if(e.key==='Escape'){navClose('sheet');return;}
   if(e.key==='Tab'){var els=Array.from(pane.querySelectorAll('button,input,textarea,select,[tabindex="0"]')).filter(function(x){return !x.disabled;});var first=els[0],last=els[els.length-1];if(e.shiftKey&&(document.activeElement===first||document.activeElement===pane)){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}
  });return pane;
 }
@@ -3922,7 +3944,7 @@ function openCalendarDay(date){
   if(b.hasAttribute('data-calendar-reservation'))openCalendarReservation(b.getAttribute('data-calendar-reservation'));
   if(b.hasAttribute('data-time-off-add'))openCalendarTimeOff(date);
   if(b.hasAttribute('data-time-off'))deleteCalendarTimeOff(b.getAttribute('data-time-off'),date);
-  if(b.hasAttribute('data-calendar-phone')){closeCalendarSheets();closeManualBooking();openManualBooking();document.getElementById('mbDatetime').value=date+'T09:00';document.getElementById('mbForm').scrollIntoView&&document.getElementById('mbForm').scrollIntoView({block:'start'});}
+  if(b.hasAttribute('data-calendar-phone'))navVisit(function(){closeCalendarSheets();navRawCloseManualBooking();openManualBooking();document.getElementById('mbDatetime').value=date+'T09:00';navMarkClean(document.getElementById('mbForm'));document.getElementById('mbForm').scrollIntoView&&document.getElementById('mbForm').scrollIntoView({block:'start'});});
  });
 }
 // Staff booking remains permitted outside shifts/time off. Warn using the same duration as its RPC.
@@ -4038,7 +4060,7 @@ function openCalendarTimeOff(date){
   var payload={p_artist:val('artist'),p_start:start,p_end:end,p_all_day:allDay,p_label:val('label').trim()||null},warning='';
   form.querySelectorAll('input,select').forEach(function(el){el.disabled=true;});
   button.disabled=true;status.textContent='保存中…';
-  try{var result=await sbRpc('add_time_off',payload);saved=true;if(!current())return;
+  try{var result=await sbRpc('add_time_off',payload);saved=true;if(!current())return;navMarkClean(form);
    warning=result.overlap_count>0?' この時間に予約が'+result.overlap_count+'件あります（'+(result.overlaps||[]).map(function(r){return CALENDAR_PURE.calendarJstDate(r.start_at)+' '+CALENDAR_PURE.calendarJstTime(r.start_at)+' 名前なし';}).join('、')+'）。予約はそのまま残ります。':'';
    var range=CALENDAR_PURE.calendarRange(CALENDAR_VIEW,CALENDAR_ANCHOR),store=CALENDAR_ARTISTS.find(function(a){return a.id===payload.p_artist;});
    var checkRange=[CALENDAR_PURE.calendarJstDate(start),CALENDAR_PURE.calendarAddDays(CALENDAR_PURE.calendarJstDate(new Date(Date.parse(end)-1)),1)];
@@ -4073,7 +4095,7 @@ async function openCalendarReservation(id){
  body.innerHTML='<h2>'+esc(CALENDAR_PURE.calendarTitle(row))+'</h2><p class="calendar-summary">'+esc(calendarDateLabel(CALENDAR_PURE.calendarJstDate(row.start_at)))+' '+esc(CALENDAR_PURE.calendarJstTime(row.start_at))+' → '+esc(CALENDAR_PURE.calendarJstDate(row.end_at)!==CALENDAR_PURE.calendarJstDate(row.start_at)?CALENDAR_PURE.calendarJstDate(row.end_at)+' ':'')+esc(CALENDAR_PURE.calendarJstTime(row.end_at))+' ／ 担当：'+esc(row.artists&&row.artists.name||'未設定')+'<br>メニュー：'+esc(row.menus&&row.menus.name||'—')+' ／ 金額：'+esc(row.price==null?'未設定':'¥'+Number(row.price).toLocaleString('ja-JP'))+' ／ 状態：'+esc(row.outcome==='visited'?'来店済み':row.outcome==='no_show'?'無断キャンセル':row.status==='questionnaire_done'?'問診済み':row.status==='pending_questionnaire'||row.status==='questionnaire_reminded'?'問診待ち':'予約済み')+'</p>'+calendarMarks(row)+'<div class="calendar-actions">'+
   '<button type="button" class="rbtn" data-calendar-action="visited">来店済み</button>'+checkoutCard(row).replace('data-act="checkout"','data-calendar-action="checkout"')+
   (!row.outcome?'<button type="button" class="rbtn" data-calendar-action="reschedule">日時変更</button>':'')+'<button type="button" class="rbtn" data-calendar-action="cancel">キャンセル</button><button type="button" class="rbtn" data-calendar-action="chart">カルテ</button></div><div data-calendar-next style="display:none"></div><div data-calendar-caution></div><h3>前回のメモ</h3><div data-calendar-history>読み込み中…</div><h3>施術メモ</h3><div data-calendar-editor>読み込み中…</div>';
- pane.addEventListener('click',function(e){var b=e.target.closest('[data-calendar-action]');if(!b||!current())return;var act=b.getAttribute('data-calendar-action');closeCalendarSheets();if(act==='chart')calendarOpenChart(id);else handleBoardAction(act,id);});
+ pane.addEventListener('click',function(e){var b=e.target.closest('[data-calendar-action]');if(!b||!current())return;var act=b.getAttribute('data-calendar-action');if(!navMayLeave('move'))return;handleBoardAction(act,id,true);});
  var caution=body.querySelector('[data-calendar-caution]');
  // Reuse the existing chart RPC; never render another store's customer record.
  var customerJob=row.line_uid?sbRpc('get_customer',{p_line_uid:row.line_uid,p_tenant:TENANT_ID}).then(function(data){
@@ -4085,7 +4107,7 @@ async function openCalendarReservation(id){
   var next=body.querySelector('[data-calendar-next]');next.innerHTML=calendarPreviousNextHtml(notes,row);next.style.display=next.innerHTML?'block':'none';
   var legacy=[own.shape&&['ストレート','ふんわり','その他'].includes(own.shape)&&('以前の形：'+own.shape),own.asymmetry&&('左右差：'+own.asymmetry),own.density&&('濃さ：'+own.density)].filter(Boolean).join(' ／ ');
   var editor=body.querySelector('[data-calendar-editor]');editor.innerHTML=(legacy?'<p>'+esc(legacy)+'</p>':'')+'<form><label>色<input name="color" maxlength="100" placeholder="例：ブラウン1／ちょこ＋かーき" value="'+esc(own.color_code||'')+'"></label><div class="calendar-choices">'+['ブラウン1','ブラウン2','ブラウン3','Gブラウン','ダーク','ちょこ','かーき','ゴールド'].map(function(color){return '<button type="button" class="calendar-note-chip" data-note-color="'+esc(color)+'">'+esc(color)+'</button>';}).join('')+'</div>'+calendarNoteChoices('technique','技法',['毛並み','パウダー','ミックス'],own.technique)+calendarNoteChoices('shape','形',['平行','アーチ','平行アーチ','自眉に沿って'],own.shape)+'<label>次回やること<textarea name="next" maxlength="500" rows="2" placeholder="例：左の眉山を確認／もう少し明るく">'+esc(own.next_note||'')+'</textarea></label><label>自由メモ<textarea name="body" maxlength="2000" rows="3" placeholder="肌・痛み・紹介・会話のことなど何でも">'+esc(own.body||'')+'</textarea></label><button type="submit" class="rbtn">施術メモを保存</button><p role="status" data-note-status></p></form>';
-  var form=editor.querySelector('form');
+  var form=editor.querySelector('form');navMarkClean(form);
   form.addEventListener('click',function(e){
    var chip=e.target.closest('[data-note-color],[data-note-choice]');if(!chip||chip.disabled)return;
    if(chip.hasAttribute('data-note-color')){
@@ -4101,7 +4123,7 @@ async function openCalendarReservation(id){
    var value=function(name){return form.elements.namedItem(name).value;};
    var payload={p_resv:id,p_body:value('body'),p_color:value('color')||null,p_shape:value('shape')||null,p_asym:own.asymmetry||null,p_density:own.density||null,p_technique:value('technique')||null,p_next:value('next')||null};
    form.querySelectorAll('input,textarea,button').forEach(function(el){el.disabled=true;});status.textContent='保存中…';
-   try{await sbRpc('save_treatment_note',payload);
+   try{await sbRpc('save_treatment_note',payload);if(current())navMarkClean(form);
     if(!current())return;var saved=await sbRpc('get_treatment_notes',{p_resv:id});if(!current())return;
     var confirmed=(saved||[]).find(function(n){return n.reservation_id===id;});
     if(!confirmed||confirmed.body!==payload.p_body||(confirmed.color_code||null)!==payload.p_color||(confirmed.shape||null)!==payload.p_shape||(confirmed.asymmetry||null)!==payload.p_asym||(confirmed.density||null)!==payload.p_density||(confirmed.technique||null)!==payload.p_technique||(confirmed.next_note||null)!==payload.p_next)throw Error('保存結果を確認できませんでした。開き直して確認してください。');
@@ -4148,7 +4170,7 @@ function showReservations(el){
   if (el && typeof setActiveNav === 'function') setActiveNav(el);
   document.getElementById('resvView').style.display = 'block';
   loadBoard();
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 function setPeriod(p){
@@ -4326,7 +4348,7 @@ function fillNurseFilterFromServer(){
     sel.innerHTML='<option value="">全アーティスト</option>'+(rows||[]).map(function(n){return '<option value="'+esc(n.id)+'">'+esc(n.name)+'</option>';}).join('');
     sel.value=cur;
     var self=CALENDAR_SELF;
-    if(self&&self.tenant===tenant&&self.ids!==null&&!self.applied&&!self.touched){
+    if(self&&self.tenant===tenant&&self.ids!==null&&!self.applied&&!self.touched&&CALENDAR_LINK_FILTER_SEQ!==NAV_SEQ){
       var mine=(rows||[]).find(function(n){return self.ids.indexOf(n.id)>=0;});
       if(mine)sel.value=mine.id;self.applied=true;
     }
@@ -4750,20 +4772,21 @@ function checkoutError(err){
   return '会計を保存・確認できませんでした。再読込してお試しください。';
 }
 function checkoutRefresh(){
-  loadBoard(); loadHomeCheckout();
+  var board=loadBoard(); loadHomeCheckout();
   var dash=document.getElementById('dashView');
   if(dash&&dash.style.display!=='none') loadDash();
+  return board;
 }
 async function openCheckout(rid, onlyIfEnabled){
-  var scope=checkoutScope();
+  var scope=checkoutScope(),navRequest=NAV_SEQ;
   try {
     await ensureStoreMap();
-    if(scope!==checkoutScope()) return;
+    if(scope!==checkoutScope()||navRequest!==NAV_SEQ) return;
     var fetched=await Promise.all([
       Promise.resolve(CHECKOUT_PURE),checkoutAccess(),
       sbGet('reservations?select=id,tenant_id,store_id,start_at,price,customer_name,status,outcome&id=eq.'+encodeURIComponent(rid))
     ]);
-    if(scope!==checkoutScope()) return;
+    if(scope!==checkoutScope()||navRequest!==NAV_SEQ) return;
     var pure=fetched[0],r=(fetched[2]||[])[0],store=r&&checkoutStore(r.store_id);
     var selectedStore=storeIdForSlug(currentStoreSlug());
     if(r&&selectedStore&&r.store_id!==selectedStore)return;
@@ -4773,7 +4796,7 @@ async function openCheckout(rid, onlyIfEnabled){
     }
     if(r.outcome!=='visited'||r.status==='cancelled') throw new Error('checkout_not_visited');
     var existing=await sbGet('reservation_checkouts?select=*&reservation_id=eq.'+encodeURIComponent(rid));
-    if(scope!==checkoutScope()) return;
+    if(scope!==checkoutScope()||navRequest!==NAV_SEQ) return;
     var saved=(existing||[])[0],defaults=pure.checkoutDefaults(r,saved);
     var old=document.getElementById('checkoutDialog'); if(old) old.remove();
     var dlg=document.createElement('dialog'); dlg.id='checkoutDialog'; dlg.className='checkout-dialog';
@@ -4790,7 +4813,8 @@ async function openCheckout(rid, onlyIfEnabled){
       +'<p class="mb-msg ng" role="status"></p><div class="mb-btns"><button type="button" class="mb-cancel">閉じる</button><button type="submit" class="mb-submit">会計を保存</button></div></form>';
     var form=dlg.querySelector('form'),msg=dlg.querySelector('[role="status"]'),submit=dlg.querySelector('[type="submit"]');
     Object.keys(defaults).forEach(function(k){if(k==='self_acquired')form.elements[k].checked=defaults[k];else form.elements[k].value=defaults[k];});
-    dlg.querySelector('.mb-cancel').onclick=function(){dlg.close();dlg.remove();};
+    dlg.querySelector('.mb-cancel').onclick=function(){navClose('checkout');};
+    dlg.addEventListener('cancel',function(e){e.preventDefault();navClose('checkout');});
     dlg.addEventListener('close',function(){dlg.remove();});
     form.onsubmit=async function(e){
       e.preventDefault(); if(submit.disabled) return;
@@ -4798,20 +4822,29 @@ async function openCheckout(rid, onlyIfEnabled){
       var input={}; Object.keys(defaults).forEach(function(k){input[k]=k==='self_acquired'?form.elements[k].checked:form.elements[k].value;});
       var errors=pure.validateCheckout(input,saved?saved.booked_price:r.price);
       if(errors.length){msg.textContent=errors.join(' ');return;}
-      submit.disabled=true; msg.textContent='保存中…';
+      submit.disabled=true;form._navSaving=true; msg.textContent='保存中…';var submittedSnapshot=navFormValue(form);
       try {
         await sbRpc('save_checkout',{p_resv:rid,p_amount:Number(input.amount),p_reason:input.reason||null,p_note:input.note,p_method:input.method,p_paid_on:input.paid_on,p_self:input.self_acquired});
+        form._navBaseline=submittedSnapshot;
         // 保存の応答だけで完了扱いにせず、DBを読み直す。
         var verified=await sbGet('reservation_checkouts?select=*&reservation_id=eq.'+encodeURIComponent(rid));
         var c=(verified||[])[0];
         if(!c||c.actual_amount!==Number(input.amount)||c.payment_method!==input.method||c.paid_on!==input.paid_on
           ||c.diff_reason!==(input.reason||null)||c.note!==input.note||c.self_acquired!==input.self_acquired) throw new Error('verification_failed');
-        // close イベントは非同期（画面が裏にあると遅れる）ので、ここで確実に取り除く。
-        dlg.close(); dlg.remove();
-        if(scope===checkoutScope()) checkoutRefresh();
+        // 戻る履歴も消費する。保存中に別画面へ移った場合はそちらを閉じない。
+        if(scope!==checkoutScope())return;
+        await checkoutRefresh();
+        if(scope!==checkoutScope())return;
+        if(!dlg.isConnected){
+          if(NAV_CURRENT&&NAV_CURRENT.sheet&&NAV_CURRENT.sheet.id===rid&&!navDirty())await navReplay(NAV_CURRENT);
+          return;
+        }
+        submit.disabled=false;msg.textContent='保存内容を確認しました。';navClose('checkout');
       } catch(err){msg.textContent=checkoutError(err);submit.disabled=false;}
+      finally{form._navSaving=false;}
     };
-    document.body.appendChild(dlg);dlg.showModal();form.elements.amount.focus();
+    document.body.appendChild(dlg);dlg.dataset.navId=rid;navMarkClean(form);dlg.showModal();form.elements.amount.focus();
+    if(!NAV_QUIET)navVisit(function(){});
   } catch(err){if(scope===checkoutScope())window.alert(checkoutError(err));}
 }
 async function loadHomeCheckout(){
@@ -4866,7 +4899,7 @@ async function showSettlement(el){
  hideAllViews();if(el)setActiveNav(el);
  document.getElementById('settlementView').style.display='block';
  await loadSettlementPanel();
- window.scrollTo({top:0,behavior:'smooth'});
+ if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 document.getElementById('resvStore').addEventListener('change',function(){
  var view=document.getElementById('settlementView');
@@ -5117,12 +5150,14 @@ function renderSettlementSettings(host,state){
  };});
 }
 
-function handleBoardAction(act, rid){
+function handleBoardAction(act, rid, fromSheet){
+  function proceed(run){if(fromSheet){navForms().forEach(navMarkClean);return navClose('sheet',run);}return run();}
   if (!rid) return;
-  if (act === 'checkout'){ openCheckout(rid); return; }
-  if (act === 'course'){ openCourseChange(rid); return; }
-  if (act === 'reschedule'){ openReschedule(rid); return; }   /* 確認は専用フォーム内で行う */
-  if (act === 'linkline'){ openLinkLine(rid); return; }       /* 確認は候補を選んだ後に専用フォーム内で行う */
+  if (act === 'checkout'){ return proceed(function(){return openCheckout(rid);}); }
+  if (act === 'course'){ return proceed(function(){return openCourseChange(rid);}); }
+  if (act === 'reschedule'){ return proceed(function(){return openReschedule(rid);}); }   /* 確認は専用フォーム内で行う */
+  if (act === 'linkline'){ return proceed(function(){return openLinkLine(rid);}); }       /* 確認は候補を選んだ後に専用フォーム内で行う */
+  if(act==='chart')return proceed(function(){return calendarOpenChart(rid);});
   var plan = {
     remind:  { q:'このお客様に「問診リマインド」をLINEで送信しますか？',
                run:function(){ return pushQuestionnaireReminder(rid)
@@ -5138,9 +5173,14 @@ function handleBoardAction(act, rid){
   };
   var m = plan[act]; if (!m) return;
   if (!window.confirm(m.q)) return;
-  m.run()
-    .then(function(){ loadBoard(); if (act === 'visited') openCheckout(rid, true); })
-    .catch(function(err){ window.alert('できませんでした：' + (err&&err.message||err)); });
+  return proceed(function(){
+    var requestNav=NAV_SEQ,scope=checkoutScope();
+    return m.run().then(function(){
+      if(scope!==checkoutScope())return;
+      loadBoard();
+      if(act === 'visited'&&requestNav===NAV_SEQ)openCheckout(rid,true);
+    }).catch(function(err){if(scope===checkoutScope())window.alert('できませんでした：'+(err&&err.message||err));});
+  });
 }
 
 /* 問診リマインドの LINE push は manage-staff（staff認証）の questionnaire_reminder アクションで実行。
@@ -5211,7 +5251,8 @@ function openManualBooking(){
   // 未読込、または店（テナント）を切り替えた場合は読み直す
   if (!MB_LOADING && (!MB_OPTS || MB_OPTS_SLUG !== mbScopeKey())) loadManualOptions();
 }
-function closeManualBooking(){
+function closeManualBooking(){navClose('manual');}
+function navRawCloseManualBooking(){
   document.getElementById('mbForm').style.display = 'none';
   document.getElementById('mbOpenBtn').textContent = '📞 ＋ 電話予約を登録する';
 }
@@ -5264,6 +5305,7 @@ function mbOnNurseChange(){
 
 /* 登録 → 成功でフォームを閉じてボード再読込（GAS submit と同等のUX） */
 async function submitManualBooking(){
+  var manualNav=NAV_SEQ;
   if(document.getElementById('mbSubmit').disabled)return;
   var scope=checkoutScope();
   var name     = document.getElementById('mbName').value.trim();
@@ -5304,7 +5346,7 @@ async function submitManualBooking(){
       ['mbName','mbFurigana','mbPhone','mbDatetime','mbMemo'].forEach(function(id){ document.getElementById(id).value=''; });
       ['mbMenu','mbTreatment','mbResvType'].forEach(function(id){ document.getElementById(id).selectedIndex=0; });
       loadBoard();
-      setTimeout(closeManualBooking, 1200);
+      navMarkClean(document.getElementById('mbForm'));setTimeout(function(){if(manualNav===NAV_SEQ&&scope===checkoutScope()&&NAV_CURRENT&&NAV_CURRENT.modal==='manual')closeManualBooking();},1200);
     })
     .catch(function(err){
       btn.disabled = false; btn.textContent = 'この内容で登録';
@@ -5380,6 +5422,7 @@ var CRM_PEOPLE = [];        // 集約後の顧客配列（reservations ∪ custo
 var CRM_BY_KEY = {};        // ckey -> person（簡易カルテ・クリック解決用）
 var CRM_CARDS = {};         // line_uid -> get_customer の戻り（キャッシュ）
 var CRM_FILTER = 'all';     // all | new | rep | att
+var CRM_DETAIL_SEQ = 0;
 var CRM_SELECTED = null;    // 選択中（line_uid もしくは ckey）
 var CRM_SEARCH_T = null;    // 検索デバウンス
 var CRM_COLORS = ['#0f766e','#7c3aed','#db2777','#2563eb','#ea580c','#0891b2','#65a30d','#9333ea'];
@@ -5460,7 +5503,7 @@ function showCustomers(el){
   document.getElementById('custView').style.display = '';
   crmBackToList();
   crmLoadList();
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 /* 顧客アイデンティティ：line_uid 優先、無ければ 名前+電話。 */
@@ -5722,14 +5765,15 @@ document.getElementById('crmList').addEventListener('click', function(e){
   if (key) crmOpenLocal(key);
 });
 
-document.getElementById('crmBack').addEventListener('click', crmBackToList);
+document.getElementById('crmBack').addEventListener('click', function(){navClose('detail');});
 function crmBackToList(){
+  CRM_DETAIL_SEQ++;
   var d = document.getElementById('crmDetail');
   d.classList.remove('crm-detail-show');
   document.getElementById('crmBack').classList.remove('crm-show');
   var lw = document.querySelector('.crm-listwrap');
   if (lw) lw.classList.remove('crm-hide');   // 一覧を戻す
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 /* 詳細パネルを「表示状態」にする（共通）。一覧は隠してカルテだけ見せる（切替型）。 */
@@ -5738,7 +5782,7 @@ function crmShowDetailPane(){
   document.getElementById('crmBack').classList.add('crm-show');
   var lw = document.querySelector('.crm-listwrap');
   if (lw) lw.classList.add('crm-hide');
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 /* ===== カルテ1件の取得（line_uid あり：RPC get_customer）=====
@@ -5748,6 +5792,8 @@ function selectCustomer(lineUid){
   CRM_SELECTED = lineUid;
   crmRenderList();   // 選択ハイライト更新
   crmShowDetailPane();
+  var detailSeq=++CRM_DETAIL_SEQ,detailScope=checkoutScope();
+  function current(){return detailSeq===CRM_DETAIL_SEQ&&detailScope===checkoutScope();}
 
   if (CRM_CARDS[lineUid]){ crmRenderDetail(lineUid, CRM_CARDS[lineUid]); return; }
   document.getElementById('crmDetailBody').innerHTML = '<div class="crm-placeholder">読み込み中…</div>';
@@ -5757,10 +5803,11 @@ function selectCustomer(lineUid){
     crmEnsureNameMaps(),
     sbRpc('get_customer', { p_line_uid: lineUid, p_tenant: TENANT_ID })
   ]).then(function(out){
+    if(!current())return;
     CRM_CARDS[lineUid] = out[1] || {};
     crmRenderDetail(lineUid, CRM_CARDS[lineUid]);
   }).catch(function(err){
-    if(seq!==DASH_LOAD_SEQ||tenant!==TENANT_ID)return;
+    if(!current())return;
     if (!TOKEN){ if (typeof showLogin === 'function') showLogin('もう一度ログインしてください。'); return; }
     var msg = String(err && err.message || err || '');
     var body = document.getElementById('crmDetailBody');
@@ -5784,10 +5831,11 @@ function crmOpenLocal(ckey){
 
   document.getElementById('crmDetailBody').innerHTML = '<div class="crm-placeholder">読み込み中…</div>';
   // 名前マップ（メニュー/担当名解決）を確保してから描画。
+  var detailSeq=++CRM_DETAIL_SEQ,detailScope=checkoutScope();
   crmEnsureNameMaps().then(function(){
-    crmRenderLocalDetail(p);
+    if(detailSeq===CRM_DETAIL_SEQ&&detailScope===checkoutScope())crmRenderLocalDetail(p);
   }).catch(function(){
-    crmRenderLocalDetail(p);   // 名前マップ失敗でも履歴は出す
+    if(detailSeq===CRM_DETAIL_SEQ&&detailScope===checkoutScope())crmRenderLocalDetail(p);   // 名前マップ失敗でも履歴は出す
   });
 }
 
@@ -5840,7 +5888,8 @@ function crmRenderLocalDetail(p){
             : r.outcome === 'no_show' ? '<span class="crm-tag crm-tag-n">無断キャンセル</span>'
             : (r.status === 'cancelled' ? '<span class="crm-tag crm-tag-c">キャンセル</span>' : '');
     var line = tre ? esc(tre) : '予約';
-    return '<li><div>'+line+tag+'</div><div class="crm-dt">'+esc(dateLbl)+'</div></li>';
+    var content='<div>'+line+tag+'</div><div class="crm-dt">'+esc(dateLbl)+'</div>';
+    return '<li>'+(r.id&&r.status!=='cancelled'?'<button type="button" class="nav-history-row" data-open-reservation="'+esc(r.id)+'">'+content+'</button>':content)+'</li>';
   }).join('');
   if (!history) history = '<li><div>まだ来店・予約の記録がありません。</div></li>';
 
@@ -5953,7 +6002,8 @@ function crmRenderDetail(uid, res){
             : r.outcome === 'no_show' ? '<span class="crm-tag crm-tag-n">無断キャンセル</span>'
             : (r.status === 'cancelled' ? '<span class="crm-tag crm-tag-c">キャンセル</span>' : '');
     var line = esc(menu) + (tre ? '（'+esc(tre)+'）' : '') + (artist ? ' ／ 担当：'+esc(artist) : '');
-    return '<li><div>'+line+tag+'</div><div class="crm-dt">'+esc(dateLbl)+'</div></li>';
+    var content='<div>'+line+tag+'</div><div class="crm-dt">'+esc(dateLbl)+'</div>';
+    return '<li>'+(r.id&&r.status!=='cancelled'?'<button type="button" class="nav-history-row" data-open-reservation="'+esc(r.id)+'">'+content+'</button>':content)+'</li>';
   }).join('');
   if (!history) history = '<li><div>まだ来店・予約の記録がありません。</div></li>';
 
@@ -6027,6 +6077,8 @@ function crmRenderDetail(uid, res){
     '<div class="crm-sect"><h3>来店・対応履歴</h3><ul class="crm-timeline">'+history+'</ul></div>' +
     crmFooterHtml(uid, curType, curHuman, hasUid, c);
 
+  if(uid&&c&&c.id&&c.line_uid){var inbox=document.createElement('button');inbox.type='button';inbox.className='rbtn nav-link';inbox.dataset.chartChat=c.id;inbox.textContent='💬 受信箱で見る';document.getElementById('crmDetailBody').prepend(inbox);}
+  navReturnButton();
   crmLoadTreatmentNotes(uid,(resvs.find(function(r){return r.phone;})||{}).phone,bookingNm,resvs,c&&c.store_id);
 
   // フッタ操作のイベント（保存ボタン）。uid は閉包で持つ（onclick 連結しない）。
@@ -6257,7 +6309,7 @@ function showDashboard(el){
   if (el) setActiveNav(el);
   document.getElementById('dashView').style.display = 'block';
   loadDash();
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 /* 期間タブのクリック委譲（インライン onclick を使わず data-dp ＋ 委譲）。
@@ -6548,7 +6600,7 @@ function showAiReport(el){
   if (el) setActiveNav(el);
   document.getElementById('aiView').style.display = '';
   loadAiReport();
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 
 /* 期間タブのクリック委譲（#aiTabs 内の .dash-tab だけに反応＝経営タブと混線しない） */
@@ -7068,7 +7120,7 @@ function showReviews(el){
   revSetMsg('');
   fillReviewStoreOptions();   // 追加フォームの店舗候補を STORE_MAP から用意
   loadReviews();
-  window.scrollTo({top:0,behavior:'smooth'});
+  if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 
 /* DBの raise/PostgREST エラーを日本語へ。RLS拒否（権限なし）を最優先で判定 */
@@ -7281,7 +7333,7 @@ function openSettings(section, el){
   document.body.classList.toggle('set-readonly', window.IS_MANAGER === false);  // 閲覧のみ
   document.getElementById('setView').style.display = '';
   setSettingsSection(section);
-  window.scrollTo({ top:0, behavior:'smooth' });
+  if(!NAV_QUIET)window.scrollTo({ top:0, behavior:'smooth' });
 }
 /* 「お店の設定」グループの各カード＝薄いラッパ（中身は既存ローダを流用・ロジック不変）。 */
 function showStoreBasic(el){ openSettings('store', el); }      // 🏪 お店の基本（受付時間ほか）
@@ -9635,7 +9687,7 @@ function showAcq(el){
   acqSetMsg('');
   loadAcqList();
   loadAcqStats();
-  window.scrollTo({top:0,behavior:'smooth'});
+  if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 
 /* （旧ガード bindAcqNavHide は撤去：hideAllViews() は既に acqView を含むうえ、
@@ -9685,7 +9737,7 @@ function showSteps(el){
   var v = document.getElementById('stepsView'); if(v) v.style.display='';
   stpTopMsg('');
   stpReload();
-  window.scrollTo({top:0,behavior:'smooth'});
+  if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 /* （旧ガード bindStpNavHide は撤去：acq と同様、hideAllViews() が stepsView を含み、
    2階層ナビでは show*()→hideAllViews() を必ず通るため不要。グループボタン誤隠しの競合も解消。） */
@@ -11478,6 +11530,299 @@ function usrAddStaffCall(email, name, role, storeId, pass, allowExisting){
   // TOKEN が後から入る場合に備え、軽く遅延しても拾えるよう showUsers 側でも参照する。
   if (typeof TOKEN !== 'undefined' && TOKEN) pull();
   else if (typeof document !== 'undefined') document.addEventListener('click', function once(){ if (TOKEN){ pull(); document.removeEventListener('click', once); } });
+})();
+
+// Cross-view links only read existing APIs. Requests are tied to the current
+// login, store, navigation generation and (for inbox links) conversation.
+var NAV_LINK_SEQ=0;
+function navLinkRequest(){
+ var seq=++NAV_LINK_SEQ,nav=NAV_SEQ,scope=checkoutScope(),epoch=NAV_EPOCH;
+ return function(){return seq===NAV_LINK_SEQ&&nav===NAV_SEQ&&scope===checkoutScope()&&epoch===NAV_EPOCH&&!!TOKEN&&!NAV_BACK_PENDING;};
+}
+function navOriginLabel(){return CURRENT_GROUP==='chat'?'受信箱':CURRENT_GROUP==='home'?'ホーム':'カルテ';}
+async function chatOpenChart(customerId){
+ if(!CHAT_STATE||CHAT_STATE.selectedCustomerId!==customerId||CURRENT_GROUP!=='chat')return;
+ var current=navLinkRequest(),state=CHAT_STATE;
+ try{
+  var rows=await sbGet('customers?select=line_uid&id=eq.'+encodeURIComponent(customerId)+'&limit=1');
+  if(!current()||state!==CHAT_STATE||state.selectedCustomerId!==customerId)return;
+  var uid=rows&&rows[0]&&rows[0].line_uid;
+  if(!uid)throw Error('missing');
+  navVisit(function(){gotoSubtab('resv','showCustomers');selectCustomer(uid);NAV_RETURN_TO='受信箱';});
+ }catch(err){if(current())chatSetText('chatDetailMsg','カルテを開けませんでした');}
+}
+function chartOpenChat(customerId){
+ if(!customerId)return;
+ return navVisit(function(){gotoSubtab('chat');NAV_RETURN_TO='カルテ';chatLoadDetail(customerId,true);});
+}
+function chatRenderLinks(host,detail){
+ var box=chatElement('div','chat-nav-links'),links=CHAT_STATE.links;
+ var chart=chatElement('button','rbtn nav-link','🗂 カルテを見る');chart.type='button';chart.dataset.chatChart=detail.customer_id;
+ if(!links||links.uid)box.appendChild(chart);
+ if(links&&links.reservation){
+  var r=links.reservation,date=CALENDAR_PURE.calendarJstDate(r.start_at),day=new Date(date+'T12:00:00+09:00').getUTCDay();
+  var b=chatElement('button','rbtn nav-link','📅 次の予約 '+Number(date.slice(5,7))+'/'+Number(date.slice(8))+'('+['日','月','火','水','木','金','土'][day]+') '+CALENDAR_PURE.calendarJstTime(r.start_at)+' '+(r.artists&&r.artists.name||''));
+  b.type='button';b.dataset.openReservation=r.id;box.appendChild(b);
+ }else box.appendChild(chatElement('span','',links?(links.error?'次の予約を取得できませんでした':'次の予約はありません'):'次の予約を確認中…'));
+ host.appendChild(box);
+}
+async function chatLoadLinks(customerId){
+ var state=CHAT_STATE,seq=(state.linksSeq||0)+1,scope=checkoutScope(),nav=NAV_SEQ;
+ state.linksSeq=seq;state.links=null;
+ function current(){return state===CHAT_STATE&&seq===state.linksSeq&&state.selectedCustomerId===customerId&&scope===checkoutScope()&&nav===NAV_SEQ&&CURRENT_GROUP==='chat';}
+ try{
+  var customers=await sbGet('customers?select=line_uid&id=eq.'+encodeURIComponent(customerId)+'&limit=1');
+  if(!current())return;
+  var uid=customers&&customers[0]&&customers[0].line_uid;
+  state.links={uid:uid||'',reservation:null};
+  if(uid){
+   var now=new Date().toISOString();
+   var rows=await sbGet('reservations?select=id,start_at,artists(name)&line_uid=eq.'+encodeURIComponent(uid)+'&status=neq.cancelled&or=(outcome.is.null,outcome.neq.visited)&start_at=gt.'+encodeURIComponent(now)+'&order=start_at,id&limit=1');
+   if(!current())return;
+   state.links.reservation=rows&&rows[0]||null;
+  }
+ }catch(err){if(!current())return;state.links={uid:state.links&&state.links.uid||'',error:true};}
+ if(current())chatRenderDetail();
+}
+async function homeOpenAttention(){
+ var current=navLinkRequest();
+ try{await chatCall('list_conversations',{limit:1});if(current())gotoSubtab('chat');}
+ catch(err){if(!current())return;if(err&&err.code==='chat_inbox_disabled')gotoSubtab('resv','showCustomers');else gotoSubtab('chat');}
+}
+async function openReservationFromAnywhere(id){
+ if(!id)return;
+ var current=navLinkRequest(),tenant=String(TENANT_ID),origin=navOriginLabel();
+ try{
+  var rows=await sbGet('reservations?select=id,tenant_id,store_id,start_at,status&id=eq.'+encodeURIComponent(id)+'&limit=1');
+  if(!current())return;
+  var row=rows&&rows[0],date=row&&CALENDAR_PURE.calendarJstDate(row.start_at);
+  if(!row||row.id!==id||String(row.tenant_id)!==tenant||row.status==='cancelled'||!date)throw Error('missing');
+  var map=await ensureStoreMap();if(!current())return;
+  var slug=Object.keys(map||{}).find(function(key){return map[key].id===row.store_id;});
+  if(!slug||!Array.from(document.getElementById('resvStore').options).some(function(o){return o.value===slug;}))throw Error('store');
+  await ensureMyArtistIds();if(!current())return;
+  var moved=false;
+  navVisit(function(){
+   NAV_SETUP=true;try{gotoSubtab('resv','showReservations');}finally{NAV_SETUP=false;}
+   document.getElementById('resvStore').value=slug;
+   document.getElementById('resvNurse').value='';document.getElementById('resvStatus').value='';
+   CALENDAR_ANCHOR=date;CALENDAR_VIEW='month';NAV_RETURN_TO=origin;moved=true;
+  });
+  if(!moved)return;
+  var nav=NAV_SEQ,scope=checkoutScope();
+  CALENDAR_LINK_FILTER_SEQ=nav;
+  function destinationCurrent(){return nav===NAV_SEQ&&scope===checkoutScope()&&CURRENT_GROUP==='resv'&&NAV_CURRENT.tab==='showReservations'&&!NAV_BACK_PENDING;}
+  CALENDAR_ROWS=[];
+  await loadBoard();
+  if(!destinationCurrent())return;
+  if(!CALENDAR_ROWS.some(function(r){return r.id===id&&String(r.tenant_id)===tenant&&r.store_id===row.store_id&&r.status!=='cancelled';})){window.alert('予約を開けませんでした');return;}
+  var pending;NAV_QUIET=true;try{pending=openCalendarReservation(id);}finally{NAV_QUIET=false;}
+  navWrite(navCapture(),true);await pending;
+  if(destinationCurrent())navReturnButton();
+ }catch(err){if(current())window.alert('予約を開けませんでした');}
+ finally{if(CALENDAR_LINK_FILTER_SEQ===nav)CALENDAR_LINK_FILTER_SEQ=-1;}
+}
+document.addEventListener('click',function(e){
+ var b=e.target.closest('[data-chat-chart],[data-chart-chat],[data-open-reservation]');if(!b)return;
+ if(b.hasAttribute('data-chat-chart'))chatOpenChart(b.dataset.chatChart);
+ else if(b.hasAttribute('data-chart-chat'))chartOpenChat(b.dataset.chartChat);
+ else openReservationFromAnywhere(b.dataset.openReservation);
+});
+
+var NAV_PURE=(function(){
+/*<nav-history-pure>*/
+// Snapshots stay in JS memory; browser history receives only an opaque counter.
+function navState(s = {}) {
+ return {navToken:Number.isSafeInteger(s.navToken)&&s.navToken>0?s.navToken:0};
+}
+function navSnapshot(s = {}) {
+ const sheet = s.sheet && ['day','reservation','timeOff'].includes(s.sheet.kind)
+  ? {kind:s.sheet.kind,id:String(s.sheet.id || '')} : null;
+ return {nav:1,epoch:String(s.epoch || ''),tenant:String(s.tenant || ''),store:String(s.store || ''),
+  group:String(s.group || 'home'),tab:String(s.tab || 'showHome'),
+  view:['month','week','day','list'].includes(s.view)?s.view:'month',anchor:String(s.anchor || ''),
+  period:String(s.period || 'today'),sheet,
+  detail:s.detail?{key:String(s.detail.key || ''),local:!!s.detail.local}:null,
+  chat:s.chat&&s.chat.id?{id:String(s.chat.id)}:null,
+  returnTo:['受信箱','カルテ','ホーム'].includes(s.returnTo)?s.returnTo:'',
+  viewStore:String(s.viewStore || ''),nurse:String(s.nurse || ''),status:String(s.status || ''),
+  chartFrom:String(s.chartFrom || ''),modal:['manual','checkout'].includes(s.modal)?s.modal:'',
+  modalId:String(s.modalId || ''),scrollX:Number(s.scrollX)||0,scrollY:Number(s.scrollY)||0,
+  self:s.self?{touched:!!s.self.touched,applied:!!s.self.applied}:null};
+}
+function navSame(a,b) { return JSON.stringify({...navSnapshot(a),scrollX:0,scrollY:0})===JSON.stringify({...navSnapshot(b),scrollX:0,scrollY:0}); }
+function navMatchesScope(s,scope) {
+ return !!s && s.nav===1 && s.tenant===scope.tenant && s.store===scope.store && s.epoch===scope.epoch;
+}
+function navRestore(s,scope,rows) {
+ if(!navMatchesScope(s,scope))
+  return navSnapshot({...scope,group:'home',tab:'showHome'});
+ const next=navSnapshot(s);
+ if(next.sheet?.kind==='reservation' && !(rows || []).some(r=>r.id===next.sheet.id && r.status!=='cancelled'))next.sheet=null;
+ return next;
+}
+/*</nav-history-pure>*/
+return {navState,navSnapshot,navSame,navMatchesScope,navRestore};
+})();
+// Navigation is layered over existing view functions; rendering stays with each view.
+var NAV_CURRENT=null, NAV_DEPTH=0, NAV_QUIET=false, NAV_SETUP=false, NAV_SEQ=0, NAV_EPOCH='', NAV_INDEX=0, NAV_CHART_FROM='', NAV_BACK_PENDING=false, NAV_RETURN_TO='', NAV_SCOPE_STORE='', NAV_DETAIL_LOCAL=false;
+var NAV_ENTRIES=new Map(),NAV_COUNTER=Date.now()*1000,NAV_CONSOLE=false,NAV_AFTER_CLOSE=null;
+if('scrollRestoration' in history)history.scrollRestoration='manual';
+function navScope(){return {tenant:String(TENANT_ID),store:NAV_SCOPE_STORE||currentStoreSlug(),epoch:NAV_EPOCH};}
+function navCapture(){
+ var active=document.querySelector('#subnav button.active'),group=NAV_GROUPS.find(function(g){return g.key===CURRENT_GROUP;});
+ var pane=document.querySelector('.calendar-sheet[data-nav-kind]'),detail=document.getElementById('crmDetail');
+ return NAV_PURE.navSnapshot(Object.assign(navScope(),{group:CURRENT_GROUP,tab:group&&group.direct||active&&active.getAttribute('data-fn')||'showReservations',
+  view:CALENDAR_VIEW,anchor:CALENDAR_ANCHOR,period:BOARD_PERIOD,sheet:pane?{kind:pane.dataset.navKind,id:pane.dataset.navId}:null,
+  detail:document.getElementById('custView').style.display!=='none'&&detail.classList.contains('crm-detail-show')?{key:CRM_SELECTED||'',local:NAV_DETAIL_LOCAL}:null,
+  chat:CURRENT_GROUP==='chat'&&CHAT_STATE&&CHAT_STATE.selectedCustomerId?{id:CHAT_STATE.selectedCustomerId}:null,
+  returnTo:NAV_RETURN_TO,viewStore:currentStoreSlug(),nurse:document.getElementById('resvNurse').value,status:document.getElementById('resvStatus').value,
+  chartFrom:NAV_CHART_FROM,modal:document.getElementById('checkoutDialog')?'checkout':document.getElementById('mbForm').style.display!=='none'?'manual':'',
+  modalId:document.getElementById('checkoutDialog')&&document.getElementById('checkoutDialog').dataset.navId||'',
+  scrollX:window.scrollX,scrollY:window.scrollY,self:CALENDAR_SELF}));
+}
+function navWrite(state,replace){
+ NAV_CURRENT=state;
+ var counter=replace&&history.state&&NAV_ENTRIES.has(history.state.navToken)?history.state.navToken:++NAV_COUNTER;
+ NAV_ENTRIES.set(counter,{state:state,index:NAV_INDEX});
+ history[replace?'replaceState':'pushState'](NAV_PURE.navState({navToken:counter}),'',location.href);
+ navReturnButton();
+}
+function navListState(state){
+ return NAV_PURE.navSnapshot(Object.assign({},state,navScope(),{sheet:null,detail:null,chat:null,modal:'',modalId:'',chartFrom:'',returnTo:''}));
+}
+function navReset(keepView){
+ NAV_CONSOLE=false;
+ NAV_SEQ++;NAV_BACK_PENDING=false;NAV_AFTER_CLOSE=null;NAV_ENTRIES.clear();NAV_CHART_FROM='';NAV_RETURN_TO='';NAV_SCOPE_STORE=currentStoreSlug();NAV_EPOCH=String(Date.now())+'-'+String(NAV_SEQ);NAV_INDEX=0;
+ closeCalendarSheets();navRawCloseManualBooking();var dlg=document.getElementById('checkoutDialog');if(dlg)dlg.remove();
+ var was=NAV_QUIET;NAV_QUIET=true;try{crmBackToList();}finally{NAV_QUIET=was;}
+ var state=keepView?navListState(navCapture()):NAV_PURE.navSnapshot(Object.assign(navScope(),{group:'home',tab:'showHome',view:CALENDAR_VIEW,anchor:CALENDAR_ANCHOR,period:BOARD_PERIOD,viewStore:currentStoreSlug(),nurse:document.getElementById('resvNurse').value,status:document.getElementById('resvStatus').value}));
+ navWrite(state,true);
+}
+function navRememberScroll(){if(NAV_CURRENT){NAV_CURRENT.scrollX=window.scrollX||0;NAV_CURRENT.scrollY=window.scrollY||0;}}
+function navFormValue(root){return JSON.stringify(Array.from(root.querySelectorAll('input,textarea,select')).map(function(el){return [el.name||el.id,el.type==='checkbox'||el.type==='radio'?el.checked:el.value];}));}
+function navMarkClean(root){if(root)root._navBaseline=navFormValue(root);}
+function navForms(){return Array.from(document.querySelectorAll('#calendarReservationSheet form,#calendarTimeOffSheet form,#checkoutDialog form')).concat(document.getElementById('mbForm').style.display!=='none'?[document.getElementById('mbForm')]:[]);}
+function navDirty(){if(CURRENT_GROUP==='chat'&&CHAT_STATE&&String(CHAT_STATE.draftBody||''))return true;return navForms().some(function(form){return !form._navSaving&&form._navBaseline!==undefined&&form._navBaseline!==navFormValue(form);});}
+function navMayLeave(reason){return !navDirty()||window.confirm(reason==='move'?'書いた内容が消えます。移動しますか？':'書いた内容が消えます。戻りますか？');}
+function navVisit(action){
+ if(NAV_QUIET||NAV_DEPTH)return action();
+ if(NAV_BACK_PENDING)return;
+ if(!NAV_CURRENT) {NAV_EPOCH=String(Date.now());NAV_INDEX=0;navWrite(navCapture(),true);}
+ if(NAV_CURRENT.tenant!==String(TENANT_ID)||NAV_CURRENT.store!==navScope().store)navReset();
+ if(!navMayLeave('move'))return;
+ navRememberScroll();
+ if(CURRENT_GROUP==='chat'&&CHAT_STATE){CHAT_STATE.draftBody='';CHAT_STATE.draftId=null;}
+ NAV_SEQ++;NAV_DEPTH++;
+ var result;try{result=action();}finally{NAV_DEPTH--;var next=navCapture();if(!NAV_PURE.navSame(next,NAV_CURRENT)){NAV_INDEX++;navWrite(next,false);}}
+ return result;
+}
+function navClose(kind,after){
+ if(NAV_BACK_PENDING)return;
+ var owns=NAV_PURE.navMatchesScope(NAV_CURRENT,navScope())&&NAV_INDEX>0;
+ if(owns&&((kind==='sheet'&&NAV_CURRENT.sheet)||(kind==='detail'&&NAV_CURRENT.detail)||(kind===NAV_CURRENT.modal))){
+  NAV_AFTER_CLOSE=after||null;NAV_BACK_PENDING=true;history.back();return;
+ }
+ if(!navMayLeave())return;
+ if(kind==='sheet')closeCalendarSheets();
+ if(kind==='detail')crmBackToList();
+ if(kind==='manual')navRawCloseManualBooking();
+ if(kind==='checkout'){var dlg=document.getElementById('checkoutDialog');if(dlg)dlg.remove();}
+ navWrite(navCapture(),true);if(after)return after();
+}
+function navReturnButton(){
+ document.querySelectorAll('[data-nav-cross-back]').forEach(function(b){b.remove();});
+ if(NAV_CURRENT&&NAV_CURRENT.returnTo){
+  var host=NAV_CURRENT.sheet?document.querySelector('#calendarReservationSheet .calendar-sheet-content'):NAV_CURRENT.detail?document.getElementById('crmDetail'):NAV_CURRENT.group==='chat'?document.getElementById('chatDetail'):null;
+  if(host){var back=document.createElement('button');back.type='button';back.className='rbtn nav-link';back.dataset.navCrossBack='';back.textContent='← '+NAV_CURRENT.returnTo+'に戻る';host.prepend(back);}
+ }
+ var old=document.querySelector('[data-nav-reservation-back]');if(old)old.remove();
+ if(!NAV_CURRENT||!NAV_CURRENT.chartFrom||!NAV_CURRENT.detail)return;
+ var b=document.createElement('button');b.type='button';b.className='rbtn';b.dataset.navReservationBack='';b.textContent='← 予約に戻る';
+ document.getElementById('crmDetail').prepend(b);
+}
+document.addEventListener('click',function(e){if(e.target.closest('[data-nav-reservation-back]'))navClose('detail');if(e.target.closest('[data-nav-cross-back]')&&!NAV_BACK_PENDING){NAV_BACK_PENDING=true;history.back();}});
+document.getElementById('resvStore').addEventListener('change',function(e){
+ if(!navMayLeave('move')){this.value=NAV_CURRENT.viewStore;e.stopImmediatePropagation();return;}
+ navReset(true);
+},true);
+async function navReplay(target){
+ var seq=++NAV_SEQ,scope=navScope(),valid=NAV_PURE.navMatchesScope(target,scope);
+ var next=valid?NAV_PURE.navSnapshot(target):NAV_PURE.navSnapshot(Object.assign(scope,{group:'home',tab:'showHome'}));
+ var group=NAV_GROUPS.find(function(g){return g.key===next.group&&navAllowed(g.mgr);});
+ if(!group||(!group.direct&&!group.tabs.some(function(t){return t.fn===next.tab&&tabAllowed(t);})))next=NAV_PURE.navSnapshot(Object.assign(scope,{group:'home',tab:'showHome'}));
+ var previous=NAV_CURRENT,sameTab=previous&&CURRENT_GROUP===next.group&&previous.group===next.group&&previous.tab===next.tab;
+ NAV_CURRENT=next;NAV_CHART_FROM=next.chartFrom;NAV_RETURN_TO=next.returnTo;
+ if(CHAT_STATE){CHAT_STATE.draftBody='';CHAT_STATE.draftId=null;}
+ if(next.viewStore&&Array.from(document.getElementById('resvStore').options).some(function(o){return o.value===next.viewStore;}))document.getElementById('resvStore').value=next.viewStore;
+ NAV_QUIET=true;NAV_SETUP=true;
+ try{
+  closeCalendarSheets();navRawCloseManualBooking();var dlg=document.getElementById('checkoutDialog');if(dlg)dlg.remove();crmBackToList();
+  if(TOKEN){if(!sameTab||!valid){if(next.group==='home')showGroup('home');else gotoSubtab(next.group,next.tab);}}
+  if(CALENDAR_SELF&&next.self){CALENDAR_SELF.touched=next.self.touched;CALENDAR_SELF.applied=next.self.applied;}
+  CALENDAR_VIEW=next.view;CALENDAR_ANCHOR=next.anchor;BOARD_PERIOD=next.period;
+  document.getElementById('resvNurse').value=next.nurse;document.getElementById('resvStatus').value=next.status;
+  document.querySelectorAll('.rtab[data-p]').forEach(function(b){b.classList.toggle('active',b.dataset.p===next.period);});
+ }finally{NAV_SETUP=false;NAV_QUIET=false;}
+ NAV_RETURN_TO=next.returnTo;NAV_CHART_FROM=next.chartFrom;
+ if(next.group==='chat'&&!next.chat){chatResetState();chatLoadList(true);}
+ if(!valid){NAV_INDEX=0;navWrite(next,true);return;}
+ if(!TOKEN){navReset();return;}
+ if(next.tab==='showReservations'){
+  if(!sameTab||!previous||previous.view!==next.view||previous.anchor!==next.anchor||previous.period!==next.period||previous.viewStore!==next.viewStore||previous.nurse!==next.nurse||previous.status!==next.status)await loadBoard();
+  if(seq!==NAV_SEQ||scope.tenant!==String(TENANT_ID)||scope.store!==navScope().store)return;
+  calendarControls();next=NAV_PURE.navRestore(next,scope,CALENDAR_ROWS);
+ }
+ if(seq!==NAV_SEQ)return;
+ NAV_QUIET=true;
+ try{
+  if(next.sheet){if(next.sheet.kind==='day')openCalendarDay(next.sheet.id);if(next.sheet.kind==='timeOff')openCalendarTimeOff(next.sheet.id);if(next.sheet.kind==='reservation')openCalendarReservation(next.sheet.id);}
+  if(next.chat)chatLoadDetail(next.chat.id,true);
+  if(next.detail){if(next.detail.local)crmOpenLocal(next.detail.key);else selectCustomer(next.detail.key);}
+  if(next.modal==='manual')openManualBooking();
+  if(next.modal==='checkout')openCheckout(next.modalId);
+ }finally{NAV_QUIET=false;}
+ navWrite(next,true);window.scrollTo({left:next.scrollX,top:next.scrollY,behavior:'instant'});
+}
+window.addEventListener('popstate',async function(e){
+ NAV_BACK_PENDING=false;if(!NAV_CURRENT)return;
+ var after=NAV_AFTER_CLOSE;NAV_AFTER_CLOSE=null;
+ if(NAV_CONSOLE){hideAllViews();document.getElementById('consoleView').style.display='block';navWrite(NAV_CURRENT,true);return;}
+ var entry=e.state&&NAV_ENTRIES.get(e.state.navToken),target=entry&&entry.state;
+ var sameScope=NAV_PURE.navMatchesScope(target,navScope());
+ if(!navMayLeave()){navWrite(NAV_CURRENT,false);return;}
+ NAV_INDEX=sameScope?entry.index:0;
+ navRememberScroll();
+ var replay=navReplay(sameScope?target:navListState(NAV_CURRENT)),replaySeq=NAV_SEQ;
+ await replay;
+ if(after&&replaySeq===NAV_SEQ)return after();
+});
+// Wrappers batch nested transitions (group -> first tab -> selected tab) into one entry.
+(function(){
+ ['showGroup','gotoSubtab','setCalendarView','setPeriod','openCalendarDay','openCalendarReservation','openCalendarTimeOff','calendarOpenChart','selectCustomer','crmOpenLocal','crmShowDetailPane','chatLoadDetail'].forEach(function(name){
+  var original=window[name];window[name]=function(){var args=arguments;
+   if((name==='selectCustomer'||name==='crmOpenLocal')&&(!args[0]||(name==='crmOpenLocal'&&!CRM_BY_KEY[args[0]])))return;
+   if(name==='chatLoadDetail'&&(!args[1]||CHAT_STATE&&CHAT_STATE.selectedCustomerId===args[0]))return original.apply(window,args);
+   var kinds={openCalendarDay:'day',openCalendarReservation:'reservation',openCalendarTimeOff:'timeOff'},kind=kinds[name];
+   if((kind==='reservation'||name==='calendarOpenChart')&&!CALENDAR_ROWS.some(function(r){return r.id===args[0]&&r.status!=='cancelled';}))return Promise.resolve();
+   return navVisit(function(){
+    // CRM_BY_KEY contains LINE customers too. Remember the actual chart opener,
+    // before crmShowDetailPane captures it; never infer it from reservation rows.
+    if(name==='selectCustomer'||name==='crmOpenLocal')NAV_DETAIL_LOCAL=name==='crmOpenLocal';
+    if(name==='showGroup'||name==='gotoSubtab'){NAV_CHART_FROM='';NAV_RETURN_TO='';closeCalendarSheets();navRawCloseManualBooking();}
+    if(name==='calendarOpenChart')NAV_CHART_FROM=String(args[0]);
+    var result=original.apply(window,args);
+    if(name==='calendarOpenChart')NAV_CHART_FROM=String(args[0]);
+    if(kind){var pane=document.querySelector('.calendar-sheet');if(pane){pane.dataset.navKind=kind;pane.dataset.navId=String(args[0]);if(kind==='timeOff')navMarkClean(pane.querySelector('form'));}}
+    return result;
+   });
+  };
+ });
+ var enter=enterDashboard;enterDashboard=function(){var was=NAV_QUIET;NAV_QUIET=true;try{return enter.apply(window,arguments);}finally{NAV_QUIET=was;navReset();}};
+ var login=showLogin;showLogin=function(){navReset();return login.apply(window,arguments);};
+ var reset=resetTenantScopedCaches;resetTenantScopedCaches=function(){var result=reset.apply(window,arguments);navReset();return result;};
+ var load=loadBoard;loadBoard=function(){if(NAV_SETUP)return Promise.resolve();return load.apply(window,arguments);};
+ var manual=openManualBooking;openManualBooking=function(){if(document.getElementById('mbForm').style.display!=='none'){navClose('manual');return;}return navVisit(function(){manual();navMarkClean(document.getElementById('mbForm'));});};
 })();
 </script>
 </body>
