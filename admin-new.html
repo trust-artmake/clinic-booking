@@ -757,7 +757,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-retry-btn{border:0;background:transparent;color:#b45309;text-decoration:underline;font:inherit;font-size:10.5px;font-weight:800;cursor:pointer;padding:0}
 .chat-empty{padding:28px 14px;color:#94a3b8;text-align:center;font-size:13px;line-height:1.6}
 
-/* 受信箱 段A: 375px基準。丸・検索・プレビューとLINE風トーク。 */
+/* チャット 段A: 375px基準。丸・検索・プレビューとLINE風トーク。 */
 .chat-toolbar{flex-wrap:wrap;min-width:0}
 #chatSearch{min-width:0;width:150px;max-width:100%;padding:7px 9px;border:1px solid #cbd8d6;border-radius:8px;font:inherit;font-size:13px}
 .chat-list-item{display:flex;align-items:center;gap:10px;min-width:0}
@@ -774,6 +774,13 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-labels:empty{display:none}
 .chat-detail{background:#edf3f5;min-width:0}
 .chat-detail-title,.chat-detail-meta{overflow-wrap:anywhere}
+.chat-detail-header{display:flex;align-items:flex-start;gap:10px;min-width:0}
+.chat-detail-header .chat-detail-title{flex:1;min-width:0}
+.chat-read-toggle{position:relative;flex:0 0 auto;margin:2px 3px 0 0;padding:8px 10px;border:1px solid #9ca3af;border-radius:8px;background:transparent;color:#64748b;font:inherit;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer}
+.chat-read-toggle.is-unread{background:#168348;border-color:#168348;color:#fff}
+.chat-read-toggle.is-unread::after{content:'';position:absolute;right:-3px;top:-3px;width:9px;height:9px;border-radius:50%;background:#e34848;border:1px solid #fff}
+.chat-read-toggle:disabled{opacity:.55;cursor:default}
+.chat-read-toggle:focus-visible{outline:2px solid #0b5c55;outline-offset:2px}
 .chat-message-row{display:flex;align-items:flex-end;gap:5px;margin:10px 0;min-width:0}
 .chat-message-row.chat-role-staff,.chat-message-row.chat-role-ai{flex-direction:row-reverse}
 .chat-message-row .chat-message{margin:0;max-width:calc(100% - 45px);min-width:0}
@@ -940,7 +947,7 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
   <div id="chatView" style="display:none">
     <div class="chat-head">
       <div>
-        <div class="chat-title">💬 受信箱</div>
+        <div class="chat-title">💬 チャット</div>
         <div class="chat-readonly" id="chatModeNote">閲覧専用です。会話を開いても既読や担当状態は変わりません。</div>
       </div>
       <div class="chat-toolbar">
@@ -1472,7 +1479,7 @@ function setActiveNav(el){ if(!el) return; var bs=document.querySelectorAll("#su
    ============================================================================ */
 var NAV_GROUPS = [
   { key:'home', label:'🏠 ホーム', mgr:false, direct:'showHome' },   // 小タブ無し＝押すと直接ホーム表示
-  { key:'chat', label:'💬 受信箱', mgr:false, direct:'showChatInbox' },
+  { key:'chat', label:'💬 チャット', mgr:false, direct:'showChatInbox' },
   { key:'resv', label:'📋 予約・顧客', mgr:false, tabs:[
       { label:'📋 予約管理', fn:'showReservations' },
       { label:'🗂 顧客カルテ', fn:'showCustomers' },
@@ -1659,11 +1666,11 @@ function chatReason(code){
   var messages={
     invalid_query:'名前は50文字以内で入力してください。',
     invalid_token:'もう一度ログインしてください。', unauthorized:'もう一度ログインしてください。',
-    forbidden:'この受信箱を閲覧する権限がありません。', not_found:'会話が見つかりません。',
-    chat_inbox_disabled:'この店舗では受信箱がまだ有効ではありません。',
+    forbidden:'このチャットを閲覧する権限がありません。', not_found:'会話が見つかりません。',
+    chat_inbox_disabled:'この店舗ではチャットがまだ有効ではありません。',
     chat_workflow_disabled:'この店舗では既読・対応開始はまだ有効ではありません。',
     chat_ai_resume_disabled:'この店舗では対応完了によるAI再開はまだ有効ではありません。',
-    completion_requires_manager:'受信箱の対応完了は管理者だけが使えます。スタッフグループLINEで「完了 番号 名前」を送ってください。',
+    completion_requires_manager:'チャットの対応完了は管理者だけが使えます。スタッフグループLINEで「完了 番号 名前」を送ってください。',
     chat_send_disabled:'この店舗では管理画面返信がまだ有効ではありません。',
     line_uid_missing:'このお客様はLINE送信先を確認できません。',
     channel_not_resolved:'送信チャネルを一意に確認できません。設定を確認してください。',
@@ -1729,7 +1736,7 @@ function chatCanWorkflow(detail){ return !!(detail && detail.workflow_enabled ==
 function chatCanSend(detail){
   return !!(detail && detail.send_enabled === true && detail.status==='in_progress');
 }
-// 受信箱の「対応完了（AI再開）」は管理者（owner/admin/platform_admin）だけ（2026-10-12）。
+// チャットの「対応完了（AI再開）」は管理者（owner/admin/platform_admin）だけ（2026-10-12）。
 // スタッフはLINEの「完了 番号 名前」を使う。最終判定はDB（completion_requires_manager）。
 function chatIsManager(){ return window.IS_MANAGER === true; }
 function chatCanComplete(detail){
@@ -1748,9 +1755,9 @@ function chatUpdateModeNote(detail){
     var sendNote=detail.send_enabled===true ? '管理画面返信が有効です。' : '管理画面返信はまだ無効です。';
     note=detail.ai_resume_enabled===true
       ? (chatIsManager()
-        ? '共有既読・対応開始・「対応完了（AI再開）」が有効です。'+sendNote
-        : '共有既読と「対応を始める」が有効です。対応完了はスタッフグループLINEの「完了 番号 名前」で行ってください。'+sendNote)
-      : '共有既読と「対応を始める」が有効です。対応完了によるAI再開はまだ無効です。'+sendNote;
+        ? '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。対応開始・「対応完了（AI再開）」が有効です。'+sendNote
+        : '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」が有効です。対応完了はスタッフグループLINEの「完了 番号 名前」で行ってください。'+sendNote)
+      : '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」が有効です。対応完了によるAI再開はまだ無効です。'+sendNote;
   }
   chatSetText('chatModeNote',note);
 }
@@ -1848,7 +1855,7 @@ function chatLoadList(reset,preserveDetail){
   }).catch(function(error){
     if(!current())return;
     chatSetText('chatListMsg',chatReason(error && error.code));
-    if(!CHAT_STATE.items.length){ var host=document.getElementById('chatList'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','受信箱を表示できませんでした。')); } }
+    if(!CHAT_STATE.items.length){ var host=document.getElementById('chatList'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','チャットを表示できませんでした。')); } }
   }).finally(function(){
     if(!current())return;
     CHAT_STATE.loadingList=false; var button=document.getElementById('chatMore'); if(button) button.disabled=false;
@@ -1860,7 +1867,18 @@ function chatRenderDetail(){
   chatClear(host);
   var detail=CHAT_STATE.detail;
   var name=detail.display_name || (detail.ticket_no ? 'お客様 #'+detail.ticket_no : '名前未設定のお客様');
-  host.appendChild(chatElement('div','chat-detail-title',name));
+  var header=chatElement('div','chat-detail-header');
+  header.appendChild(chatElement('div','chat-detail-title',name));
+  if(chatCanWorkflow(detail) && Number.isSafeInteger(detail.version) && detail.version>=0 && detail.last_inbound_at){
+    var unread=chatIsUnread(detail);
+    var readButton=chatElement('button','chat-read-toggle'+(unread?' is-unread':''),unread?'未確認 ✉':'確認済み ✓');
+    readButton.type='button'; readButton.dataset.chatReadToggle='';
+    readButton.setAttribute('aria-label',unread?'未確認：確認済みにする':'確認済み：未確認に戻す');
+    readButton.disabled=!!CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy;
+    readButton.addEventListener('click',function(){chatMaybeMarkRead(detail);});
+    header.appendChild(readButton);
+  }
+  host.appendChild(header);
   var assigned=(detail.status==='in_progress')
     ? ' ・ '+(detail.assigned_staff_name ? detail.assigned_staff_name+'さん対応中' : '担当者対応中') : '';
   var meta=chatElement('div','chat-detail-meta',chatStoreName(detail.store_id)+' ・ '+chatStatusLabel(detail.status)+assigned);
@@ -2062,13 +2080,13 @@ async function chatResolveFailedDelivery(message,resolution){
 
 function chatRenderWorkflow(host, detail){
   var panel=chatElement('div','chat-workflow');
-  if(!chatCanWorkflow(detail)){
-    panel.appendChild(chatElement('div','chat-workflow-note','この会話は閲覧専用です。'));
-    host.appendChild(panel); return;
-  }
   if(CHAT_STATE.workflowMessage){
     var kind=/しました|有効です/.test(CHAT_STATE.workflowMessage) ? ' chat-workflow-ok' : ' chat-workflow-warn';
     panel.appendChild(chatElement('div','chat-workflow-note'+kind,CHAT_STATE.workflowMessage));
+  }
+  if(!chatCanWorkflow(detail)){
+    panel.appendChild(chatElement('div','chat-workflow-note','この会話は閲覧専用です。'));
+    host.appendChild(panel); return;
   }
   if(detail.status==='needs_reply'){
     var start=chatElement('button','chat-btn','対応を始める'); start.type='button';
@@ -2084,7 +2102,7 @@ function chatRenderWorkflow(host, detail){
     }else if(detail.ai_resume_enabled!==true){
       panel.appendChild(chatElement('div','chat-workflow-note','対応完了によるAI再開は現在無効です。'));
     }else{
-      panel.appendChild(chatElement('div','chat-workflow-note','対応が終わったら、スタッフグループLINEで「完了 番号 名前」を送ってください（受信箱の対応完了は管理者のみ）。'));
+      panel.appendChild(chatElement('div','chat-workflow-note','対応が終わったら、スタッフグループLINEで「完了 番号 名前」を送ってください（チャットの対応完了は管理者のみ）。'));
     }
   }else{
     panel.appendChild(chatElement('div','chat-workflow-note',detail.status==='none' ? 'まだやり取りはありません' : '現在は対応完了の状態です。'));
@@ -2093,35 +2111,40 @@ function chatRenderWorkflow(host, detail){
 }
 
 function chatMaybeMarkRead(detail){
-  if(!CHAT_STATE || !chatCanWorkflow(detail) || !chatIsUnread(detail) || CHAT_STATE.workflowBusy) return;
-  if(!Number.isSafeInteger(detail.version) || !detail.last_inbound_at) return;
+  if(!CHAT_STATE || CHAT_STATE.detail!==detail || !chatCanWorkflow(detail) || CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy) return;
+  if(!Number.isSafeInteger(detail.version) || detail.version<0 || !detail.last_inbound_at) return;
   var customerId=detail.customer_id;
   var expectedVersion=detail.version;
   var expectedInbound=detail.last_inbound_at;
-  CHAT_STATE.workflowBusy='mark_read'; CHAT_STATE.workflowMessage='既読にしています…'; chatRenderDetail();
-  chatCall('mark_read', {
+  var state=CHAT_STATE,requestTenant=TENANT_ID,requestScope=checkoutScope(),requestNav=NAV_SEQ;
+  var requestSeq=(state.readToggleSeq||0)+1;state.readToggleSeq=requestSeq;
+  function current(){return state===CHAT_STATE && state.readToggleSeq===requestSeq && TENANT_ID===requestTenant && checkoutScope()===requestScope && NAV_SEQ===requestNav && CURRENT_GROUP==='chat' && state.selectedCustomerId===customerId && !!state.detail;}
+  function unchanged(){return current() && state.detail.version===expectedVersion && state.detail.last_inbound_at===expectedInbound;}
+  var action=chatIsUnread(detail)?'mark_read':'mark_unread';
+  CHAT_STATE.workflowBusy=action; CHAT_STATE.workflowMessage=action==='mark_read'?'確認済みにしています…':'未確認に戻しています…'; chatRenderDetail();
+  var params={
     customer_id:customerId,
-    expected_version:expectedVersion,
-    expected_last_inbound_at:expectedInbound
-  }).then(function(data){
-    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
-    if(CHAT_STATE.detail.version!==expectedVersion || CHAT_STATE.detail.last_inbound_at!==expectedInbound) return;
-    if(!data || !Number.isSafeInteger(data.version) || !data.last_read_at){
+    expected_version:expectedVersion
+  };
+  if(action==='mark_read')params.expected_last_inbound_at=expectedInbound;
+  return chatCall(action,params).then(function(data){
+    if(!unchanged()) return;
+    if(!data || !Number.isSafeInteger(data.version) || data.version!==expectedVersion+1 || (action==='mark_read' ? typeof data.last_read_at!=='string' || !Number.isFinite(Date.parse(data.last_read_at)) : data.last_read_at!==null)){
       throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
     }
     CHAT_STATE.detail.version=data.version;
     CHAT_STATE.detail.last_read_at=data.last_read_at;
     CHAT_STATE.workflowNeedsReload=false;
-    CHAT_STATE.workflowMessage='共有既読にしました。';
+    CHAT_STATE.workflowMessage=action==='mark_read'?'確認済みにしました。':'未確認に戻しました。';
     chatSyncListFromDetail(); chatRenderList();
   }).catch(function(error){
-    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(!unchanged()) return;
     var code=error && error.code;
-    if(code==='chat_workflow_disabled') CHAT_STATE.detail.workflow_enabled=false;
+    if(code==='chat_workflow_disabled' || code==='forbidden') CHAT_STATE.detail.workflow_enabled=false;
     if(code==='version_conflict' || code==='inbound_conflict') CHAT_STATE.workflowNeedsReload=true;
     CHAT_STATE.workflowMessage=chatReason(code);
   }).finally(function(){
-    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    if(!current()) return;
     CHAT_STATE.workflowBusy=null; chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
   });
 }
@@ -2207,6 +2230,7 @@ function chatLoadDetail(customerId, reset){
   var requestTenant=TENANT_ID,state=CHAT_STATE,requestScope=checkoutScope(),requestNav=NAV_SEQ,requestSeq=(state.detailSeq||0)+1;state.detailSeq=requestSeq;
   function current(){return state===CHAT_STATE&&requestSeq===state.detailSeq&&requestTenant===TENANT_ID&&requestScope===checkoutScope()&&requestNav===NAV_SEQ&&CURRENT_GROUP==='chat';}
   if(reset){
+    state.readToggleSeq=(state.readToggleSeq||0)+1;
     var changingCustomer=!!CHAT_STATE.selectedCustomerId && CHAT_STATE.selectedCustomerId!==customerId;
     if(changingCustomer){
       CHAT_STATE.sendBusy=false; CHAT_STATE.sendMessage=''; CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null;
@@ -2243,7 +2267,6 @@ function chatLoadDetail(customerId, reset){
     chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
     if(reset)chatLoadLinks(customerId);
     if(reset) chatScrollToLatest();
-    if(reset) chatMaybeMarkRead(CHAT_STATE.detail);
   }).catch(function(error){
     if(!current())return;
     var reason=chatReason(error && error.code);
@@ -5554,7 +5577,7 @@ function crmMenuName(id){ return (id && CRM_MENU_MAP && CRM_MENU_MAP[id]) ? CRM_
 function crmArtistName(id){ return (id && CRM_ARTIST_MAP && CRM_ARTIST_MAP[id]) ? CRM_ARTIST_MAP[id] : ''; }
 
 /* 有人対応ステータスの語彙（AI側 chat-webhook/_pure.ts の HUMAN_STATUS と同一に保つ）。
-   旧カルテでは表示だけに使い、状態変更は受信箱のguarded RPCへ一本化する。
+   旧カルテでは表示だけに使い、状態変更はチャットのguarded RPCへ一本化する。
    旧語彙 'open'/'done' はDBに残っている可能性があるため「読み取りだけ」互換。 */
 var HUMAN_STATUS_ATT  = '要対応';
 var HUMAN_STATUS_DONE = '対応完了';
@@ -6170,7 +6193,7 @@ function crmRenderDetail(uid, res){
     '<div class="crm-sect"><h3>来店・対応履歴</h3><ul class="crm-timeline">'+history+'</ul></div>' +
     crmFooterHtml(uid, curType, curHuman, hasUid, c);
 
-  if(uid&&c&&c.id&&c.line_uid){var inbox=document.createElement('button');inbox.type='button';inbox.className='rbtn nav-link';inbox.dataset.chartChat=c.id;inbox.textContent='💬 受信箱で見る';document.getElementById('crmDetailBody').prepend(inbox);}
+  if(uid&&c&&c.id&&c.line_uid){var inbox=document.createElement('button');inbox.type='button';inbox.className='rbtn nav-link';inbox.dataset.chartChat=c.id;inbox.textContent='💬 チャットで見る';document.getElementById('crmDetailBody').prepend(inbox);}
   navReturnButton();
   crmLoadTreatmentNotes(uid,(resvs.find(function(r){return r.phone;})||{}).phone,bookingNm,resvs,c&&c.store_id);
 
@@ -6247,8 +6270,8 @@ function crmEditMsg(t, ok){
 /* 有人対応RPCのエラーコード → 日本語。値はそのまま画面に出さない（コードだけを見る）。 */
 function crmHumanRpcError(err){
   var msg = String(err && err.message || err || '');
-  if (/legacy_completion_disabled/.test(msg)) return 'この店舗はAI再開を受信箱に移行済みです。受信箱の「対応完了（AI再開）」から行ってください。';
-  if (/unresolved_delivery/.test(msg)) return '受信箱に送信中・失敗の返信が残っています。受信箱で確認してから対応完了にしてください。';
+  if (/legacy_completion_disabled/.test(msg)) return 'この店舗はAI再開をチャットに移行済みです。チャットの「対応完了（AI再開）」から行ってください。';
+  if (/unresolved_delivery/.test(msg)) return 'チャットに送信中・失敗の返信が残っています。チャットで確認してから対応完了にしてください。';
   if (/conversation_not_open/.test(msg)) return 'このお客様は今「要対応」ではないため、対応完了にできません（画面を再読込してください）。';
   if (/line_not_linked/.test(msg)) return 'LINE未連携のお客様は有人対応に切り替えられません（AIは元々返信しません）。';
   if (/conversation_not_found|unauthorized|permission|denied|42501|forbidden/i.test(msg)) return '権限がありません（この店舗のお客様は編集できません。ログインもご確認ください）。';
@@ -11633,7 +11656,7 @@ function navLinkRequest(){
  var seq=++NAV_LINK_SEQ,nav=NAV_SEQ,scope=checkoutScope(),epoch=NAV_EPOCH;
  return function(){return seq===NAV_LINK_SEQ&&nav===NAV_SEQ&&scope===checkoutScope()&&epoch===NAV_EPOCH&&!!TOKEN&&!NAV_BACK_PENDING;};
 }
-function navOriginLabel(){return CURRENT_GROUP==='chat'?'受信箱':CURRENT_GROUP==='home'?'ホーム':'カルテ';}
+function navOriginLabel(){return CURRENT_GROUP==='chat'?'チャット':CURRENT_GROUP==='home'?'ホーム':'カルテ';}
 async function chatOpenChart(customerId){
  if(!CHAT_STATE||CHAT_STATE.selectedCustomerId!==customerId||CURRENT_GROUP!=='chat')return;
  var current=navLinkRequest(),state=CHAT_STATE;
@@ -11642,7 +11665,7 @@ async function chatOpenChart(customerId){
   if(!current()||state!==CHAT_STATE||state.selectedCustomerId!==customerId)return;
   var uid=rows&&rows[0]&&rows[0].line_uid;
   if(!uid)throw Error('missing');
-  return await navVisit(function(){gotoSubtab('resv','showCustomers');selectCustomer(uid);NAV_RETURN_TO='受信箱';});
+  return await navVisit(function(){gotoSubtab('resv','showCustomers');selectCustomer(uid);NAV_RETURN_TO='チャット';});
  }catch(err){if(current())chatSetText('chatDetailMsg','カルテを開けませんでした');}
 }
 function chartOpenChat(customerId){
@@ -11822,7 +11845,7 @@ function navSnapshot(s = {}) {
   period:String(s.period || 'today'),sheet,
   detail:s.detail?{key:String(s.detail.key || ''),local:!!s.detail.local}:null,
   chat:s.chat&&s.chat.id?{id:String(s.chat.id)}:null,
-  returnTo:['受信箱','カルテ','ホーム'].includes(s.returnTo)?s.returnTo:'',
+  returnTo:['チャット','カルテ','ホーム'].includes(s.returnTo)?s.returnTo:'',
   viewStore:String(s.viewStore || ''),nurse:String(s.nurse || ''),status:String(s.status || ''),
   chartFrom:String(s.chartFrom || ''),modal:['manual','checkout'].includes(s.modal)?s.modal:'',
   modalId:String(s.modalId || ''),scrollX:Number(s.scrollX)||0,scrollY:Number(s.scrollY)||0,
