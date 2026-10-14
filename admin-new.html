@@ -6261,6 +6261,9 @@ function crmRenderDetail(uid, res){
   var bookingNm = '';
   for (var _bi = 0; _bi < resvs.length; _bi++){ if (resvs[_bi] && resvs[_bi].customer_name){ bookingNm = resvs[_bi].customer_name; break; } }
   var name = composeName(bookingNm, c && c.line_display_name) || res.display_name || '（名前なし）';
+  // 電話番号は予約（新しい順）から最初に見つかったもの。連絡が要る時に予約画面を探さなくて済むように基本情報へ出す。
+  var phoneForKarte = '';
+  for (var _pi = 0; _pi < resvs.length; _pi++){ if (resvs[_pi] && resvs[_pi].phone){ phoneForKarte = resvs[_pi].phone; break; } }
   var ltv = res.ltv || 0;
   var next = res.next_reservation || null;
   var q = res.questionnaire || null;                  // { answers:jsonb, submitted_at, ... }
@@ -6391,6 +6394,7 @@ function crmRenderDetail(uid, res){
     consentSect +
     '<div class="crm-sect"><h3>基本情報</h3><div class="crm-memo" style="background:#f8fafa;border-color:#e6eceb;white-space:normal">' +
       'LINE表示名：'+esc((c && c.line_display_name) || name) +
+      (phoneForKarte ? '<br>電話：'+esc(phoneForKarte) : '') +
       (c && c.chief_complaint ? '<br>主訴：'+esc(c.chief_complaint) : '') +
       (c && c.interest_menus ? '<br>興味メニュー：'+esc(c.interest_menus) : '') +
       (c && c.line_joined_at ? '<br>LINE登録日：'+esc(crmDate(c.line_joined_at)) : '') +
