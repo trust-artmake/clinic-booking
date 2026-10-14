@@ -10,10 +10,10 @@
      ・全fetchはSupabaseのみ → connect-srcで縛り、想定外の外部送信を即遮断
      ・img-src（H5 Phase2小粒で https: 全許可から限定に変更）：実画像の出所は
        Supabase Storage 公開URL（artist-photos/case-photos/step-images。署名URLも同一ドメイン）＋
-       data:（同意書署名PNG・FileReaderプレビュー・旧形式アイコン）のみ（監査済・LINE系画像なし）
+       data:（同意書署名PNG・FileReaderプレビュー・旧形式アイコン）＋LINEプロフィール写真のprofile.line-scdn.net
      ・object-src 'none' で Flash等を遮断、base/form-action は 'self' 固定
      ・frame-ancestors / report-uri は meta では効かない → クリックジャッキングは下のJSフレームバスティングで代替 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://stgarheuldubyrzdqzaq.supabase.co; connect-src 'self' https://stgarheuldubyrzdqzaq.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://stgarheuldubyrzdqzaq.supabase.co https://profile.line-scdn.net; connect-src 'self' https://stgarheuldubyrzdqzaq.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <style id="fbGuard">body{display:none !important}</style>
 <script>
@@ -762,6 +762,8 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 #chatSearch{min-width:0;width:150px;max-width:100%;padding:7px 9px;border:1px solid #cbd8d6;border-radius:8px;font:inherit;font-size:13px}
 .chat-list-item{display:flex;align-items:center;gap:10px;min-width:0}
 .chat-avatar{flex:0 0 42px;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700}
+.chat-avatar{position:relative;overflow:hidden}
+.chat-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
 .chat-list-content{flex:1;min-width:0}
 .chat-list-side{align-self:stretch;flex:0 0 42px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 .chat-list-time{font-size:10px;color:#64748b;white-space:nowrap}
@@ -1766,6 +1768,13 @@ function chatAvatarColor(name){
   var hash=0;Array.from(name).forEach(function(c){hash=(hash*31+c.codePointAt(0))>>>0;});
   return ['#52796f','#65799b','#a76a73','#95764f','#756b9a'][hash%5];
 }
+function chatProfileAvatar(name,pictureUrl){
+  var avatar=chatElement('span','chat-avatar',Array.from(name||'?')[0]);
+  avatar.style.backgroundColor=chatAvatarColor(name||'?');avatar.setAttribute('aria-hidden','true');
+  if(typeof pictureUrl!=='string'||pictureUrl.length>2048||/\s/.test(pictureUrl)||!/^https:\/\/profile\.line-scdn\.net\/.+$/.test(pictureUrl))return avatar;
+  var image=document.createElement('img');image.alt='';image.loading='lazy';image.referrerPolicy='no-referrer';
+  image.addEventListener('error',function(){image.remove();},{once:true});image.src=pictureUrl;avatar.appendChild(image);return avatar;
+}
 function chatStatusLabel(status){
   if(status==='none') return '履歴閲覧';
   if(status==='needs_reply') return '要返信';
@@ -1934,7 +1943,7 @@ function chatRenderList(){
     var button=chatElement('button','chat-list-item'); button.type='button';
     if(item.customer_id===CHAT_STATE.selectedCustomerId) button.classList.add('chat-selected');
     var name=item.display_name || (item.ticket_no ? 'お客様 #'+item.ticket_no : '名前未設定のお客様');
-    var avatar=chatElement('span','chat-avatar',Array.from(name)[0]);avatar.style.backgroundColor=chatAvatarColor(name);avatar.setAttribute('aria-hidden','true');button.appendChild(avatar);
+    button.appendChild(chatProfileAvatar(name,item.picture_url));
     var content=chatElement('div','chat-list-content');button.appendChild(content);
     var badges=chatElement('div','chat-badges');
     if(item.status==='needs_reply') badges.appendChild(chatBadge('要返信','chat-needs'));
@@ -2031,7 +2040,7 @@ function chatRenderDetail(live){
   var detail=CHAT_STATE.detail;
   var name=detail.display_name || (detail.ticket_no ? 'お客様 #'+detail.ticket_no : '名前未設定のお客様');
   var header=chatElement('div','chat-detail-header');
-  var avatar=chatElement('span','chat-avatar',Array.from(name)[0]);avatar.style.backgroundColor=chatAvatarColor(name);avatar.setAttribute('aria-hidden','true');header.appendChild(avatar);
+  header.appendChild(chatProfileAvatar(name,detail.picture_url));
   header.appendChild(chatElement('div','chat-detail-title',name));
   if(chatCanWorkflow(detail) && Number.isSafeInteger(detail.version) && detail.version>=0 && detail.last_inbound_at){
     var unread=chatIsUnread(detail);
@@ -6577,7 +6586,7 @@ function crmRenderDetail(uid, res){
     crmFooterHtml(uid, curType, curHuman, hasUid, c);
 
   if(uid&&c&&c.id&&c.line_uid){var inbox=document.createElement('button');inbox.type='button';inbox.className='rbtn nav-link';inbox.dataset.chartChat=c.id;inbox.textContent='💬 チャットで見る';document.getElementById('crmDetailBody').prepend(inbox);}
-  if(c&&c.id)handlingLoadChart(c);
+  if(c&&c.id){document.getElementById('crmDetailBody').prepend(chatProfileAvatar(c.line_display_name||c.customer_name||c.name||'?',c.picture_url));handlingLoadChart(c);}
   navReturnButton();
   crmLoadTreatmentNotes(uid,(resvs.find(function(r){return r.phone;})||{}).phone,bookingNm,resvs,c&&c.store_id);
 
