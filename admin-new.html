@@ -772,6 +772,23 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-badge.chat-unread{background:#e34848;color:white;min-width:26px;height:26px;border-radius:50%;padding:0 3px;display:flex;align-items:center;justify-content:center;font-size:9px}
 .chat-blocked{background:#e5e7eb;color:#555}
 .chat-labels:empty{display:none}
+
+/* 段B: 375pxでも長いラベル・設定行は幅の中で折り返す。 */
+.handling-controls{display:flex;flex-wrap:wrap;align-items:center;gap:5px;min-width:0;max-width:100%;padding:4px 8px;box-sizing:border-box;background:#fff;flex:0 0 auto;font-size:11px}
+.handling-controls select{min-width:0;max-width:100%;width:145px;padding:5px;border:1px solid #cbd8d6;border-radius:6px;font:inherit}
+.handling-controls .chat-btn{font-size:11px;padding:5px;max-width:100%;white-space:normal}
+.handling-note{font-size:11px;color:#64748b;overflow-wrap:anywhere;min-width:0}
+.handling-badge{max-width:100%;min-width:0;overflow-wrap:anywhere}
+.handling-list-actions{padding:0 8px 6px 52px;border-bottom:1px solid #dbe7e5;min-width:0;max-width:100%;box-sizing:border-box}
+.handling-list-actions .chat-btn{font-size:11px;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.handling-overlay{position:fixed;inset:0;z-index:1300;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}
+.handling-panel{width:600px;max-width:100%;max-height:85dvh;overflow-y:auto;background:white;border-radius:12px;padding:12px;box-sizing:border-box;min-width:0}
+.handling-setting-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid #e2e8f0;min-width:0;max-width:100%}
+.handling-setting-row input:not([type=checkbox]):not([type=color]){width:160px;min-width:0;max-width:100%;box-sizing:border-box;font:inherit}
+.handling-setting-row input[type=color]{width:38px;padding:0}
+.handling-setting-row input[type=checkbox]{width:auto}
+#chatLabelFilter{max-width:100%;min-width:0;width:150px;font:inherit;font-size:12px}
+
 .chat-detail{background:#edf3f5;min-width:0}
 .chat-detail-title,.chat-detail-meta{overflow-wrap:anywhere}
 .chat-detail-header{display:flex;align-items:flex-start;gap:10px;min-width:0}
@@ -994,6 +1011,8 @@ body.chat-conversation .chat-compose-msg{font-size:11px;max-height:44px;overflow
         <label for="chatStoreFilter">店舗</label>
         <select id="chatStoreFilter"><option value="">全店舗</option></select>
         <label for="chatSearch">名前</label><input id="chatSearch" type="search" maxlength="50" placeholder="名前で探す" autocomplete="off">
+        <select id="chatLabelFilter" aria-label="対応ステータスで絞る" disabled><option value="">すべてのステータス</option></select>
+        <button type="button" class="chat-btn" id="chatLabelSettings">ラベル設定</button>
         <button type="button" class="chat-btn" id="chatReload">更新</button>
       </div>
     </div>
@@ -1506,7 +1525,7 @@ function sbUpsert(table, rows){
 }
 
 // ===== ビュー切替（全タブ共通）=====
-function hideAllViews(){ chatSetFocus(false); ["consoleView","homeView","chatView","resvView","custView","dashView","settlementView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
+function hideAllViews(){ handlingCloseManager(); chatSetFocus(false); ["consoleView","homeView","chatView","resvView","custView","dashView","settlementView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
 // 小タブ(#subnav)の中で「いま表示中」をハイライト。el が無い（プログラム呼び出し）ときは現状維持。
 function setActiveNav(el){ if(!el) return; var bs=document.querySelectorAll("#subnav button"); for(var i=0;i<bs.length;i++) bs[i].classList.toggle("active", bs[i]===el); }
 
@@ -1633,7 +1652,7 @@ function chatLiveVisible(){
   return !!(CHAT_STATE && CHAT_STATE.tenantId===TENANT_ID && CURRENT_GROUP==='chat' && document.visibilityState==='visible' && view && view.style.display==='block' && (!login || login.style.display==='none'));
 }
 function chatLiveBusy(){
-  return !!(CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy || CHAT_STATE.loadingDetail || ASK_CONFIRM_PENDING);
+  return !!(CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy || CHAT_STATE.loadingDetail || CHAT_STATE.labelBusy || ASK_CONFIRM_PENDING);
 }
 // 最新の1ページを既存の履歴へマージする。既読化やLINE送信は行わない。
 function chatRefreshConversation(){
@@ -1642,9 +1661,9 @@ function chatRefreshConversation(){
   if(!customerId || !state.detail || state.liveDetailBusy)return;
   var scope=checkoutScope(),nav=NAV_SEQ,epoch=CHAT_LIVE_EPOCH;
   var seq=(state.detailSeq||0)+1;state.detailSeq=seq;state.liveDetailBusy=seq;
-  var version=state.detail.version,readSeq=state.readToggleSeq;
+  var version=state.detail.version,readSeq=state.readToggleSeq,labelSeq=state.labelSeq;
   function current(){return state===CHAT_STATE && state.selectedCustomerId===customerId && state.detailSeq===seq && scope===checkoutScope() && nav===NAV_SEQ && epoch===CHAT_LIVE_EPOCH && chatLiveVisible();}
-  function unchanged(){return current() && !chatLiveBusy() && state.detail && state.detail.version===version && state.readToggleSeq===readSeq;}
+  function unchanged(){return current() && !chatLiveBusy() && state.detail && state.detail.version===version && state.readToggleSeq===readSeq && state.labelSeq===labelSeq;}
   return chatCall('get_conversation',{customer_id:customerId,limit:100}).then(function(data){
     if(!unchanged())return;
     if(!data || data.customer_id!==customerId || !Array.isArray(data.messages) || !(Number.isSafeInteger(data.version) && data.version>=0 || data.status==='none' && data.version===null))throw new Error('invalid_response');
@@ -1670,10 +1689,11 @@ function chatRefreshListLive(){
   var search=document.getElementById('chatSearch'),store=document.getElementById('chatStoreFilter');
   var query=search?search.value:'',storeId=store?store.value:'';
   var params={limit:50};if(query)params.query=query;if(storeId)params.store_id=storeId;
-  function current(){return state===CHAT_STATE && state.listSeq===seq && scope===checkoutScope() && epoch===CHAT_LIVE_EPOCH && chatLiveVisible() && !state.searchPending && (!search || search.value===query) && (!store || store.value===storeId);}
+  function current(){return state===CHAT_STATE && state.listSeq===seq && scope===checkoutScope() && epoch===CHAT_LIVE_EPOCH && chatLiveVisible() && !state.searchPending && (!search || search.value===query) && (!store || store.value===storeId) && (!labelSelect || labelSelect.value===labelId);}
   state.loadingList=true;state.liveListBusy=seq;
-  return chatCall('list_conversations',params).then(function(rows){
-    if(!current() || chatLiveBusy())return;
+  var labelSelect=document.getElementById('chatLabelFilter'),labelId=labelSelect?labelSelect.value:'',labelSeq=state.labelSeq;if(labelId)params.label_id=labelId;
+  return chatCall(labelId?'filter_labeled_conversations':'list_conversations',params).then(function(rows){
+    if(!current() || chatLiveBusy() || state.labelSeq!==labelSeq)return;
     if(!Array.isArray(rows))throw new Error('invalid_response');
     // 「もっと見る」で51件目以降まで読んでいる時は、先頭50件だけ差し替えて続きは残す（読んでいた所を消さない）。
     var older=(state.items||[]).length>50?state.items.slice(50):[];
@@ -1901,6 +1921,7 @@ function chatSyncListFromDetail(){
     item.assigned_staff_id=CHAT_STATE.detail.assigned_staff_id;
     item.assigned_staff_name=CHAT_STATE.detail.assigned_staff_name;
     item.unread=chatIsUnread(CHAT_STATE.detail);
+    if(CHAT_STATE.detail.handling)item.handling_label=CHAT_STATE.detail.handling.label;
     break;
   }
 }
@@ -1924,7 +1945,7 @@ function chatRenderList(){
     if(item.send_failure) badges.appendChild(chatBadge('送信失敗','chat-fail'));
     if(item.blocked) badges.appendChild(chatBadge('ブロック','chat-blocked'));
     if(badges.childNodes.length) content.appendChild(badges);
-    content.appendChild(chatElement('div','chat-labels')); // 段B用。未設定の札は表示しない。
+    var labels=chatElement('div','chat-labels');if(item.handling_label)labels.appendChild(handlingBadge(item.handling_label));content.appendChild(labels);
     var top=chatElement('div','chat-list-top');
     top.appendChild(chatElement('div','chat-list-name',name));content.appendChild(top);
     var preview=chatElement('div','chat-preview');
@@ -1937,6 +1958,7 @@ function chatRenderList(){
     button.appendChild(side);
     button.addEventListener('click', function(){ chatLoadDetail(item.customer_id, true); });
     host.appendChild(button);
+    if(item.handling_available){var actions=chatElement('div','handling-list-actions'),change=chatElement('button','chat-btn','ステータスを変更');change.type='button';change.dataset.handlingListCustomer=item.customer_id;actions.appendChild(change);change.addEventListener('click',function(){handlingOpenList(item,actions);});host.appendChild(actions);}
   });
   chatSetText('chatListMsg', CHAT_STATE.items.length+'件を表示');
   var more=document.getElementById('chatMore');
@@ -1951,9 +1973,10 @@ function chatLoadList(reset,preserveDetail){
   var params={ limit:50 };
   var search=document.getElementById('chatSearch');if(search && search.value) params.query=search.value;
   var store=document.getElementById('chatStoreFilter'); if(store && store.value) params.store_id=store.value;
+  var labelFilter=document.getElementById('chatLabelFilter');if(labelFilter&&labelFilter.value)params.label_id=labelFilter.value;
   // 入力直後の「もっと見る」に以前の検索cursorを使わない。
-  if(!reset && ((params.query||'')!==(state.listQuery||'') || (params.store_id||'')!==(state.listStore||''))){reset=true;preserveDetail=true;}
-  state.listQuery=params.query||'';state.listStore=params.store_id||'';
+  if(!reset && ((params.query||'')!==(state.listQuery||'') || (params.store_id||'')!==(state.listStore||'') || (params.label_id||'')!==(state.listLabel||''))){reset=true;preserveDetail=true;}
+  state.listQuery=params.query||'';state.listStore=params.store_id||'';state.listLabel=params.label_id||'';
   if(!reset && CHAT_STATE.listCursor){
     params.before_at=CHAT_STATE.listCursor.before_at;
     params.before_id=CHAT_STATE.listCursor.before_id;
@@ -1971,8 +1994,9 @@ function chatLoadList(reset,preserveDetail){
   }
   CHAT_STATE.loadingList=true; chatSetText('chatListMsg','読み込み中…');
   var more=document.getElementById('chatMore'); if(more) more.disabled=true;
-  return chatCall('list_conversations', params).then(function(data){
-    if(!current())return;
+  var labelSeq=state.labelSeq;
+  return chatCall(params.label_id?'filter_labeled_conversations':'list_conversations', params).then(function(data){
+    if(!current()||state.labelSeq!==labelSeq)return;
     var rows=Array.isArray(data) ? data : [];
     var seen=Object.create(null);
     CHAT_STATE.items.forEach(function(row){ if(row && row.customer_id) seen[row.customer_id]=true; });
@@ -2019,11 +2043,12 @@ function chatRenderDetail(live){
     header.appendChild(readButton);
   }
   host.insertBefore(header,composer);
-  var assigned=(detail.status==='in_progress')
-    ? ' ・ '+(detail.assigned_staff_name ? detail.assigned_staff_name+'さん対応中' : '担当者対応中') : '';
-  var meta=chatElement('div','chat-detail-meta',chatStatusLabel(detail.status)+assigned+' ・ '+chatStoreName(detail.store_id));
+  var statusText=(detail.status==='in_progress' && detail.assigned_staff_name)
+    ? detail.assigned_staff_name+'さん対応中' : chatStatusLabel(detail.status);
+  var meta=chatElement('div','chat-detail-meta',statusText+' ・ '+chatStoreName(detail.store_id));
   var summary=chatElement('div','chat-summary');summary.appendChild(meta);
   chatRenderLinks(summary,detail);host.insertBefore(summary,composer);
+  if(detail.handling){var labels=chatElement('div','handling-controls');handlingRender(labels,detail);host.insertBefore(labels,composer);}
   if(chatCanComplete(detail)){
     var complete=chatElement('button','chat-btn chat-complete','✅ 対応完了');complete.type='button';complete.dataset.chatComplete='';
     complete.disabled=!!CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy;
@@ -2431,8 +2456,9 @@ function chatLoadDetail(customerId, reset){
     params.before_id=CHAT_STATE.detailCursor.before_id;
   }
   CHAT_STATE.loadingDetail=true; var older=document.getElementById('chatOlder'); if(older) older.disabled=true;
+  var labelSeq=state.labelSeq;
   return chatCall('get_conversation', params).then(function(data){
-    if(!current())return;
+    if(!current()||state.labelSeq!==labelSeq)return;
     if(!data || typeof data!=='object' || !Array.isArray(data.messages)) throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
     var incoming=data.messages;
     var combined=reset ? incoming : incoming.concat(CHAT_STATE.messages);
@@ -2510,14 +2536,17 @@ function showChatInbox(el){
   var state=CHAT_STATE,scope=checkoutScope();
   chatPopulateStoreFilter().catch(function(){return null;}).then(function(){
     if(state!==CHAT_STATE||scope!==checkoutScope()||CURRENT_GROUP!=='chat')return;
-    chatLoadList(!state.selectedCustomerId);
+    var settings=document.getElementById('chatLabelSettings');if(settings)settings.style.display=IS_MANAGER?'inline-block':'none';
+    handlingLoadFilter();chatLoadList(!state.selectedCustomerId);
   });
   if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
 }
 
 (function bindChatInbox(){
   var reload=document.getElementById('chatReload'); if(reload) reload.addEventListener('click',chatRefresh);
-  var store=document.getElementById('chatStoreFilter'); if(store) store.addEventListener('change',chatRefresh);
+  var store=document.getElementById('chatStoreFilter'); if(store) store.addEventListener('change',function(){handlingLoadFilter();chatRefresh();});
+  var labelFilter=document.getElementById('chatLabelFilter');if(labelFilter)labelFilter.addEventListener('change',function(){chatLoadList(true,true);});
+  var settings=document.getElementById('chatLabelSettings');if(settings)settings.addEventListener('click',function(){var store=document.getElementById('chatStoreFilter');handlingOpenManager(store&&store.value);});
   var more=document.getElementById('chatMore'); if(more) more.addEventListener('click',function(){ chatLoadList(false); });
   var search=document.getElementById('chatSearch'),searchTimer=null,composing=false;
   function scheduleSearch(){
@@ -2535,6 +2564,148 @@ function showChatInbox(el){
   window.addEventListener('resize',chatFitViewport);
   if(window.visualViewport){window.visualViewport.addEventListener('resize',chatFitViewport);window.visualViewport.addEventListener('scroll',chatFitViewport);}
 })();
+/* 段B: 対応ステータスはAIの対応状態とは別。DOMへ動的なHTMLを渡さない。 */
+var HANDLING_MANAGER=null;
+function handlingColor(value){return /^#[0-9a-fA-F]{6}$/.test(value||'')?value:'#52796f';}
+function handlingBadge(label){
+ var badge=chatElement('span','chat-badge handling-badge',label.name+(label.is_active===false?'（無効）':''));
+ badge.style.backgroundColor=handlingColor(label.color);badge.style.color='#fff';return badge;
+}
+function handlingReason(code){
+ var messages={label_conflict:'別の更新があります。最新のラベルを確認して、もう一度選んでください。',label_name_exists:'同じ名前のラベルがあります。',system_label_required:'予約用の4つは無効にできません。',label_not_found:'ラベルが変更されています。最新の一覧を確認してください。',invalid_label: '名前は40文字以内、色は指定形式で入力してください。',invalid_label_order:'一覧が更新されています。設定を開き直してください。',forbidden_store:'この店舗のラベルを操作する権限がありません。'};
+ return messages[code]||'ラベルを更新できませんでした。最新の状態を確認してください。';
+}
+function handlingRender(host,detail){
+ chatClear(host);host.dataset.handlingHost='';host.className='handling-controls';
+ var data=detail.handling;if(!data)return;
+ if(!data.store_id){host.appendChild(chatElement('span','handling-note','店舗未確定のためラベルを選べません。'));return;}
+ var title=chatElement('label','handling-note','対応ステータス');host.appendChild(title);
+ var select=chatElement('select','');select.dataset.handlingSelect='';select.setAttribute('aria-label','対応ステータス');
+ var empty=chatElement('option','','ラベルなし');empty.value='';select.appendChild(empty);
+ (data.labels||[]).forEach(function(label){
+  if(label.is_active===false&&(!data.label||data.label.id!==label.id))return;
+  var o=chatElement('option','',label.name+(label.is_active===false?'（無効）':''));o.value=label.id;o.disabled=label.is_active===false;select.appendChild(o);
+ });
+ select.value=data.label?data.label.id:'';host.appendChild(select);
+ select.addEventListener('change',function(){handlingSet(detail,select.value||null,false,host);});
+ if(data.label)host.appendChild(handlingBadge(data.label));
+ if(data.ai_paused===true || data.ai_paused===undefined&&(detail.status==='in_progress'||detail.status==='needs_reply'))host.appendChild(chatElement('span','handling-note','AI停止中'));
+ if(data.source!=='system'){
+  if(data.source==='staff')host.appendChild(chatElement('span','handling-note','手動設定'));
+  var auto=chatElement('button','chat-btn','予約に合わせる');auto.type='button';auto.dataset.handlingAuto='';host.appendChild(auto);
+  auto.addEventListener('click',function(){handlingSet(detail,null,true,host);});
+ }
+ if(data.can_manage){var manage=chatElement('button','chat-btn','ラベル設定');manage.type='button';manage.dataset.handlingManage='';host.appendChild(manage);manage.addEventListener('click',function(){handlingOpenManager(data.store_id);});}
+ var notice=chatElement('span','handling-note',detail.handlingNotice||'');notice.dataset.handlingNotice='';notice.setAttribute('aria-live','polite');host.appendChild(notice);
+ if(CHAT_STATE&&CHAT_STATE.labelBusy)host.querySelectorAll('button,select').forEach(function(el){el.disabled=true;});
+}
+async function handlingSet(detail,labelId,useAuto,host){
+ var state=CHAT_STATE,scope=checkoutScope(),nav=NAV_SEQ,customer=detail.customer_id,identity=TOKEN;
+ var conversation=!!(state&&state.detail===detail);
+ if(host.dataset.handlingBusy==='yes'||state&&state.labelBusy)return;
+ function current(){return !!TOKEN&&TOKEN===identity&&scope===checkoutScope()&&nav===NAV_SEQ&&host.isConnected&&state===CHAT_STATE&&(!conversation||state.detail===detail&&state.selectedCustomerId===customer);}
+ host.dataset.handlingBusy='yes';if(state){state.labelBusy=true;state.labelSeq=(state.labelSeq||0)+1;}
+ host.querySelectorAll('button,select').forEach(function(el){el.disabled=true;});
+ var notice=host.querySelector('[data-handling-notice]');if(notice)notice.textContent='更新中…';
+ var result=null,message='';
+ try{
+  result=await chatCall('set_customer_label',{customer_id:customer,label_id:labelId,expected_revision:detail.handling.revision,use_auto:useAuto});
+  if(!result||!Array.isArray(result.labels)||!Number.isSafeInteger(result.revision))throw Error('invalid_response');
+  message='更新しました。';
+ }catch(err){
+  message=handlingReason(err&&err.code);
+  // タイムアウトで書き込み済みかも知れない。再送せず読んでから判断する。
+  if(current())try{result=await chatCall('get_customer_label',{customer_id:customer});}catch(_err){result=null;}
+ }finally{
+  if(state)state.labelBusy=false;delete host.dataset.handlingBusy;
+ }
+ if(!current())return;
+ if(!result||!Array.isArray(result.labels)||!Number.isSafeInteger(result.revision)){
+  if(notice)notice.textContent=message+' 開き直してください。';return;
+ }
+ detail.handling=result;detail.handlingNotice=message;
+ if(state){
+  state.items.forEach(function(item){if(item.customer_id===customer)item.handling_label=result.label;});
+  if(state.detail&&state.detail.customer_id===customer)state.detail.handling=result;
+ }
+ if(conversation){chatSyncListFromDetail();chatRenderDetail(true);chatRenderList();}
+ else{handlingRender(host,detail);if(state)chatRenderList();}
+ var filter=document.getElementById('chatLabelFilter');if(state&&filter&&filter.value)chatLoadList(true,true);
+}
+async function handlingOpenList(item,host){
+ var state=CHAT_STATE,scope=checkoutScope(),nav=NAV_SEQ,identity=TOKEN;
+ if(host.dataset.handlingLoading==='yes')return;host.dataset.handlingLoading='yes';
+ var old=host.querySelector('[data-handling-host]');if(old){old.remove();delete host.dataset.handlingLoading;return;}
+ var controls=chatElement('div','handling-controls','読み込み中…');controls.dataset.handlingHost='';host.appendChild(controls);
+ try{var data=await chatCall('get_customer_label',{customer_id:item.customer_id});
+  if(!TOKEN||identity!==TOKEN||state!==CHAT_STATE||scope!==checkoutScope()||nav!==NAV_SEQ||!controls.isConnected)return;
+  if(!data||!Array.isArray(data.labels))throw Error('invalid_response');handlingRender(controls,{customer_id:item.customer_id,status:item.status,handling:data});
+ }catch(err){if(controls.isConnected&&scope===checkoutScope())controls.textContent=handlingReason(err&&err.code);}
+ finally{delete host.dataset.handlingLoading;}
+}
+async function handlingLoadFilter(){
+ var store=document.getElementById('chatStoreFilter'),select=document.getElementById('chatLabelFilter'),state=CHAT_STATE,scope=checkoutScope(),identity=TOKEN;
+ if(!store||!select)return;var storeId=store.value,seq=(state.labelFilterSeq||0)+1;state.labelFilterSeq=seq;
+ chatClear(select);var all=chatElement('option','','すべてのステータス');all.value='';select.appendChild(all);select.disabled=true;
+ if(!storeId)return;
+ try{var data=await chatCall('list_labels',{store_id:storeId});
+  if(!TOKEN||identity!==TOKEN||state!==CHAT_STATE||state.labelFilterSeq!==seq||scope!==checkoutScope()||store.value!==storeId)return;
+  if(!data||!Array.isArray(data.labels))return;
+  data.labels.forEach(function(l){var o=chatElement('option','',l.name+(l.is_active===false?'（無効）':''));o.value=l.id;select.appendChild(o);});select.disabled=false;
+ }catch(_err){/* DB/Edge未反映でも従来のチャットを利用できる。 */}
+}
+function handlingCloseManager(){if(HANDLING_MANAGER){HANDLING_MANAGER.remove();HANDLING_MANAGER=null;}}
+async function handlingOpenManager(storeId){
+ handlingCloseManager();
+ if(!storeId){chatSetText('chatListMsg','ラベル設定を開く店舗を選んでください。');return;}
+ var overlay=chatElement('div','handling-overlay'),panel=chatElement('section','handling-panel');overlay.appendChild(panel);document.body.appendChild(overlay);HANDLING_MANAGER=overlay;
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','ラベル設定');overlay.style.display='flex';
+ var previous=document.activeElement,scope=checkoutScope(),nav=NAV_SEQ,identity=TOKEN,busy=false,catalog=null;
+ function current(){return HANDLING_MANAGER===overlay&&overlay.isConnected&&scope===checkoutScope()&&nav===NAV_SEQ&&TOKEN&&TOKEN===identity;}
+ function close(){handlingCloseManager();if(previous&&previous.isConnected)previous.focus();}
+ function field(tag,label,value){var el=chatElement(tag,'');if(value!==undefined)el.value=value;el.setAttribute('aria-label',label);return el;}
+ async function run(action,params){
+  if(busy||!current())return;busy=true;panel.querySelectorAll('button,input').forEach(function(el){el.disabled=true;});
+  var msg=panel.querySelector('[data-handling-manager-notice]');msg.textContent='保存中…';
+  try{var data=await chatCall(action,Object.assign({store_id:storeId},params));if(!current())return;catalog=data;render();
+   if(CHAT_STATE&&CHAT_STATE.detail&&CHAT_STATE.detail.store_id===storeId){var detail=CHAT_STATE.detail,result=await chatCall('get_customer_label',{customer_id:detail.customer_id});if(current()&&CHAT_STATE.detail===detail){detail.handling=result;chatRenderDetail(true);}}
+   if(current()&&CURRENT_GROUP==='chat'){handlingLoadFilter();chatLoadList(true,true);}
+  }catch(err){if(current()){msg.textContent=handlingReason(err&&err.code);panel.querySelectorAll('button,input').forEach(function(el){el.disabled=false;});panel.querySelectorAll('[data-handling-system]').forEach(function(el){el.disabled=true;});}}
+  finally{busy=false;}
+ }
+ function render(){
+  chatClear(panel);panel.appendChild(chatElement('h3','',chatStoreName(storeId)+'：ラベル設定'));
+  var dismiss=chatElement('button','chat-btn','閉じる');dismiss.type='button';dismiss.addEventListener('click',close);panel.appendChild(dismiss);
+  panel.appendChild(chatElement('p','handling-note','名前は40文字以内。予約用の4つは無効化できません。'));
+  var notice=chatElement('div','handling-note','');notice.dataset.handlingManagerNotice='';notice.setAttribute('aria-live','polite');panel.appendChild(notice);
+  (catalog.labels||[]).forEach(function(l,index){
+   var row=chatElement('div','handling-setting-row');row.dataset.handlingLabelId=l.id;
+   var name=field('input','ラベル名',l.name);name.maxLength=40;name.dataset.handlingName='';row.appendChild(name);
+   var color=field('input','色',handlingColor(l.color));color.type='color';color.dataset.handlingColor='';row.appendChild(color);
+   var active=field('input','有効');active.type='checkbox';active.checked=l.is_active;active.dataset.handlingActive='';
+   if(l.system_key){active.disabled=true;active.dataset.handlingSystem='';}row.appendChild(active);
+   row.appendChild(chatElement('span','handling-note','有効'));
+   var save=chatElement('button','chat-btn','保存');save.type='button';save.dataset.handlingSave='';row.appendChild(save);save.addEventListener('click',function(){run('save_label',{label_id:l.id,name:name.value,color:color.value,is_active:active.checked});});
+   [-1,1].forEach(function(delta){var move=chatElement('button','chat-btn',delta<0?'↑':'↓');move.type='button';move.setAttribute('aria-label',delta<0?'上へ':'下へ');move.disabled=index+delta<0||index+delta>=catalog.labels.length;row.appendChild(move);move.addEventListener('click',function(){var ids=catalog.labels.map(function(x){return x.id;}),other=index+delta;var tmp=ids[index];ids[index]=ids[other];ids[other]=tmp;run('reorder_labels',{label_ids:ids});});});
+   panel.appendChild(row);
+  });
+  var add=chatElement('div','handling-setting-row'),name=field('input','追加するラベル名',''),color=field('input','追加する色','#52796f');name.maxLength=40;name.placeholder='追加する名前';name.dataset.handlingAddName='';color.type='color';
+  add.appendChild(name);add.appendChild(color);var button=chatElement('button','chat-btn','追加');button.type='button';button.dataset.handlingAdd='';add.appendChild(button);button.addEventListener('click',function(){run('save_label',{label_id:null,name:name.value,color:color.value,is_active:true});});panel.appendChild(add);
+  dismiss.focus();
+ }
+ overlay.addEventListener('keydown',function(e){if(e.key==='Escape'&&!busy){e.preventDefault();close();}if(e.key==='Tab'){var nodes=Array.from(panel.querySelectorAll('button,input')).filter(function(el){return !el.disabled;});if(e.shiftKey&&document.activeElement===nodes[0]){e.preventDefault();nodes[nodes.length-1].focus();}else if(!e.shiftKey&&document.activeElement===nodes[nodes.length-1]){e.preventDefault();nodes[0].focus();}}});
+ panel.appendChild(chatElement('p','','読み込み中…'));
+ try{catalog=await chatCall('list_labels',{store_id:storeId});if(!current())return;if(!catalog||!Array.isArray(catalog.labels)||!catalog.can_manage)throw Object.assign(Error('forbidden'),{code:'forbidden_store'});render();}
+ catch(err){if(current()){chatClear(panel);panel.appendChild(chatElement('p','',handlingReason(err&&err.code)));var b=chatElement('button','chat-btn','閉じる');b.type='button';b.addEventListener('click',close);panel.appendChild(b);}}
+}
+async function handlingLoadChart(customer){
+ var root=document.getElementById('crmDetailBody'),host=chatElement('section','crm-sect'),scope=checkoutScope(),seq=CRM_DETAIL_SEQ,identity=TOKEN;
+ host.dataset.handlingHost='';host.textContent='対応ステータスを読み込み中…';root.prepend(host);
+ function current(){return TOKEN&&TOKEN===identity&&host.isConnected&&scope===checkoutScope()&&seq===CRM_DETAIL_SEQ;}
+ try{var data=await chatCall('get_customer_label',{customer_id:customer.id});if(!current())return;handlingRender(host,{customer_id:customer.id,handling:data});}
+ catch(_err){if(current())host.textContent='対応ステータスはまだ利用できません。';}
+}
+
 /* CS3A CHAT INBOX SCRIPT END */
 
 function loadHome(){
@@ -3531,7 +3702,7 @@ async function lsecClear(kind){
 }
 
 // ===== ログイン画面の再表示（各タブのエラーフックから呼ばれる）=====
-function showLogin(msg){ chatSetFocus(false); var ov=document.getElementById("login"); if(ov) ov.style.display="flex"; var e=document.getElementById("lerr"); if(e&&msg) e.textContent=msg; }
+function showLogin(msg){ handlingCloseManager(); chatSetFocus(false); var ov=document.getElementById("login"); if(ov) ov.style.display="flex"; var e=document.getElementById("lerr"); if(e&&msg) e.textContent=msg; }
 
 /* ★ログアウト：Supabase Auth の signout → ローカルセッション破棄 → 画面を初期化してログイン表示。
    ・多院所属者が「別アカウントで入り直す」導線。単店ユーザーにも常設バーから提供。
@@ -6406,6 +6577,7 @@ function crmRenderDetail(uid, res){
     crmFooterHtml(uid, curType, curHuman, hasUid, c);
 
   if(uid&&c&&c.id&&c.line_uid){var inbox=document.createElement('button');inbox.type='button';inbox.className='rbtn nav-link';inbox.dataset.chartChat=c.id;inbox.textContent='💬 チャットで見る';document.getElementById('crmDetailBody').prepend(inbox);}
+  if(c&&c.id)handlingLoadChart(c);
   navReturnButton();
   crmLoadTreatmentNotes(uid,(resvs.find(function(r){return r.phone;})||{}).phone,bookingNm,resvs,c&&c.store_id);
 
