@@ -1715,7 +1715,7 @@ function chatReason(code){
     chat_inbox_disabled:'この店舗ではチャットがまだ有効ではありません。',
     chat_workflow_disabled:'この店舗では既読・対応開始はまだ有効ではありません。',
     chat_ai_resume_disabled:'この店舗では対応完了によるAI再開はまだ有効ではありません。',
-    completion_requires_manager:'チャットの対応完了は管理者だけが使えます。'+chatCompletionGuide(CHAT_STATE && CHAT_STATE.detail),
+    completion_requires_manager:'対応完了の権限更新がまだ反映されていません。管理者に確認してください。',
     chat_send_disabled:'この店舗では管理画面返信がまだ有効ではありません。',
     line_uid_missing:'このお客様はLINE送信先を確認できません。',
     friend_blocked:'このお客様はLINEをブロックしているため送信できません。',
@@ -1786,16 +1786,12 @@ function chatCanSend(detail){
 function chatAiPauseNote(detail){
   return detail && detail.status!=='in_progress' ? '送ると、この方へのAIの返信はお休みになります（対応完了で再開）' : '';
 }
-// チャットの「対応完了（AI再開）」は管理者（owner/admin/platform_admin）だけ（2026-10-12）。
-// スタッフはLINEの「完了 番号 名前」を使う。最終判定はDB（completion_requires_manager）。
+// 有効な自店スタッフも完了できる。最終的な店舗権限はDBで確認する。
 function chatCompletionGuide(detail){
-  return detail && detail.ticket_no
-    ? '対応が終わったら、スタッフグループLINEで「完了 番号 名前」を送ってください（チャットの対応完了は管理者のみ）。'
-    : '返事が済んでいたら、管理画面のカルテで「対応完了」を押してください。';
+  return '対応が終わったら、チャットの「対応完了（AI再開）」ボタンを押してください。';
 }
-function chatIsManager(){ return window.IS_MANAGER === true; }
 function chatCanComplete(detail){
-  return !!(detail && detail.workflow_enabled === true && detail.ai_resume_enabled === true && detail.status==='in_progress' && chatIsManager());
+  return !!(detail && detail.workflow_enabled === true && detail.ai_resume_enabled === true && detail.status==='in_progress');
 }
 function chatIsUnread(detail){
   if(!detail || !detail.last_inbound_at) return false;
@@ -1810,9 +1806,7 @@ function chatUpdateModeNote(detail){
   if(chatCanWorkflow(detail) && detail.status!=='none'){
     var sendNote=detail.send_enabled===true ? '管理画面返信が有効です。' : '管理画面返信はまだ無効です。';
     note=detail.ai_resume_enabled===true
-      ? (chatIsManager()
-        ? '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。対応開始・「対応完了（AI再開）」が有効です。'+sendNote
-        : '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」が有効です。'+chatCompletionGuide(detail)+sendNote)
+      ? '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。対応開始・「対応完了（AI再開）」が有効です。'+sendNote
       : '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」が有効です。対応完了によるAI再開はまだ無効です。'+sendNote;
   }
   chatSetText('chatModeNote',note);
