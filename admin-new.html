@@ -831,6 +831,8 @@ body.chat-conversation .chat-read-toggle{margin:0;padding:8px;font-size:12px}
 .chat-summary .chat-nav-links>[data-chat-chart]{flex-shrink:0}
 .chat-summary .chat-detail-meta,.chat-summary .chat-nav-links>*,.chat-summary>[data-nav-cross-back]{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
 .chat-summary>[data-nav-cross-back]{margin:0;min-width:0;font-size:11px}
+.chat-summary .chat-complete{flex:0 0 auto;margin:0;padding:5px;font-size:11px;white-space:nowrap}
+.chat-new-messages{flex:0 0 auto;align-self:center;margin:3px;padding:4px 12px;border:1px solid #b3d8d1;border-radius:16px;background:#fff;color:#147668;font-size:12px}
 .chat-messages{min-height:0;padding:0 12px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;overflow-anchor:none;flex:1}
 body.chat-conversation .chat-compose{position:sticky;bottom:0;flex:0 0 auto;margin:0;padding:6px 10px max(6px,env(safe-area-inset-bottom));border-radius:0;border-width:1px 0 0;background:#f8fbfa}
 body.chat-conversation .chat-compose-title{font-size:11px;margin-bottom:2px}
@@ -1610,6 +1612,83 @@ function showHome(el){
 /* CS3A CHAT INBOX SCRIPT START */
 // CS4は対応中の会話だけに1対1返信を追加する。宛先・送信者・チャネルはサーバー側で確定する。
 var CHAT_STATE = null;
+var CHAT_LIVE_DETAIL_TIMER=null,CHAT_LIVE_LIST_TIMER=null,CHAT_LIVE_EPOCH=0;
+
+function chatStopLive(){
+  clearInterval(CHAT_LIVE_DETAIL_TIMER);clearInterval(CHAT_LIVE_LIST_TIMER);
+  CHAT_LIVE_DETAIL_TIMER=null;CHAT_LIVE_LIST_TIMER=null;CHAT_LIVE_EPOCH++;
+  if(CHAT_STATE){
+    CHAT_STATE.liveDetailBusy=null;
+    if(CHAT_STATE.liveListBusy){CHAT_STATE.loadingList=false;CHAT_STATE.liveListBusy=null;}
+  }
+}
+function chatStartLive(){
+  chatStopLive();
+  if(document.visibilityState!=='visible')return;
+  CHAT_LIVE_DETAIL_TIMER=setInterval(chatRefreshConversation,10000);
+  CHAT_LIVE_LIST_TIMER=setInterval(chatRefreshListLive,30000);
+}
+function chatLiveVisible(){
+  var view=document.getElementById('chatView'),login=document.getElementById('login');
+  return !!(CHAT_STATE && CHAT_STATE.tenantId===TENANT_ID && CURRENT_GROUP==='chat' && document.visibilityState==='visible' && view && view.style.display==='block' && (!login || login.style.display==='none'));
+}
+function chatLiveBusy(){
+  return !!(CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy || CHAT_STATE.loadingDetail || ASK_CONFIRM_PENDING);
+}
+// 最新の1ページを既存の履歴へマージする。既読化やLINE送信は行わない。
+function chatRefreshConversation(){
+  if(!chatLiveVisible() || chatLiveBusy())return;
+  var state=CHAT_STATE,customerId=state.selectedCustomerId;
+  if(!customerId || !state.detail || state.liveDetailBusy)return;
+  var scope=checkoutScope(),nav=NAV_SEQ,epoch=CHAT_LIVE_EPOCH;
+  var seq=(state.detailSeq||0)+1;state.detailSeq=seq;state.liveDetailBusy=seq;
+  var version=state.detail.version,readSeq=state.readToggleSeq;
+  function current(){return state===CHAT_STATE && state.selectedCustomerId===customerId && state.detailSeq===seq && scope===checkoutScope() && nav===NAV_SEQ && epoch===CHAT_LIVE_EPOCH && chatLiveVisible();}
+  function unchanged(){return current() && !chatLiveBusy() && state.detail && state.detail.version===version && state.readToggleSeq===readSeq;}
+  return chatCall('get_conversation',{customer_id:customerId,limit:100}).then(function(data){
+    if(!unchanged())return;
+    if(!data || data.customer_id!==customerId || !Array.isArray(data.messages) || !(Number.isSafeInteger(data.version) && data.version>=0 || data.status==='none' && data.version===null))throw new Error('invalid_response');
+    if(!state.liveConflict && !state.workflowNeedsReload && !state.liveDetailFailures && JSON.stringify(data)===JSON.stringify(state.detail))return;
+    var body=document.getElementById('chatMessages'),nearBottom=body && body.scrollHeight-body.clientHeight-body.scrollTop<=80;
+    var known=new Map(state.messages.map(function(m){return [m.id,m];})),added=false;
+    data.messages.forEach(function(m){if(!m || !m.id)return;if(!known.has(m.id))added=true;known.set(m.id,m);});
+    state.messages=Array.from(known.values()).sort(function(a,b){return a.created_at<b.created_at?-1:a.created_at>b.created_at?1:String(a.id).localeCompare(String(b.id));});
+    state.detail=data;state.liveDetailFailures=0;state.workflowNeedsReload=false;
+    if(state.liveConflict){state.workflowMessage='新しいメッセージがあります。内容を確認してから、もう一度『対応完了』を押してください';state.liveConflict=false;}
+    if(added && !nearBottom)state.hasNewMessages=true;
+    chatSyncListFromDetail();chatRenderList();chatUpdateModeNote(data);chatRenderDetail(true);
+    if(nearBottom)chatScrollToLatest();
+  }).catch(function(){
+    if(!unchanged())return;
+    state.liveDetailFailures=(state.liveDetailFailures||0)+1;
+    if(state.liveDetailFailures>=3)chatSetText('chatDetailMsg','会話の自動更新ができていません。接続を確認してください。再試行します。');
+  }).finally(function(){if(state.liveDetailBusy===seq)state.liveDetailBusy=null;});
+}
+function chatRefreshListLive(){
+  if(!chatLiveVisible() || chatLiveBusy() || CHAT_STATE.loadingList || CHAT_STATE.searchPending)return;
+  var state=CHAT_STATE,scope=checkoutScope(),epoch=CHAT_LIVE_EPOCH,seq=(state.listSeq||0)+1;state.listSeq=seq;
+  var search=document.getElementById('chatSearch'),store=document.getElementById('chatStoreFilter');
+  var query=search?search.value:'',storeId=store?store.value:'';
+  var params={limit:50};if(query)params.query=query;if(storeId)params.store_id=storeId;
+  function current(){return state===CHAT_STATE && state.listSeq===seq && scope===checkoutScope() && epoch===CHAT_LIVE_EPOCH && chatLiveVisible() && !state.searchPending && (!search || search.value===query) && (!store || store.value===storeId);}
+  state.loadingList=true;state.liveListBusy=seq;
+  return chatCall('list_conversations',params).then(function(rows){
+    if(!current() || chatLiveBusy())return;
+    if(!Array.isArray(rows))throw new Error('invalid_response');
+    // 「もっと見る」で51件目以降まで読んでいる時は、先頭50件だけ差し替えて続きは残す（読んでいた所を消さない）。
+    var older=(state.items||[]).length>50?state.items.slice(50):[];
+    if(older.length){var seen={};rows.forEach(function(r){if(r&&r.customer_id)seen[r.customer_id]=true;});state.items=rows.concat(older.filter(function(r){return r&&!seen[r.customer_id];}));}
+    else{state.items=rows;var last=rows.length?rows[rows.length-1]:null;
+      state.listCursor=last && last.sort_at && (last.customer_id || last.cursor_id)?{before_at:last.sort_at,before_id:last.customer_id || last.cursor_id}:null;
+      state.listHasMore=rows.length===50 && !!state.listCursor;}
+    state.listQuery=query;state.listStore=storeId;state.liveListFailures=0;
+    chatRenderList();
+  }).catch(function(){
+    if(!current())return;
+    state.liveListFailures=(state.liveListFailures||0)+1;
+    if(state.liveListFailures>=3)chatSetText('chatListMsg','一覧の自動更新ができていません。再試行します。');
+  }).finally(function(){if(state===CHAT_STATE && state.listSeq===seq){state.loadingList=false;state.liveListBusy=null;var more=document.getElementById('chatMore');if(more)more.disabled=false;}});
+}
 
 function chatNewState(){
   return {
@@ -1624,6 +1703,7 @@ function chatNewState(){
 function chatResetState(){
   chatSetFocus(false);
   CHAT_STATE = chatNewState();
+  chatStartLive();
   var list = document.getElementById('chatList'); if(list) chatClear(list);
   var detail = document.getElementById('chatDetail'); if(detail) chatClear(detail);
   chatSetText('chatListMsg', '読み込み前');
@@ -1912,13 +1992,18 @@ function chatLoadList(reset,preserveDetail){
   });
 }
 
-function chatRenderDetail(){
+function chatRenderDetail(live){
   var host=document.getElementById('chatDetail'); if(!host || !CHAT_STATE || !CHAT_STATE.detail) return;
   var active=document.getElementById('chatReplyBody'),selection=active&&document.activeElement===active
     ? [active.selectionStart,active.selectionEnd,active.selectionDirection] : null;
   var previous=document.getElementById('chatMessages'),scrollTop=previous?previous.scrollTop:0;
   var atBottom=previous && previous.scrollHeight-previous.clientHeight-previous.scrollTop<=2;
-  chatClear(host);
+  // 自動更新中は入力欄をDOMから外さない（iPhoneのキーボード・変換を保持）。
+  var composer=live && chatCanSend(CHAT_STATE.detail)?host.querySelector('.chat-compose'):null;
+  if(composer && composer.dataset.chatComposerKey!==chatComposerKey(CHAT_STATE.detail))composer=null;
+  var oldRows=new Map();
+  if(live)host.querySelectorAll('[data-chat-message-id]').forEach(function(row){oldRows.set(row.dataset.chatMessageId,row);});
+  Array.from(host.childNodes).forEach(function(node){if(node!==composer)host.removeChild(node);});
   var detail=CHAT_STATE.detail;
   var name=detail.display_name || (detail.ticket_no ? 'お客様 #'+detail.ticket_no : '名前未設定のお客様');
   var header=chatElement('div','chat-detail-header');
@@ -1933,23 +2018,30 @@ function chatRenderDetail(){
     readButton.addEventListener('click',function(){chatMaybeMarkRead(detail);});
     header.appendChild(readButton);
   }
-  host.appendChild(header);
+  host.insertBefore(header,composer);
   var assigned=(detail.status==='in_progress')
     ? ' ・ '+(detail.assigned_staff_name ? detail.assigned_staff_name+'さん対応中' : '担当者対応中') : '';
   var meta=chatElement('div','chat-detail-meta',chatStatusLabel(detail.status)+assigned+' ・ '+chatStoreName(detail.store_id));
   var summary=chatElement('div','chat-summary');summary.appendChild(meta);
-  chatRenderLinks(summary,detail);host.appendChild(summary);
+  chatRenderLinks(summary,detail);host.insertBefore(summary,composer);
+  if(chatCanComplete(detail)){
+    var complete=chatElement('button','chat-btn chat-complete','✅ 対応完了');complete.type='button';complete.dataset.chatComplete='';
+    complete.disabled=!!CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy;
+    complete.addEventListener('click',chatCompleteHandling);summary.appendChild(complete);
+  }
   navReturnButton();
-  if(CHAT_STATE.workflowMessage){var notice=chatElement('div','chat-action-notice',CHAT_STATE.workflowMessage);notice.setAttribute('role','status');host.appendChild(notice);}
+  if(CHAT_STATE.workflowMessage){var notice=chatElement('div','chat-action-notice',CHAT_STATE.workflowMessage);notice.setAttribute('role','status');host.insertBefore(notice,composer);}
   var body=chatElement('div','chat-messages');body.id='chatMessages';body.setAttribute('role','region');body.setAttribute('aria-label','会話本文');body.tabIndex=0;
   body.appendChild(document.getElementById('chatOlderTemplate').content.cloneNode(true));
-  host.appendChild(body);host=body;
+  host.insertBefore(body,composer);host=body;
   chatRenderWorkflow(host, detail);
   if(!CHAT_STATE.messages.length){ host.appendChild(chatElement('div','chat-empty','メッセージはありません。')); }
   var previousDay=null;
   CHAT_STATE.messages.forEach(function(message){
     var date=chatDateParts(message.created_at);
     if(date && date.key!==previousDay){host.appendChild(chatElement('div','chat-date-divider',date.month+'月'+date.day+'日('+date.week+')'));previousDay=date.key;}
+    var oldRow=oldRows.get(String(message.id));
+    if(oldRow && oldRow._chatMessage===JSON.stringify(message)){host.appendChild(oldRow);return;}
     var roleClass=(message.role==='staff') ? 'chat-role-staff' : (message.role==='ai' ? 'chat-role-ai' : 'chat-role-user');
     var bubble=chatElement('article','chat-message '+roleClass);
     bubble.appendChild(chatElement('div','chat-message-role',chatRoleLabel(message.role)));
@@ -1983,9 +2075,13 @@ function chatRenderDetail(){
       foot.appendChild(outside);
     }
     bubble.appendChild(foot);
-    var row=chatElement('div','chat-message-row '+roleClass);row.appendChild(bubble);row.appendChild(time);host.appendChild(row);
+    var row=chatElement('div','chat-message-row '+roleClass);row.dataset.chatMessageId=message.id;row._chatMessage=JSON.stringify(message);row.appendChild(bubble);row.appendChild(time);host.appendChild(row);
   });
-  chatRenderComposer(document.getElementById('chatDetail'),detail);
+  var newMessages=chatElement('button','chat-new-messages','↓ 新しいメッセージ');newMessages.type='button';newMessages.id='chatNewMessages';
+  newMessages.style.display=CHAT_STATE.hasNewMessages?'block':'none';newMessages.addEventListener('click',chatScrollToLatest);
+  document.getElementById('chatDetail').insertBefore(newMessages,composer);
+  if(composer){composer.querySelector('.chat-compose-foot button').disabled=CHAT_STATE.sendBusy || CHAT_STATE.workflowNeedsReload;}
+  else chatRenderComposer(document.getElementById('chatDetail'),detail);
   chatSetText('chatDetailMsg','会話履歴 '+CHAT_STATE.messages.length+'件');
   var older=document.getElementById('chatOlder');
   if(older){ older.style.display=CHAT_STATE.detailHasMore ? 'inline-block' : 'none'; older.disabled=CHAT_STATE.loadingDetail;
@@ -1996,6 +2092,7 @@ function chatRenderDetail(){
   if(selection && reply && !reply.disabled){reply.focus({preventScroll:true});reply.setSelectionRange(selection[0],selection[1],selection[2]);}
 }
 
+function chatComposerKey(detail){return JSON.stringify([chatAiPauseNote(detail),detail.send_mock===true,CHAT_STATE.sendMessage]);}
 function chatRenderComposer(host,detail){
   if(!chatCanSend(detail)){
     var reason=detail.blocked ? 'friend_blocked' : (detail.line_uid_missing ? 'line_uid_missing' : detail.send_block_reason);
@@ -2004,6 +2101,7 @@ function chatRenderComposer(host,detail){
     return;
   }
   var box=chatElement('section','chat-compose');
+  box.dataset.chatComposerKey=chatComposerKey(detail);
   var title='返信を書く';
   if(detail.send_mock===true) title+='（モック・外部LINE送信なし）';
   box.appendChild(chatElement('div','chat-compose-title',title));
@@ -2265,21 +2363,23 @@ function chatStartHandling(){
 
 async function chatCompleteHandling(){
   if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanComplete(CHAT_STATE.detail)) return;
-  if(CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload) return;
+  if(CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy) return;
+  var state=CHAT_STATE,seq=state.detailSeq,scope=checkoutScope(),nav=NAV_SEQ;
+  function current(){return state===CHAT_STATE && state.detailSeq===seq && scope===checkoutScope() && nav===NAV_SEQ && CURRENT_GROUP==='chat';}
   var customerId=CHAT_STATE.detail.customer_id;
   var expectedVersion=CHAT_STATE.detail.version;
   var expectedInbound=CHAT_STATE.detail.last_inbound_at;
   if(!Number.isSafeInteger(expectedVersion) || (expectedInbound!==null && (typeof expectedInbound!=='string' || !expectedInbound))) return;
   if(!(await askConfirm({title:'', body:'対応を完了すると、次回のお客様メッセージからAI対応を再開します。対応完了にしますか？', ok:'対応完了にする', cancel:'やめる', danger:false}))) return;
-  if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanComplete(CHAT_STATE.detail) || CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload) return;
+  if(!current() || !CHAT_STATE.detail || !chatCanComplete(CHAT_STATE.detail) || CHAT_STATE.workflowBusy || CHAT_STATE.workflowNeedsReload || CHAT_STATE.sendBusy) return;
   if(CHAT_STATE.detail.customer_id!==customerId || CHAT_STATE.detail.version!==expectedVersion || CHAT_STATE.detail.last_inbound_at!==expectedInbound) return;
   CHAT_STATE.workflowBusy='complete_handling'; CHAT_STATE.workflowMessage='対応完了を記録しています…'; chatRenderDetail();
-  chatCall('complete_handling', {
+  return chatCall('complete_handling', {
     customer_id:customerId,
     expected_version:expectedVersion,
     expected_last_inbound_at:expectedInbound
   }).then(function(data){
-    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(!current() || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
     if(CHAT_STATE.detail.version!==expectedVersion || CHAT_STATE.detail.last_inbound_at!==expectedInbound) return;
     if(!data || data.status!=='done' || !Number.isSafeInteger(data.version) || !data.completed_at){
       throw Object.assign(new Error('chat_invalid_response'),{code:'invalid_response'});
@@ -2292,24 +2392,27 @@ async function chatCompleteHandling(){
     CHAT_STATE.workflowMessage='対応完了として記録し、AI再開条件を有効にしました。';
     chatSyncListFromDetail(); chatRenderList();
   }).catch(function(error){
-    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
+    if(!current() || CHAT_STATE.selectedCustomerId!==customerId || !CHAT_STATE.detail) return;
     var code=error && error.code;
     if(code==='chat_workflow_disabled') CHAT_STATE.detail.workflow_enabled=false;
     if(code==='chat_ai_resume_disabled') CHAT_STATE.detail.ai_resume_enabled=false;
     if(code==='version_conflict' || code==='inbound_conflict' || code==='conversation_not_open' || code==='unresolved_delivery') CHAT_STATE.workflowNeedsReload=true;
+    if(code==='version_conflict' || code==='inbound_conflict')CHAT_STATE.liveConflict=true;
     CHAT_STATE.workflowMessage=chatReason(code);
   }).finally(function(){
-    if(!CHAT_STATE || CHAT_STATE.selectedCustomerId!==customerId) return;
+    if(!current() || CHAT_STATE.selectedCustomerId!==customerId) return;
     CHAT_STATE.workflowBusy=null; chatUpdateModeNote(CHAT_STATE.detail); chatRenderDetail();
+    if(CHAT_STATE.liveConflict){CHAT_STATE.liveDetailBusy=null;return chatRefreshConversation();}
   });
 }
 
 function chatLoadDetail(customerId, reset){
-  if(!customerId || !CHAT_STATE || (!reset&&CHAT_STATE.loadingDetail)) return;
+  if(!customerId || !CHAT_STATE || (!reset && (CHAT_STATE.loadingDetail || CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy || ASK_CONFIRM_PENDING))) return;
   var requestTenant=TENANT_ID,state=CHAT_STATE,requestScope=checkoutScope(),requestNav=NAV_SEQ,requestSeq=(state.detailSeq||0)+1;state.detailSeq=requestSeq;
   function current(){return state===CHAT_STATE&&requestSeq===state.detailSeq&&requestTenant===TENANT_ID&&requestScope===checkoutScope()&&requestNav===NAV_SEQ&&CURRENT_GROUP==='chat';}
   if(reset){
     state.readToggleSeq=(state.readToggleSeq||0)+1;
+    state.liveDetailBusy=null;state.liveDetailFailures=0;state.hasNewMessages=false;state.liveConflict=false;
     var changingCustomer=!!CHAT_STATE.selectedCustomerId && CHAT_STATE.selectedCustomerId!==customerId;
     if(changingCustomer){
       CHAT_STATE.sendBusy=false; CHAT_STATE.sendMessage=''; CHAT_STATE.draftBody=''; CHAT_STATE.draftId=null;
@@ -2385,6 +2488,8 @@ function chatFitViewport(){
 /* 本文の中だけを最新へ。返信欄や管理画面をスクロールしない。 */
 function chatScrollToLatest(){
   var host=document.getElementById('chatMessages'); if(host) host.scrollTop=host.scrollHeight;
+  if(CHAT_STATE)CHAT_STATE.hasNewMessages=false;
+  var button=document.getElementById('chatNewMessages');if(button)button.style.display='none';
 }
 async function chatBackToList(){
   if(!CHAT_STATE || NAV_BACK_PENDING)return;
@@ -2418,9 +2523,14 @@ function showChatInbox(el){
   function scheduleSearch(){
     clearTimeout(searchTimer);if(composing)return;
     var state=CHAT_STATE,scope=checkoutScope();
-    searchTimer=setTimeout(function(){if(state===CHAT_STATE&&scope===checkoutScope()&&CURRENT_GROUP==='chat')chatLoadList(true,true);},300);
+    if(state)state.searchPending=true;
+    searchTimer=setTimeout(function(){if(state===CHAT_STATE&&scope===checkoutScope()&&CURRENT_GROUP==='chat'){state.searchPending=false;chatLoadList(true,true);}},300);
   }
-  if(search){search.addEventListener('input',scheduleSearch);search.addEventListener('compositionstart',function(){composing=true;clearTimeout(searchTimer);});search.addEventListener('compositionend',function(){composing=false;scheduleSearch();});}
+  if(search){search.addEventListener('input',scheduleSearch);search.addEventListener('compositionstart',function(){composing=true;clearTimeout(searchTimer);if(CHAT_STATE)CHAT_STATE.searchPending=true;});search.addEventListener('compositionend',function(){composing=false;scheduleSearch();});}
+  document.addEventListener('visibilitychange',function(){
+    chatStopLive();
+    if(document.visibilityState==='visible' && chatLiveVisible()){chatStartLive();chatRefreshConversation();chatRefreshListLive();}
+  });
   var back=document.getElementById('chatBack'); if(back) back.addEventListener('click',chatBackToList);
   window.addEventListener('resize',chatFitViewport);
   if(window.visualViewport){window.visualViewport.addEventListener('resize',chatFitViewport);window.visualViewport.addEventListener('scroll',chatFitViewport);}
