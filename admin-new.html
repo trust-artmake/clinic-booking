@@ -1019,7 +1019,7 @@ body.chat-conversation .chat-compose-msg{font-size:11px;max-height:44px;overflow
     <div class="chat-head">
       <div>
         <div class="chat-title">💬 チャット</div>
-        <div class="chat-readonly" id="chatModeNote">閲覧専用です。会話を開いても既読や担当状態は変わりません。</div>
+        <div class="chat-readonly" id="chatModeNote">会話を選んで確認・返信できます。開くだけでは既読や担当状態は変わりません。</div>
       </div>
       <div class="chat-toolbar">
         <label for="chatStoreFilter">店舗</label>
@@ -1742,7 +1742,7 @@ function chatResetState(){
   var detail = document.getElementById('chatDetail'); if(detail) chatClear(detail);
   chatSetText('chatListMsg', '読み込み前');
   chatSetText('chatDetailMsg', '会話を選んでください');
-  chatSetText('chatModeNote', '閲覧専用です。会話を開いても既読や担当状態は変わりません。');
+  chatUpdateModeNote(null);
   var more = document.getElementById('chatMore'); if(more) more.style.display = 'none';
   var older = document.getElementById('chatOlder'); if(older) older.style.display = 'none';
 }
@@ -1922,7 +1922,9 @@ function chatIsUnread(detail){
   return !Number.isFinite(inbound) || !Number.isFinite(read) || read < inbound;
 }
 function chatUpdateModeNote(detail){
-  var note='閲覧専用です。会話を開いても既読や担当状態は変わりません。';
+  var note=detail
+    ? '閲覧専用です。会話を開いても既読や担当状態は変わりません。'
+    : '会話を選んで確認・返信できます。開くだけでは既読や担当状態は変わりません。';
   if(chatCanSend(detail) && detail.status==='none') note='会話を開くだけでは担当状態は変わりません。管理画面返信が有効です。';
   if(chatCanWorkflow(detail) && detail.status!=='none'){
     var sendNote=detail.send_enabled===true ? '管理画面返信が有効です。' : '管理画面返信はまだ無効です。';
