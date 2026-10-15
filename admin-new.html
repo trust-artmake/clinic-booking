@@ -745,6 +745,13 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-message.chat-role-staff{margin-left:auto;background:#e6f6f3}
 .chat-message-role{font-size:10.5px;font-weight:800;color:#64748b;margin-bottom:3px}
 .chat-message-body{font-size:13.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-inline-image{display:block;max-width:100%;width:auto;height:auto;max-height:320px;object-fit:contain;border-radius:8px;cursor:zoom-in;margin-top:6px}
+.chat-image-status{font-size:12px;color:#64748b;white-space:normal;margin-top:4px}
+.chat-image-viewer{display:none;position:fixed;inset:0;margin:auto;width:calc(100% - 24px);max-width:960px;max-height:85vh;max-height:85dvh;padding:12px;border:0;border-radius:12px;overflow:auto;background:#fff;box-sizing:border-box}
+.chat-image-viewer::backdrop{background:#000b}
+.chat-image-viewer[open]{display:flex;flex-direction:column;align-items:center;gap:8px}
+.chat-image-viewer img{display:block;max-width:100%;max-height:70vh;max-height:70dvh;object-fit:contain;min-width:0}
+.chat-image-viewer .chat-btn{align-self:flex-end}
 .chat-message-foot{font-size:10.5px;color:#64748b;margin-top:5px;display:flex;gap:7px;flex-wrap:wrap}
 .chat-delivery-fail{color:#b91c1c;font-weight:800}
 .chat-compose{margin:12px 0 4px;padding:11px;border:1px solid #cfe0dd;border-radius:11px;background:#f8fbfa}
@@ -1539,7 +1546,7 @@ function sbUpsert(table, rows){
 }
 
 // ===== ビュー切替（全タブ共通）=====
-function hideAllViews(){ handlingCloseManager(); chatSetFocus(false); ["consoleView","homeView","chatView","resvView","custView","dashView","settlementView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
+function hideAllViews(){ handlingCloseManager(); chatSetFocus(false); chatClearImages(); ["consoleView","homeView","chatView","resvView","custView","dashView","settlementView","aiView","reviewView","setView","acqView","stepsView","setupView","usersView"].forEach(function(id){ var e=document.getElementById(id); if(e) e.style.display="none"; }); }
 // 小タブ(#subnav)の中で「いま表示中」をハイライト。el が無い（プログラム呼び出し）ときは現状維持。
 function setActiveNav(el){ if(!el) return; var bs=document.querySelectorAll("#subnav button"); for(var i=0;i<bs.length;i++) bs[i].classList.toggle("active", bs[i]===el); }
 
@@ -1645,6 +1652,7 @@ function showHome(el){
 /* CS3A CHAT INBOX SCRIPT START */
 // CS4は対応中の会話だけに1対1返信を追加する。宛先・送信者・チャネルはサーバー側で確定する。
 var CHAT_STATE = null;
+var CHAT_IMAGE_URLS=new Map(),CHAT_IMAGE_REQUESTS=new Map(),CHAT_IMAGE_EPOCH=0;
 var CHAT_LIVE_DETAIL_TIMER=null,CHAT_LIVE_LIST_TIMER=null,CHAT_LIVE_EPOCH=0;
 
 function chatStopLive(){
@@ -1735,6 +1743,7 @@ function chatNewState(){
 }
 
 function chatResetState(){
+  chatClearImages();
   chatSetFocus(false);
   CHAT_STATE = chatNewState();
   chatStartLive();
@@ -1757,6 +1766,69 @@ function chatElement(tag, className, value){
   if(className) el.className=className;
   if(value !== undefined && value !== null) el.textContent=String(value);
   return el;
+}
+
+function chatCloseImageViewer(){
+  var viewer=document.getElementById('chatImageViewer');if(!viewer)return;
+  var previous=viewer._chatPrevious;if(typeof viewer.close==='function'&&viewer.open)viewer.close();viewer.remove();
+  if(previous&&previous.isConnected)previous.focus();
+}
+function chatForgetImage(id){
+  var url=CHAT_IMAGE_URLS&&CHAT_IMAGE_URLS.get(id);
+  if(url){URL.revokeObjectURL(url);CHAT_IMAGE_URLS.delete(id);}
+  var viewer=document.getElementById('chatImageViewer');if(viewer&&viewer.dataset.chatImageId===id)chatCloseImageViewer();
+  document.querySelectorAll('[data-chat-image-id]').forEach(function(host){if(host.dataset.chatImageId!==id)return;
+    var img=host.querySelector('.chat-inline-image');if(img)img.remove();var button=host.querySelector('[data-chat-image-load]');if(button){button.disabled=false;button.textContent='画像を表示';}
+  });
+}
+function chatClearImages(){
+  CHAT_IMAGE_EPOCH=(CHAT_IMAGE_EPOCH||0)+1;chatCloseImageViewer();
+  if(CHAT_IMAGE_REQUESTS){CHAT_IMAGE_REQUESTS.forEach(function(request){request.abort();});CHAT_IMAGE_REQUESTS.clear();}
+  if(CHAT_IMAGE_URLS)Array.from(CHAT_IMAGE_URLS.keys()).forEach(chatForgetImage);
+}
+function chatShowImage(url,id,previous){
+  if(!CHAT_IMAGE_URLS||CHAT_IMAGE_URLS.get(id)!==url)return;
+  chatCloseImageViewer();var viewer=chatElement('dialog','chat-image-viewer');viewer.id='chatImageViewer';viewer.dataset.chatImageId=id;viewer.setAttribute('aria-label','受信した画像');viewer._chatPrevious=previous;
+  var close=chatElement('button','chat-btn','閉じる');close.type='button';close.dataset.chatImageClose='';close.addEventListener('click',chatCloseImageViewer);
+  var img=chatElement('img','');img.alt='お客様から届いた画像';img.referrerPolicy='no-referrer';img.src=url;
+  viewer.appendChild(close);viewer.appendChild(img);document.body.appendChild(viewer);
+  viewer.addEventListener('cancel',function(e){e.preventDefault();chatCloseImageViewer();});
+  viewer.addEventListener('click',function(e){if(e.target===viewer)chatCloseImageViewer();});
+  viewer.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();chatCloseImageViewer();}});
+  if(typeof viewer.showModal==='function')viewer.showModal();else{viewer.setAttribute('open','');viewer.style.display='flex';}close.focus();
+}
+function chatImageContent(host,message){
+  var id=String(message.id||''),customer=CHAT_STATE.selectedCustomerId;
+  host.dataset.chatImageId=id;
+  var button=chatElement('button','chat-btn','画像を表示');button.type='button';button.dataset.chatImageLoad='';
+  var status=chatElement('div','chat-image-status');status.setAttribute('role','status');host.appendChild(button);host.appendChild(status);
+  function render(url){
+    if(host.querySelector('.chat-inline-image'))return;
+    var img=chatElement('img','chat-inline-image');img.alt='お客様から届いた画像（押すと拡大）';img.referrerPolicy='no-referrer';img.tabIndex=0;img.setAttribute('role','button');img.src=url;
+    img.addEventListener('click',function(){chatShowImage(url,id,img);});img.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();chatShowImage(url,id,img);}});
+    img.addEventListener('error',function(){chatForgetImage(id);status.textContent='画像を読み込めませんでした。もう一度お試しください。';});
+    host.appendChild(img);button.textContent='画像を拡大';button.disabled=false;status.textContent='';
+  }
+  if(CHAT_IMAGE_URLS.has(id))render(CHAT_IMAGE_URLS.get(id));
+  button.addEventListener('click',async function(){
+    if(CHAT_IMAGE_URLS.has(id)){chatShowImage(CHAT_IMAGE_URLS.get(id),id,button);return;}
+    if(!TOKEN||CHAT_IMAGE_REQUESTS.has(id)||!CHAT_STATE||CHAT_STATE.selectedCustomerId!==customer)return;
+    var state=CHAT_STATE,tenant=TENANT_ID,token=TOKEN,scope=checkoutScope(),epoch=CHAT_IMAGE_EPOCH,controller=new AbortController();
+    function current(){return state===CHAT_STATE&&tenant===TENANT_ID&&token===TOKEN&&scope===checkoutScope()&&epoch===CHAT_IMAGE_EPOCH&&CHAT_STATE.selectedCustomerId===customer&&CURRENT_GROUP==='chat'&&host.isConnected;}
+    CHAT_IMAGE_REQUESTS.set(id,controller);var timeout=setTimeout(function(){controller.abort();},20000);button.disabled=true;status.textContent='画像を読み込み中…';
+    try{
+      var response=await fetch(SB_URL+'/functions/v1/manage-chat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},hdr()),body:JSON.stringify({action:'get_message_image',tenant_id:tenant,customer_id:customer,message_id:id}),signal:controller.signal});
+      if(!current())return;
+      if(!response.ok)throw new Error(response.status===404?'image_unavailable':'image_failed');
+      var mime=(response.headers.get('content-type')||'').split(';')[0];
+      if(!/^image\/(png|jpeg|gif|webp)$/.test(mime))throw new Error('image_failed');
+      var blob=await response.blob();if(!current())return;
+      if(!blob.size||blob.size>5242880)throw new Error('image_failed');
+      while(CHAT_IMAGE_URLS.size>=8)chatForgetImage(CHAT_IMAGE_URLS.keys().next().value);
+      var url=URL.createObjectURL(blob);CHAT_IMAGE_URLS.set(id,url);render(url);
+    }catch(error){if(current())status.textContent=error.message==='image_unavailable'?'この画像は保存されていないか、保存期間が終了しています。':'画像を読み込めませんでした。もう一度お試しください。';}
+    finally{clearTimeout(timeout);if(CHAT_IMAGE_REQUESTS.get(id)===controller)CHAT_IMAGE_REQUESTS.delete(id);if(current())button.disabled=false;}
+  });
 }
 
 function chatFormatTime(value){
@@ -2093,9 +2165,9 @@ function chatRenderDetail(live){
     var roleClass=(message.role==='staff') ? 'chat-role-staff' : (message.role==='ai' ? 'chat-role-ai' : 'chat-role-user');
     var bubble=chatElement('article','chat-message '+roleClass);
     bubble.appendChild(chatElement('div','chat-message-role',chatRoleLabel(message.role)));
-    var body=message.role==='user_image' ? '画像' : message.body;
-    if(!body) body='（本文なし）';
-    bubble.appendChild(chatElement('div','chat-message-body',body));
+    var body=chatElement('div','chat-message-body');
+    if(message.role==='user_image')chatImageContent(body,message);else body.textContent=message.body||'（本文なし）';
+    bubble.appendChild(body);
     var foot=chatElement('div','chat-message-foot');
     var time=chatElement('time','chat-message-time',date ? date.time : '');
     var delivery=chatDeliveryLabel(message.delivery_status);
@@ -2463,6 +2535,7 @@ function chatLoadDetail(customerId, reset){
   var requestTenant=TENANT_ID,state=CHAT_STATE,requestScope=checkoutScope(),requestNav=NAV_SEQ,requestSeq=(state.detailSeq||0)+1;state.detailSeq=requestSeq;
   function current(){return state===CHAT_STATE&&requestSeq===state.detailSeq&&requestTenant===TENANT_ID&&requestScope===checkoutScope()&&requestNav===NAV_SEQ&&CURRENT_GROUP==='chat';}
   if(reset){
+    if(CHAT_STATE.selectedCustomerId!==customerId)chatClearImages();
     state.readToggleSeq=(state.readToggleSeq||0)+1;
     state.liveDetailBusy=null;state.liveDetailFailures=0;state.hasNewMessages=false;state.liveConflict=false;
     var changingCustomer=!!CHAT_STATE.selectedCustomerId && CHAT_STATE.selectedCustomerId!==customerId;
@@ -2522,6 +2595,7 @@ function chatLoadDetail(customerId, reset){
 
 /* スマホは会話のみ、PCは一覧を残す。非表示にした管理ナビはクラス解除で元の表示に戻る。 */
 function chatSetFocus(on){
+  if(!on)chatCloseImageViewer();
   var shell=document.getElementById('chatShell'); if(!shell) return;
   if(on) shell.classList.add('chat-focus'); else shell.classList.remove('chat-focus');
   document.body.classList.toggle('chat-conversation',!!on);
@@ -3761,7 +3835,7 @@ async function lsecClear(kind){
 }
 
 // ===== ログイン画面の再表示（各タブのエラーフックから呼ばれる）=====
-function showLogin(msg){ handlingCloseManager(); chatSetFocus(false); var ov=document.getElementById("login"); if(ov) ov.style.display="flex"; var e=document.getElementById("lerr"); if(e&&msg) e.textContent=msg; }
+function showLogin(msg){ handlingCloseManager(); chatSetFocus(false); chatClearImages(); var ov=document.getElementById("login"); if(ov) ov.style.display="flex"; var e=document.getElementById("lerr"); if(e&&msg) e.textContent=msg; }
 
 /* ★ログアウト：Supabase Auth の signout → ローカルセッション破棄 → 画面を初期化してログイン表示。
    ・多院所属者が「別アカウントで入り直す」導線。単店ユーザーにも常設バーから提供。
