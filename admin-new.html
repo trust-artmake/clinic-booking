@@ -752,6 +752,13 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-image-viewer[open]{display:flex;flex-direction:column;align-items:center;gap:8px}
 .chat-image-viewer img{display:block;max-width:100%;max-height:70vh;max-height:70dvh;object-fit:contain;min-width:0}
 .chat-image-viewer .chat-btn{align-self:flex-end}
+.chat-image-send-preview{max-width:520px;align-items:stretch}
+.chat-image-send-preview p{margin:0;overflow-wrap:anywhere;max-width:100%}
+.chat-image-send-preview img{max-height:48vh;max-height:48dvh;align-self:center}
+.chat-image-send-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;min-width:0;max-width:100%}
+.chat-image-pick{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:5px 0;min-width:0}
+.chat-image-pick input{display:none}
+.chat-image-pick span{font-size:11px;color:#657576}
 .chat-message-foot{font-size:10.5px;color:#64748b;margin-top:5px;display:flex;gap:7px;flex-wrap:wrap}
 .chat-delivery-fail{color:#b91c1c;font-weight:800}
 .chat-compose{margin:12px 0 4px;padding:11px;border:1px solid #cfe0dd;border-radius:11px;background:#f8fbfa}
@@ -1674,7 +1681,7 @@ function chatLiveVisible(){
   return !!(CHAT_STATE && CHAT_STATE.tenantId===TENANT_ID && CURRENT_GROUP==='chat' && document.visibilityState==='visible' && view && view.style.display==='block' && (!login || login.style.display==='none'));
 }
 function chatLiveBusy(){
-  return !!(CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy || CHAT_STATE.loadingDetail || CHAT_STATE.labelBusy || HANDLING_PICKER || ASK_CONFIRM_PENDING);
+  return !!(CHAT_STATE.sendBusy || CHAT_STATE.workflowBusy || CHAT_STATE.loadingDetail || CHAT_STATE.labelBusy || CHAT_STATE.imagePreparing || document.getElementById('chatImageSendPreview') || HANDLING_PICKER || ASK_CONFIRM_PENDING);
 }
 // 最新の1ページを既存の履歴へマージする。既読化やLINE送信は行わない。
 function chatRefreshConversation(){
@@ -1738,7 +1745,7 @@ function chatNewState(){
     selectedCustomerId: null, detail: null, messages: [], detailCursor: null,
     detailHasMore: false, loadingList: false, loadingDetail: false,
     workflowBusy: null, workflowMessage: '', workflowNeedsReload: false,
-    sendBusy: false, sendMessage: '', draftBody: '', draftId: null
+    sendBusy: false, sendMessage: '', draftBody: '', draftId: null, imageDraft:null, imagePreparing:false
   };
 }
 
@@ -1782,15 +1789,16 @@ function chatForgetImage(id){
   });
 }
 function chatClearImages(){
+  chatDiscardImageDraft();
   CHAT_IMAGE_EPOCH=(CHAT_IMAGE_EPOCH||0)+1;chatCloseImageViewer();
   if(CHAT_IMAGE_REQUESTS){CHAT_IMAGE_REQUESTS.forEach(function(request){request.abort();});CHAT_IMAGE_REQUESTS.clear();}
   if(CHAT_IMAGE_URLS)Array.from(CHAT_IMAGE_URLS.keys()).forEach(chatForgetImage);
 }
 function chatShowImage(url,id,previous){
   if(!CHAT_IMAGE_URLS||CHAT_IMAGE_URLS.get(id)!==url)return;
-  chatCloseImageViewer();var viewer=chatElement('dialog','chat-image-viewer');viewer.id='chatImageViewer';viewer.dataset.chatImageId=id;viewer.setAttribute('aria-label','受信した画像');viewer._chatPrevious=previous;
+  chatCloseImageViewer();var viewer=chatElement('dialog','chat-image-viewer');viewer.id='chatImageViewer';viewer.dataset.chatImageId=id;viewer.setAttribute('aria-label','チャットの画像');viewer._chatPrevious=previous;
   var close=chatElement('button','chat-btn','閉じる');close.type='button';close.dataset.chatImageClose='';close.addEventListener('click',chatCloseImageViewer);
-  var img=chatElement('img','');img.alt='お客様から届いた画像';img.referrerPolicy='no-referrer';img.src=url;
+  var img=chatElement('img','');img.alt='チャットの画像';img.referrerPolicy='no-referrer';img.src=url;
   viewer.appendChild(close);viewer.appendChild(img);document.body.appendChild(viewer);
   viewer.addEventListener('cancel',function(e){e.preventDefault();chatCloseImageViewer();});
   viewer.addEventListener('click',function(e){if(e.target===viewer)chatCloseImageViewer();});
@@ -1804,7 +1812,7 @@ function chatImageContent(host,message){
   var status=chatElement('div','chat-image-status');status.setAttribute('role','status');host.appendChild(button);host.appendChild(status);
   function render(url){
     if(host.querySelector('.chat-inline-image'))return;
-    var img=chatElement('img','chat-inline-image');img.alt='お客様から届いた画像（押すと拡大）';img.referrerPolicy='no-referrer';img.tabIndex=0;img.setAttribute('role','button');img.src=url;
+    var img=chatElement('img','chat-inline-image');img.alt='チャットの画像（押すと拡大）';img.referrerPolicy='no-referrer';img.tabIndex=0;img.setAttribute('role','button');img.src=url;
     img.addEventListener('click',function(){chatShowImage(url,id,img);});img.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();chatShowImage(url,id,img);}});
     img.addEventListener('error',function(){chatForgetImage(id);status.textContent='画像を読み込めませんでした。もう一度お試しください。';});
     host.appendChild(img);button.textContent='画像を拡大';button.disabled=false;status.textContent='';
@@ -2166,7 +2174,7 @@ function chatRenderDetail(live){
     var bubble=chatElement('article','chat-message '+roleClass);
     bubble.appendChild(chatElement('div','chat-message-role',chatRoleLabel(message.role)));
     var body=chatElement('div','chat-message-body');
-    if(message.role==='user_image')chatImageContent(body,message);else body.textContent=message.body||'（本文なし）';
+    if(message.role==='user_image'||message.message_kind==='image')chatImageContent(body,message);else body.textContent=message.body||'（本文なし）';
     bubble.appendChild(body);
     var foot=chatElement('div','chat-message-foot');
     var time=chatElement('time','chat-message-time',date ? date.time : '');
@@ -2226,6 +2234,15 @@ function chatRenderComposer(host,detail){
   if(detail.send_mock===true) title+='（モック・外部LINE送信なし）';
   box.appendChild(chatElement('div','chat-compose-title',title));
   if(chatAiPauseNote(detail)) box.appendChild(chatElement('div','chat-workflow-note',chatAiPauseNote(detail)));
+  var imagePick=chatElement('div','chat-image-pick'),imageButton=chatElement('button','chat-btn','写真を送る'),imageInput=chatElement('input','');
+  imageButton.type='button';imageButton.dataset.chatImagePick='';imageButton.disabled=CHAT_STATE.sendBusy||CHAT_STATE.workflowNeedsReload||!!CHAT_STATE.imagePreparing;
+  imageInput.type='file';imageInput.accept='image/jpeg,image/png';imageInput.setAttribute('aria-label','送信する写真');imageInput.id='chatImageFile';
+  imageButton.addEventListener('click',function(){
+    if(CHAT_STATE.imageDraft&&CHAT_STATE.imageDraft.submitted){CHAT_STATE.sendMessage='先ほどの画像は、会話の同じ送信IDから結果を確認してください。';chatRenderDetail();return;}
+    CHAT_STATE.imageRetryId=null;CHAT_STATE.imagePickerContext=chatImageSendContext();imageInput.click();
+  });
+  imageInput.addEventListener('change',function(){var file=imageInput.files&&imageInput.files[0],context=CHAT_STATE&&CHAT_STATE.imagePickerContext;imageInput.value='';if(file)chatSelectImage(file,context);});
+  imagePick.appendChild(imageButton);imagePick.appendChild(imageInput);imagePick.appendChild(chatElement('span','','1枚ずつ・送信前に確認できます'));box.appendChild(imagePick);
   var area=chatElement('textarea',''); area.id='chatReplyBody'; area.maxLength=4000;
   area.value=CHAT_STATE.draftBody || ''; area.disabled=CHAT_STATE.sendBusy;
   area.setAttribute('aria-label','返信本文'); area.setAttribute('placeholder','お客様への返信を入力してください');
@@ -2245,6 +2262,98 @@ function chatRenderComposer(host,detail){
     box.appendChild(chatElement('div','chat-compose-msg'+(ok?' ok':''),CHAT_STATE.sendMessage));
   }
   host.appendChild(box);
+}
+
+// 画像の選択・確認はローカルだけ。明示的な送信まで通信もAI停止もしない。
+function chatImageSendContext(){
+  return CHAT_STATE&&CHAT_STATE.detail?{state:CHAT_STATE,tenant:TENANT_ID,token:TOKEN,customer:CHAT_STATE.selectedCustomerId,version:CHAT_STATE.detail.version,epoch:CHAT_IMAGE_EPOCH,scope:checkoutScope()}:null;
+}
+function chatImageSendCurrent(c){
+  return !!(c&&CHAT_STATE===c.state&&TENANT_ID===c.tenant&&TOKEN===c.token&&TOKEN&&CHAT_IMAGE_EPOCH===c.epoch&&checkoutScope()===c.scope&&CURRENT_GROUP==='chat'&&CHAT_STATE.selectedCustomerId===c.customer&&CHAT_STATE.detail&&CHAT_STATE.detail.customer_id===c.customer&&CHAT_STATE.detail.version===c.version&&chatCanSend(CHAT_STATE.detail));
+}
+function chatCloseImageSendPreview(){
+  var dialog=document.getElementById('chatImageSendPreview');if(!dialog)return;
+  if(typeof dialog.close==='function'&&dialog.open)dialog.close();dialog.remove();
+}
+function chatDiscardImageDraft(){
+  chatCloseImageSendPreview();
+  if(CHAT_STATE){var d=CHAT_STATE.imageDraft;if(d&&d.url)URL.revokeObjectURL(d.url);CHAT_STATE.imageDraft=null;CHAT_STATE.imageRetryId=null;CHAT_STATE.imagePickerContext=null;CHAT_STATE.imagePreparing=false;CHAT_STATE.imageSelectionSeq=(CHAT_STATE.imageSelectionSeq||0)+1;}
+}
+async function chatPrepareImage(file){
+  if(!file||!/^image\/(jpeg|png)$/.test(file.type)||!file.size||file.size>10485760)throw Error('invalid_image_content');
+  var bitmap=null,temporary='',image=null,timer;
+  try{
+    if(typeof createImageBitmap==='function')bitmap=await createImageBitmap(file);
+    else{temporary=URL.createObjectURL(file);bitmap=await new Promise(function(resolve,reject){image=new Image();timer=setTimeout(function(){reject(Error('invalid_image_content'));},20000);image.onload=function(){resolve(image);};image.onerror=function(){reject(Error('invalid_image_content'));};image.src=temporary;});}
+    var width=bitmap.width||bitmap.naturalWidth,height=bitmap.height||bitmap.naturalHeight;
+    if(!width||!height||width*height>32000000)throw Error('invalid_image_content');
+    var factor=Math.min(1,2048/Math.max(width,height)),canvas=document.createElement('canvas'),blob=null;
+    for(var round=0;round<4;round++){
+      canvas.width=Math.max(1,Math.round(width*factor));canvas.height=Math.max(1,Math.round(height*factor));
+      var ctx=canvas.getContext('2d');if(!ctx)throw Error('invalid_image_content');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+      for(var quality of [0.9,0.8,0.7]){blob=await new Promise(function(resolve){canvas.toBlob(resolve,'image/jpeg',quality);});if(blob&&blob.size<=1048576)break;}
+      if(blob&&blob.size<=1048576)break;factor*=0.7;
+    }
+    if(!blob||!blob.size||blob.size>1048576)throw Error('invalid_image_content');
+    var data=await new Promise(function(resolve,reject){var reader=new FileReader();reader.onload=function(){resolve(String(reader.result).split(',')[1]);};reader.onerror=function(){reject(Error('invalid_image_content'));};reader.readAsDataURL(blob);});
+    return {mime:'image/jpeg',data:data,blob:blob};
+  }finally{clearTimeout(timer);if(bitmap&&typeof bitmap.close==='function')bitmap.close();if(image)image.src='';if(temporary)URL.revokeObjectURL(temporary);}
+}
+async function chatSelectImage(file,context){
+  var c=context||chatImageSendContext();if(!chatImageSendCurrent(c)||CHAT_STATE.sendBusy)return;
+  var state=CHAT_STATE,seq=(state.imageSelectionSeq||0)+1;state.imageSelectionSeq=seq;state.imagePreparing=true;
+  try{
+    var prepared=await chatPrepareImage(file);if(!chatImageSendCurrent(c)||state.imageSelectionSeq!==seq)return;
+    var retryId=state.imageRetryId;state.imageRetryId=null;chatDiscardImageDraft();
+    state.imageDraft={id:retryId||crypto.randomUUID(),image:{mime:prepared.mime,data:prepared.data},blob:prepared.blob,url:URL.createObjectURL(prepared.blob),context:c,submitted:!!retryId};
+    chatOpenImageSendPreview(state.imageDraft);
+  }catch(error){if(chatImageSendCurrent(c)){state.sendMessage='写真を読み込めませんでした。JPEG・PNG（10MB以内）の写真を選んでください。';chatRenderDetail();}}
+  finally{if(state===CHAT_STATE&&state.imageSelectionSeq===seq)state.imagePreparing=false;}
+}
+function chatOpenImageSendPreview(draft){
+  if(!draft||!chatImageSendCurrent(draft.context))return;
+  chatCloseImageSendPreview();var dialog=chatElement('dialog','chat-image-viewer chat-image-send-preview');dialog.id='chatImageSendPreview';dialog.setAttribute('aria-label','画像の送信確認');
+  dialog.appendChild(chatElement('strong','','画像を送信'));
+  dialog.appendChild(chatElement('p','','宛先：'+(CHAT_STATE.detail.display_name||'名前未設定のお客様')));
+  var img=chatElement('img','');img.alt='送信する画像のプレビュー';img.referrerPolicy='no-referrer';img.src=draft.url;dialog.appendChild(img);
+  dialog.appendChild(chatElement('p','','表示中の画像1枚を送ります。送信サイズに調整済みです。'));
+  if(chatAiPauseNote(CHAT_STATE.detail))dialog.appendChild(chatElement('p','',chatAiPauseNote(CHAT_STATE.detail)));
+  var actions=chatElement('div','chat-image-send-actions'),cancel=chatElement('button','chat-btn','やめる'),send=chatElement('button','chat-btn','この画像を送信');cancel.type='button';send.type='button';cancel.dataset.chatImageCancel='';send.dataset.chatImageConfirm='';
+  function close(){if(draft.submitted)chatCloseImageSendPreview();else chatDiscardImageDraft();}
+  cancel.addEventListener('click',close);send.addEventListener('click',function(){if(send.disabled)return;send.disabled=true;chatSubmitImage(draft);});
+  dialog.addEventListener('cancel',function(e){e.preventDefault();close();});dialog.addEventListener('click',function(e){if(e.target===dialog)close();});
+  actions.appendChild(cancel);actions.appendChild(send);dialog.appendChild(actions);document.body.appendChild(dialog);
+  if(typeof dialog.showModal==='function')dialog.showModal();else{dialog.setAttribute('open','');dialog.style.display='flex';}cancel.focus();
+}
+async function chatSubmitImage(draft){
+  if(!draft||!chatImageSendCurrent(draft.context)||CHAT_STATE.imageDraft!==draft||CHAT_STATE.sendBusy){if(CHAT_STATE&&CHAT_STATE.imageDraft===draft)chatDiscardImageDraft();return;}
+  var c=draft.context,state=CHAT_STATE;state.sendBusy=true;state.sendMessage='画像を送信しています…';draft.submitted=true;chatCloseImageSendPreview();chatRenderDetail();
+  var payload={customer_id:c.customer,client_message_id:draft.id,expected_version:c.version==null?0:c.version};if(draft.image)payload.image=draft.image;
+  try{
+    var data=await chatCall('send_image',payload);
+    if(!chatImageSendCurrent(c))return;
+    if(!data||!/^(sent|pending|retryable|failed|unknown)$/.test(String(data.deliveryStatus||'')))throw Error('invalid_response');
+    if(data.deliveryStatus==='sent'){state.sendMessage=data.mock?'モック送信完了：外部LINEには送っていません。':'画像はLINE受付済みです。端末への到達を保証する表示ではありません。';chatDiscardImageDraft();}
+    else if(data.deliveryStatus==='failed'){state.sendMessage='画像はLINEに受理されませんでした。設定を確認してください。';chatDiscardImageDraft();}
+    else state.sendMessage=data.deliveryStatus==='unknown'?'送信結果が不明です。LINE公式画面で確認してください。':'同じ送信IDを保持しています。会話の再試行ボタンから結果を確認してください。';
+  }catch(error){if(chatImageSendCurrent(c)){
+    var code=error&&error.code;
+    if(code==='idempotency_conflict'){chatDiscardImageDraft();state.sendMessage='前の送信と写真が一致しません。会話の再試行から、最初と同じ写真を選び直してください。';}
+    else if(['version_conflict','forbidden_store','chat_send_disabled','chat_workflow_disabled','friend_blocked','line_uid_missing','daily_send_limit_reached','invalid_image_content','invalid_token'].includes(code)){chatDiscardImageDraft();state.sendMessage=code==='invalid_image_content'?'写真の形式・サイズを確認して選び直してください。':chatReason(code);}
+    else state.sendMessage=code==='image_not_ready'?'画像の保存が完了していません。会話の再試行から同じ写真を選び直してください。':'画像の送信結果を確認できません。同じ送信IDから結果を確認してください。';
+  }}
+  finally{if(state===CHAT_STATE&&state.selectedCustomerId===c.customer&&TENANT_ID===c.tenant&&TOKEN===c.token){state.sendBusy=false;chatRenderDetail();chatLoadDetail(c.customer,true);}}
+}
+async function chatRetryImage(message){
+  var c=chatImageSendContext();if(!chatImageSendCurrent(c)||CHAT_STATE.sendBusy||!message||!message.client_message_id||message.delivery_resolution||!['pending','retryable'].includes(message.delivery_status))return;
+  var state=CHAT_STATE,old=state.imageDraft;
+  if(old&&old.id===message.client_message_id&&old.blob){old.context=c;if(message.image_ready===true)old.image=null;chatOpenImageSendPreview(old);return;}
+  if(message.image_ready!==true){state.imageRetryId=message.client_message_id;state.imagePickerContext=c;var input=document.getElementById('chatImageFile');if(input)input.click();return;}
+  try{
+    var res=await fetch(SB_URL+'/functions/v1/manage-chat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},hdr()),body:JSON.stringify({action:'get_message_image',tenant_id:c.tenant,customer_id:c.customer,message_id:message.id}),signal:AbortSignal.timeout(20000)});
+    if(!res.ok||!/^image\/(jpeg|png)(;|$)/.test(res.headers.get('content-type')||''))throw Error('image_unavailable');var blob=await res.blob();if(!blob.size||blob.size>1048576)throw Error('image_unavailable');
+    if(!chatImageSendCurrent(c))return;chatDiscardImageDraft();state.imageDraft={id:message.client_message_id,image:null,blob:blob,url:URL.createObjectURL(blob),context:c,submitted:true};chatOpenImageSendPreview(state.imageDraft);
+  }catch(error){if(chatImageSendCurrent(c)){state.sendMessage='再試行する画像を確認できません。会話を更新して確認してください。';chatRenderDetail();}}
 }
 
 function chatSendRequest(body,clientMessageId,medicalConfirmed){
@@ -2329,6 +2438,7 @@ async function chatSendMessage(){
 }
 
 async function chatRetryMessage(message){
+  if(message&&message.message_kind==='image')return chatRetryImage(message);
   if(!CHAT_STATE || !CHAT_STATE.detail || !chatCanSend(CHAT_STATE.detail) || CHAT_STATE.sendBusy) return;
   if(!message || message.delivery_resolution || (message.delivery_status!=='pending' && message.delivery_status!=='retryable') || !message.client_message_id || !message.body) return;
   var name=CHAT_STATE.detail.display_name || '名前未設定のお客様';
@@ -2364,6 +2474,7 @@ async function chatResolveFailedDelivery(message,resolution){
     if(CHAT_STATE.draftId===message.client_message_id){
       CHAT_STATE.draftId=null; CHAT_STATE.sendMessage='';
     }
+    if(CHAT_STATE.imageDraft&&CHAT_STATE.imageDraft.id===message.client_message_id)chatDiscardImageDraft();
     CHAT_STATE.workflowMessage='送信結果を「'+reasonLabel+'」として記録しました。';
   }).catch(function(error){
     CHAT_STATE.workflowMessage=chatReason(error && error.code);
@@ -12426,7 +12537,7 @@ function navRememberScroll(){if(NAV_CURRENT){NAV_CURRENT.scrollX=window.scrollX|
 function navFormValue(root){return JSON.stringify(Array.from(root.querySelectorAll('input,textarea,select')).map(function(el){return [el.name||el.id,el.type==='checkbox'||el.type==='radio'?el.checked:el.value];}));}
 function navMarkClean(root){if(root)root._navBaseline=navFormValue(root);}
 function navForms(){return Array.from(document.querySelectorAll('#calendarReservationSheet form,#calendarTimeOffSheet form,#checkoutDialog form')).concat(document.getElementById('mbForm').style.display!=='none'?[document.getElementById('mbForm')]:[]);}
-function navDirty(){if(CURRENT_GROUP==='chat'&&CHAT_STATE&&String(CHAT_STATE.draftBody||''))return true;return navForms().some(function(form){return !form._navSaving&&form._navBaseline!==undefined&&form._navBaseline!==navFormValue(form);});}
+function navDirty(){if(CURRENT_GROUP==='chat'&&CHAT_STATE&&(String(CHAT_STATE.draftBody||'')||CHAT_STATE.imageDraft&&!CHAT_STATE.imageDraft.submitted))return true;return navForms().some(function(form){return !form._navSaving&&form._navBaseline!==undefined&&form._navBaseline!==navFormValue(form);});}
 async function navMayLeave(reason){return !navDirty()||(await askConfirm(CONFIRM_PURE.confirmLeaveOptions(reason)));}
 function navVisit(action,approved){
  if(NAV_QUIET||NAV_DEPTH)return action();
