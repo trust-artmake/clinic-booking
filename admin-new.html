@@ -2392,6 +2392,8 @@ function chatStartHandling(){
     CHAT_STATE.detail.version=data.version;
     CHAT_STATE.detail.assigned_staff_id=data.assigned_staff_id || null;
     CHAT_STATE.detail.assigned_staff_name=data.assigned_staff_name || null;
+    // 対応開始がDBで確定した時だけ、ラベル欄のAI停止情報も同期する。
+    if(CHAT_STATE.detail.handling)CHAT_STATE.detail.handling=Object.assign({},CHAT_STATE.detail.handling,{ai_paused:true});
     CHAT_STATE.workflowNeedsReload=false;
     CHAT_STATE.workflowMessage='対応中として記録しました。';
     chatSyncListFromDetail(); chatRenderList();
@@ -2434,6 +2436,8 @@ async function chatCompleteHandling(){
     CHAT_STATE.detail.version=data.version;
     CHAT_STATE.detail.assigned_staff_id=null;
     CHAT_STATE.detail.assigned_staff_name=null;
+    // 完了APIの成功はAI停止解除済み（state_onlyは既に解除済み）。古い表示を残さない。
+    if(CHAT_STATE.detail.handling)CHAT_STATE.detail.handling=Object.assign({},CHAT_STATE.detail.handling,{ai_paused:false});
     CHAT_STATE.workflowNeedsReload=false;
     CHAT_STATE.workflowMessage='対応完了として記録し、AI再開条件を有効にしました。';
     chatSyncListFromDetail(); chatRenderList();
