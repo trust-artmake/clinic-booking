@@ -10,10 +10,10 @@
      ・全fetchはSupabaseのみ → connect-srcで縛り、想定外の外部送信を即遮断
      ・img-src（H5 Phase2小粒で https: 全許可から限定に変更）：実画像の出所は
        Supabase Storage 公開URL（artist-photos/case-photos/step-images。署名URLも同一ドメイン）＋
-       data:（同意書署名PNG・FileReaderプレビュー・旧形式アイコン）＋LINEプロフィール写真のprofile.line-scdn.net / obs.line-apps.com
+       data:（同意書署名PNG・FileReaderプレビュー・旧形式アイコン）＋LINEプロフィール写真のprofile.line-scdn.net / sprofile.line-scdn.net / obs.line-apps.com
      ・object-src 'none' で Flash等を遮断、base/form-action は 'self' 固定
      ・frame-ancestors / report-uri は meta では効かない → クリックジャッキングは下のJSフレームバスティングで代替 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://stgarheuldubyrzdqzaq.supabase.co https://profile.line-scdn.net https://obs.line-apps.com; connect-src 'self' https://stgarheuldubyrzdqzaq.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://stgarheuldubyrzdqzaq.supabase.co https://profile.line-scdn.net https://sprofile.line-scdn.net https://obs.line-apps.com; connect-src 'self' https://stgarheuldubyrzdqzaq.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <style id="fbGuard">body{display:none !important}</style>
 <script>
@@ -1783,7 +1783,7 @@ function chatAvatarColor(name){
 function chatProfileAvatar(name,pictureUrl){
   var avatar=chatElement('span','chat-avatar',Array.from(name||'?')[0]);
   avatar.style.backgroundColor=chatAvatarColor(name||'?');avatar.setAttribute('aria-hidden','true');
-  if(typeof pictureUrl!=='string'||pictureUrl.length>2048||/\s/.test(pictureUrl)||!/^https:\/\/(?:profile\.line-scdn\.net|obs\.line-apps\.com)\/.+$/.test(pictureUrl))return avatar;
+  if(typeof pictureUrl!=='string'||pictureUrl.length>2048||/\s/.test(pictureUrl)||!/^https:\/\/(?:s?profile\.line-scdn\.net|obs\.line-apps\.com)\/.+$/.test(pictureUrl))return avatar;
   var image=document.createElement('img');image.alt='';image.loading='lazy';image.referrerPolicy='no-referrer';
   image.addEventListener('error',function(){image.remove();},{once:true});image.src=pictureUrl;avatar.appendChild(image);return avatar;
 }
