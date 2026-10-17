@@ -835,6 +835,16 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-role-ai .chat-message-role{display:inline-block;background:#edf9e8;border-radius:4px;padding:1px 4px}
 .chat-message-time{font-size:10px;color:#64748b;white-space:nowrap;flex-shrink:0;padding-bottom:3px}
 .chat-date-divider{text-align:center;font-size:11px;color:#61727b;margin:16px 0 9px}
+.chat-event-row{display:flex;align-items:center;gap:8px;margin:10px 0;color:#61727b;font-size:11px}
+.chat-event-row::before,.chat-event-row::after{content:"";flex:1;border-top:1px dashed #cbd5d9}
+.chat-auto-row{margin:8px 6%;padding:8px 10px;border:1px solid #dfe5e8;border-radius:10px;background:#f4f6f7;color:#3d4b52;font-size:12px;line-height:1.55}
+.chat-auto-head{display:flex;justify-content:space-between;gap:8px;color:#61727b;font-size:11px;margin-bottom:3px}
+.chat-auto-body{white-space:pre-wrap;word-break:break-word}
+.chat-auto-body.is-collapsed{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.chat-auto-more{border:0;background:none;color:#1f6f5c;font-size:11px;padding:2px 0;cursor:pointer}
+.chat-auto-meta{color:#61727b;font-size:11px;margin-top:3px}
+.chat-auto-status{color:#61727b;font-size:11px;text-align:right;margin-top:2px}
+.chat-auto-note{text-align:center;font-size:11px;color:#94a3b8;margin:10px 0}
 .chat-message-foot{overflow-wrap:anywhere}
 
 /* スマホ用フォーカスモード：会話を開いたら一覧を隠し、そのトークだけを表示する。
@@ -1696,6 +1706,8 @@ function chatRefreshConversation(){
   return chatCall('get_conversation',{customer_id:customerId,limit:100}).then(function(data){
     if(!unchanged())return;
     if(!data || data.customer_id!==customerId || !Array.isArray(data.messages) || !(Number.isSafeInteger(data.version) && data.version>=0 || data.status==='none' && data.version===null))throw new Error('invalid_response');
+    // 会話に変化が無くても、自動配信の追加・送信結果（LINEが受付／失敗）は30秒ごとに取り直す。
+    if(Date.now()-(state.eventsAt||0)>=30000) chatLoadEvents(customerId);
     if(!state.liveConflict && !state.workflowNeedsReload && !state.liveDetailFailures && JSON.stringify(data)===JSON.stringify(state.detail))return;
     var body=document.getElementById('chatMessages'),nearBottom=body && body.scrollHeight-body.clientHeight-body.scrollTop<=80;
     var known=new Map(state.messages.map(function(m){return [m.id,m];})),added=false;
@@ -1706,6 +1718,7 @@ function chatRefreshConversation(){
     if(added && !nearBottom)state.hasNewMessages=true;
     chatSyncListFromDetail();chatRenderList();chatUpdateModeNote(data);chatRenderDetail(true);
     if(nearBottom)chatScrollToLatest();
+    chatLoadEvents(customerId);
   }).catch(function(){
     if(!unchanged())return;
     state.liveDetailFailures=(state.liveDetailFailures||0)+1;
@@ -1838,6 +1851,45 @@ function chatImageContent(host,message){
     finally{clearTimeout(timeout);if(CHAT_IMAGE_REQUESTS.get(id)===controller)CHAT_IMAGE_REQUESTS.delete(id);if(current())button.disabled=false;}
   });
 }
+/* CHAT TIMELINE HELPERS START */
+/* 会話欄に「友だち追加」「自動配信」を混ぜて出す（2026-10-16）。メッセージ（chat_log）とは別に取り、描くときだけ時刻順に合流する。 */
+function chatTimelineMerge(messages, events){
+  var rank={event:0,auto:1,message:2},out=[];
+  (Array.isArray(messages)?messages:[]).forEach(function(m){ if(m && m.id && m.created_at) out.push({type:'message',at:String(m.created_at),data:m}); });
+  (Array.isArray(events)?events:[]).forEach(function(e){
+    if(!e || !e.id || !e.at || (e.kind!=='auto' && e.kind!=='event')) return;
+    out.push({type:e.kind,at:String(e.at),data:e});
+  });
+  return out.sort(function(a,b){
+    var ta=Date.parse(a.at),tb=Date.parse(b.at);
+    if(ta!==tb) return ta<tb?-1:1;
+    if(rank[a.type]!==rank[b.type]) return rank[a.type]-rank[b.type];
+    return String(a.data.id).localeCompare(String(b.data.id));
+  });
+}
+/* 読み込んだ会話の範囲だけ取る。もっと古い会話が残っていれば最古のメッセージから、全部読んでいれば最初から。 */
+function chatEventsFrom(state){
+  var list=state && Array.isArray(state.messages) ? state.messages : [];
+  if(state && state.detailHasMore && list.length && list[0].created_at) return String(list[0].created_at);
+  return '2000-01-01T00:00:00Z';
+}
+function chatAutoTitle(item){
+  var name=item && item.scenario_name ? '「'+item.scenario_name+'」' : '';
+  if(item && item.auto_kind==='reminder') return '自動配信｜予約リマインド'+name;
+  return '自動配信｜ステップ'+(name || ' ')+(item && item.step_no ? item.step_no+'通目' : '');
+}
+function chatAutoStatus(status){
+  if(status==='accepted') return 'LINEが受付';
+  if(status==='failed') return '送信失敗';
+  if(status==='unknown') return '結果不明';
+  return '送信依頼済み';
+}
+function chatEventTitle(type){
+  if(type==='follow') return '友だち追加';
+  if(type==='unfollow') return 'ブロックされました';
+  return '';
+}
+/* CHAT TIMELINE HELPERS END */
 
 function chatFormatTime(value){
   if(!value) return '時刻なし';
@@ -2118,6 +2170,67 @@ function chatLoadList(reset,preserveDetail){
   });
 }
 
+/* CHAT TIMELINE RENDER START */
+/* 友だち追加・自動配信は吹き出しにしない（お客様の発言と見間違えないよう、灰色の細い行）。本文は textContent。 */
+function chatTimelineRow(entry,date){
+  var item=entry.data,time=date ? date.time : '';
+  if(entry.type==='event'){
+    var ev=chatElement('div','chat-event-row');
+    ev.appendChild(chatElement('span','chat-event-label',(time ? time+' ' : '')+chatEventTitle(item.type)));
+    return ev;
+  }
+  var row=chatElement('div','chat-auto-row');
+  var head=chatElement('div','chat-auto-head');
+  head.appendChild(chatElement('span','chat-auto-title',chatAutoTitle(item)));
+  head.appendChild(chatElement('time','chat-auto-time',time));
+  row.appendChild(head);
+  var text=String(item.body || '');
+  var body=chatElement('div','chat-auto-body',text || '（本文なし）');
+  row.appendChild(body);
+  if(text.length>60 || text.split('\n').length>2){
+    // 開いた状態は再描画（自動更新）でも保つ。
+    var expanded=CHAT_STATE && CHAT_STATE.expandedAuto ? CHAT_STATE.expandedAuto : {};
+    var isOpen=!!expanded[String(item.id)];
+    if(!isOpen) body.classList.add('is-collapsed');
+    var more=chatElement('button','chat-auto-more',isOpen ? 'たたむ' : '全文を見る');more.type='button';
+    more.addEventListener('click',function(){
+      var open=body.classList.toggle('is-collapsed')===false;
+      if(CHAT_STATE){ if(!CHAT_STATE.expandedAuto) CHAT_STATE.expandedAuto={}; if(open) CHAT_STATE.expandedAuto[String(item.id)]=true; else delete CHAT_STATE.expandedAuto[String(item.id)]; }
+      more.textContent=open ? 'たたむ' : '全文を見る';
+    });
+    row.appendChild(more);
+  }
+  var extras=[];
+  if(Number(item.image_count)>0) extras.push('画像'+Number(item.image_count)+'枚');
+  if(Array.isArray(item.button_labels) && item.button_labels.length) extras.push('ボタン：'+item.button_labels.join('／'));
+  if(extras.length) row.appendChild(chatElement('div','chat-auto-meta',extras.join('　')));
+  var failed=item.delivery_status==='failed' || item.delivery_status==='unknown';
+  row.appendChild(chatElement('div','chat-auto-status'+(failed ? ' chat-delivery-fail' : ''),chatAutoStatus(item.delivery_status)));
+  return row;
+}
+function chatRenderTimelineNote(host){
+  if(!CHAT_STATE || !CHAT_STATE.eventsLoaded || CHAT_STATE.detailHasMore) return;
+  var started=CHAT_STATE.eventsLogStartedAt ? chatDateParts(CHAT_STATE.eventsLogStartedAt) : null;
+  var text=started ? '自動配信の記録は'+started.month+'月'+started.day+'日から表示しています' : '自動配信の記録はまだありません（記録はこの機能の公開後から）';
+  if(CHAT_STATE.eventsTruncated) text+='。古い自動配信の一部は表示していません';
+  host.appendChild(chatElement('div','chat-auto-note',text));
+}
+/* CHAT TIMELINE RENDER END */
+/* 自動配信・出来事を読み込んだ会話の範囲で取り直す。失敗しても会話本体の表示は続ける（灰色の行が出ないだけ）。 */
+function chatLoadEvents(customerId){
+  var state=CHAT_STATE; if(!state || !customerId || state.selectedCustomerId!==customerId) return;
+  var seq=(state.eventsSeq||0)+1; state.eventsSeq=seq; state.eventsAt=Date.now();
+  var to=new Date(Date.now()+24*60*60*1000).toISOString();
+  return chatCall('get_conversation_events',{customer_id:customerId,from:chatEventsFrom(state),to:to,limit:200}).then(function(data){
+    if(state!==CHAT_STATE || state.eventsSeq!==seq || state.selectedCustomerId!==customerId) return;
+    CHAT_STATE.events=(data && Array.isArray(data.items)) ? data.items : [];
+    CHAT_STATE.eventsTruncated=!!(data && data.truncated);
+    CHAT_STATE.eventsLogStartedAt=(data && data.log_started_at) || null;
+    CHAT_STATE.eventsLoaded=true;
+    if(CHAT_STATE.detail) chatRenderDetail(true);
+  }).catch(function(){});
+}
+
 function chatRenderDetail(live){
   handlingClosePicker();
   var host=document.getElementById('chatDetail'); if(!host || !CHAT_STATE || !CHAT_STATE.detail) return;
@@ -2163,11 +2276,14 @@ function chatRenderDetail(live){
   body.appendChild(document.getElementById('chatOlderTemplate').content.cloneNode(true));
   host.insertBefore(body,composer);host=body;
   chatRenderWorkflow(host, detail);
-  if(!CHAT_STATE.messages.length){ host.appendChild(chatElement('div','chat-empty','メッセージはありません。')); }
+  chatRenderTimelineNote(host);
+  if(!CHAT_STATE.messages.length && !(CHAT_STATE.events||[]).length){ host.appendChild(chatElement('div','chat-empty','メッセージはありません。')); }
   var previousDay=null;
-  CHAT_STATE.messages.forEach(function(message){
-    var date=chatDateParts(message.created_at);
+  chatTimelineMerge(CHAT_STATE.messages, CHAT_STATE.events).forEach(function(entry){
+    var date=chatDateParts(entry.at);
     if(date && date.key!==previousDay){host.appendChild(chatElement('div','chat-date-divider',date.month+'月'+date.day+'日('+date.week+')'));previousDay=date.key;}
+    if(entry.type!=='message'){ host.appendChild(chatTimelineRow(entry,date)); return; }
+    var message=entry.data;
     var oldRow=oldRows.get(String(message.id));
     if(oldRow && oldRow._chatMessage===JSON.stringify(message)){host.appendChild(oldRow);return;}
     var roleClass=(message.role==='staff') ? 'chat-role-staff' : (message.role==='ai' ? 'chat-role-ai' : 'chat-role-user');
@@ -2655,6 +2771,7 @@ function chatLoadDetail(customerId, reset){
     }
     CHAT_STATE.links=null;CHAT_STATE.linksSeq=(CHAT_STATE.linksSeq||0)+1;
     CHAT_STATE.selectedCustomerId=customerId; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
+    CHAT_STATE.events=[]; CHAT_STATE.eventsLoaded=false; CHAT_STATE.eventsTruncated=false; CHAT_STATE.eventsLogStartedAt=null; CHAT_STATE.expandedAuto={};
     CHAT_STATE.detailCursor=null; CHAT_STATE.detailHasMore=false;
     CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false; chatUpdateModeNote(null);
     chatSetFocus(true);
@@ -2689,6 +2806,7 @@ function chatLoadDetail(customerId, reset){
     if(!reset){var newBody=document.getElementById('chatMessages');if(newBody)newBody.scrollTop=oldTop+newBody.scrollHeight-oldHeight;}
     if(reset)chatLoadLinks(customerId);
     if(reset) chatScrollToLatest();
+    chatLoadEvents(customerId);
   }).catch(function(error){
     if(!current())return;
     var reason=chatReason(error && error.code);
@@ -6040,6 +6158,17 @@ function mbOnNurseChange(){
   }
   ms.innerHTML = '<option value="">選択してください</option>' +
     menus.map(function(m){ return '<option value="'+esc(m.menu_id)+'">'+esc(m.name)+'</option>'; }).join('');
+  ms.onchange = mbOnMenuChange;
+}
+/* メニュー名から種類（新規／再来）を決める。予約ページ（index.html の isRetouchMenu）と同じ判定（2026-10-17）。
+   小倉の2回セットの2回目が「新規」で入り、受信箱のラベルが「初回予約確定」になっていたため。 */
+function mbTreatmentForMenu(name){var n=String(name||'');return (n.indexOf('再来')>=0||n.indexOf('リタッチ')>=0||/[2２]回目/.test(n))?'retouch':'new';}
+/* メニューを選んだら種類欄を合わせる。スタッフが後から手で変えることもできる。 */
+function mbOnMenuChange(){
+  var ms = document.getElementById('mbMenu');
+  var opt = ms && ms.options[ms.selectedIndex];
+  if (!opt || !opt.value) return;
+  document.getElementById('mbTreatment').value = mbTreatmentForMenu(opt.textContent);
 }
 
 /* 登録 → 成功でフォームを閉じてボード再読込（GAS submit と同等のUX） */
