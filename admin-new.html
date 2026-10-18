@@ -1302,6 +1302,29 @@ body.chat-conversation .chat-compose-msg{font-size:11px;max-height:44px;overflow
   <h3>🔗 流入元リンク（発行・コピー）</h3>
   <div id="acqList"><div class="placeholder">読み込み中…</div></div>
 
+  <!-- ★2026-10-17 流入元ごとのリッチメニュー（docs/ref-source-richmenu-design-2026-10-17.md）。
+       エルメの「流入経路 → アクション → リッチメニューを表示」と同じ流れ。メニューを作って LINE に登録 → 上の流入リンクのカードで選ぶ。 -->
+  <h3>🧩 流入元ごとのリッチメニュー</h3>
+  <div id="rmSection">
+    <div class="acq-hint" style="margin:0 4px 6px">
+      ここで作ったメニューを、上の流入リンクの「アクション」で選ぶと、<b>そのリンクから初めて友だちになった人だけ</b>にそのメニューが出ます。
+      選んでいないリンク・昔からの友だち・再追加の人は、今のメニュー（LINE公式アカウントの管理画面で設定したもの）のままです。
+      <br>※店ごとのスイッチが「止めている」の間は、アクションを付けても誰の画面も変わりません（スイッチの切り替えは仁義さん・松村さんの OK のあと AI が行います）。
+    </div>
+    <div class="acq-hint" style="margin:0 4px 6px">店：<select id="rmStore"></select></div>
+    <div class="acq-hint" id="rmFlowNote" style="margin:0 4px 6px"></div>
+    <div id="rmList"><div class="placeholder">読み込み中…</div></div>
+    <div class="acq-add">
+      <label>新しいメニューの名前（お客様には見えません・例：ゆきね用）</label>
+      <input type="text" id="rmNewName" maxlength="60" placeholder="メニューの名前" autocomplete="off">
+      <label>メニューバーの文字（お客様に見えます・14字まで）</label>
+      <input type="text" id="rmNewBar" maxlength="14" value="メニュー" autocomplete="off">
+      <button type="button" class="save" id="rmNewBtn">＋ 下書きを作る</button>
+      <button type="button" class="acq-btn ghost" id="rmReconcileBtn">🔍 LINE と照合</button>
+      <div class="acq-msg" id="rmMsg"></div>
+    </div>
+  </div>
+
   <h3>➕ 流入元を追加</h3>
   <div class="acq-add">
     <label>表示名（例：遠山Instagram、久留米チラシ、Google広告）</label>
@@ -11264,7 +11287,12 @@ function loadAcqList(){
   prep.then(function(){
     return sbGet('ref_sources?select=id,label,tag,is_shown,created_at&order=created_at.desc');
   })
-    .then(function(rows){ acqRememberRefSources(rows || []); renderAcqList(rows || []); })
+    .then(function(rows){
+      acqRememberRefSources(rows || []);
+      RM.refRows = rows || [];
+      renderAcqList(rows || []);
+      rmRefreshAll();   // ★2026-10-17 流入元ごとのリッチメニュー（失敗しても一覧は壊さない）
+    })
     .catch(function(err){
       if(acqNeedsLogin()) return;
       box.innerHTML = '<div class="placeholder">取得に失敗しました<br>'+esc(acqReason(err))+'</div>';
@@ -11293,14 +11321,277 @@ function renderAcqList(rows){
           + '<button type="button" class="acq-btn copy" data-aq="copy" data-url="'+esc(liffUrl)+'">📋 コピー</button>'
         + '</div>')
       : ('<div class="acq-hint" style="margin:6px 4px 2px;color:#b00">⚠️ この店舗のLINE設定（LIFF）が未完了のため、集客リンクを発行できません。設定タブ→セットアップから LIFF を登録してください。</div>');
+    // ★2026-10-17 アクション（エルメの「流入経路 → アクション」と同じ）。今はリッチメニューだけ。
+    var curMenu = (typeof RM !== 'undefined' && RM.actions) ? (RM.actions[s.id] || '') : '';
+    var pubs = (typeof RM !== 'undefined') ? rmPublished() : [];
+    var actionBlock = (pubs.length || curMenu)
+      ? ('<div class="acq-hint" style="margin:6px 4px 2px;font-size:11px">⚡ アクション（このリンクから初めて友だちになった人に）'
+          + (curMenu ? '：' + esc(rmActionSummary(rmMenuName(curMenu))) : '：なし') + '</div>'
+        + '<div class="acq-url"><select data-aq-rmsel="'+id+'"><option value="">（なし）</option>'
+          + pubs.map(function(p){ return '<option value="'+esc(p.id)+'"'+(p.id === curMenu ? ' selected' : '')+'>'+esc(rmActionSummary(p.name))+'</option>'; }).join('')
+        + '</select><button type="button" class="acq-btn" data-aq="rmset" data-id="'+id+'">保存</button></div>')
+      : '';
     return '<div class="acq-card'+(shown?'':' off')+'">'
       + '<div><span class="ac-label">'+esc(s.label)+'</span><span class="acq-pill">'+esc(acqRefCategory(s.tag))+'</span></div>'
       + linkBlock
+      + actionBlock
       + '<div class="acq-actions">'
         + '<button type="button" class="acq-btn ghost" data-aq="'+(shown?'hide':'show')+'" data-id="'+id+'">'+(shown?'⏸ 非表示にする':'▶️ 表示する')+'</button>'
         + '<button type="button" class="acq-btn ghost" data-aq="del" data-id="'+id+'">🗑 削除</button>'
       + '</div></div>';
   }).join('');
+}
+
+/* ===== ★2026-10-17 流入元ごとのリッチメニュー（docs/ref-source-richmenu-design-2026-10-17.md） =====
+   正本の純粋ロジックは poc/admin_richmenu_pure.mjs（tests/admin_richmenu.test.mjs で一致を確認）。
+   書き込みは全部 manage-line-richmenu 経由（画面は表を読むだけ）。値は esc()、操作は data-rm／data-aq とイベント委譲。 */
+function rmStatusLabel(status) {
+  var m = {
+    draft: "下書き", publishing: "登録中", published: "LINEに登録済み",
+    retiring: "削除の準備中", retired: "削除済み", orphaned: "LINEに取り残し（照合で確認）"
+  };
+  return Object.prototype.hasOwnProperty.call(m, status) ? m[status] : "不明";
+}
+function rmUsageText(usage) {
+  var u = usage || {};
+  var s = u.states || {};
+  var n = function (k) { return Number(s[k] || 0); };
+  var parts = ["使っている流入リンク " + Number(u.activeActions || 0) + "本", "表示中 " + n("linked") + "人"];
+  if (n("unknown")) parts.push("結果不明 " + n("unknown") + "人");
+  if (n("pending") + n("processing")) parts.push("紐づけ待ち " + (n("pending") + n("processing")) + "人");
+  var text = parts.join("・");
+  if (n("linked") + n("unknown") > 0) text += "（この人たちには LINE 公式アカウントの管理画面での既定メニューの変更が届きません）";
+  return text;
+}
+function rmLayoutAreas(layout, width, height) {
+  var spec = { full: [1, 1], "2col": [2, 1], "3col": [3, 1], "2x2": [2, 2], "2x3": [3, 2] }[layout];
+  if (!spec) return [];
+  var cols = spec[0], rows = spec[1];
+  var cw = Math.floor(width / cols), rh = Math.floor(height / rows);
+  var out = [];
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var x = c * cw, y = r * rh;
+      out.push({
+        x: x, y: y,
+        width: c === cols - 1 ? width - x : cw,
+        height: r === rows - 1 ? height - y : rh
+      });
+    }
+  }
+  return out;
+}
+function rmActionSummary(menuName) {
+  var n = String(menuName == null ? "" : menuName);
+  return n ? "リッチメニュー「" + n + "」を表示" : "リッチメニュー（名前なし）を表示";
+}
+function rmErrorText(j) {
+  var e = j || {};
+  if (e.message) return String(e.message);
+  var m = {
+    forbidden: "この店を操作する権限がありません。", forbidden_manager: "店長以上の権限が必要です。",
+    name: "名前を入れてください（300字まで）。", chat_bar_text: "メニューバーの文字は1〜14字にしてください。",
+    size: "画像の大きさが LINE の条件に合いません。", areas_count: "ボタンは1〜20個にしてください。",
+    no_image: "先に画像を選んでください。", bad_image: "画像は PNG か JPEG（1MB以内）にしてください。",
+    too_large: "画像は1MB以内にしてください。", image_size: "画像の大きさが LINE の条件に合いません（幅800〜2500px・横÷縦1.45以上）。",
+    in_use: "使っている流入リンクや表示中の人がいるため、まだ削除できません。",
+    menu_not_published: "LINE に登録済みのメニューだけ選べます。", not_draft: "登録済みのメニューは直せません。複製して直してください。"
+  };
+  if (e.reason === "area_bounds" || e.reason === "area_action") {
+    var i = Number(e.index);
+    var which = (Number.isInteger(i) && i >= 0) ? (i + 1) + "番目のボタン" : "ボタン";
+    return e.reason === "area_bounds"
+      ? which + "の範囲が画像からはみ出しているか、小さすぎます。"
+      : which + "の飛び先を入れてください（https で始まる URL、または送る文字）。";
+  }
+  return Object.prototype.hasOwnProperty.call(m, e.reason) ? m[e.reason] : "操作に失敗しました。時間をおいてもう一度お試しください。";
+}
+
+var RM = { storeId: '', storeName: '', flow: 'off', menus: [], actions: {}, drafts: {}, refRows: null };
+function rmSetMsg(text, ok){ var el = document.getElementById('rmMsg'); if(el){ el.textContent = text || ''; el.style.color = ok ? '#0a7' : '#b00'; } }
+function rmCall(action, extra){
+  return fetch(SB_URL + '/functions/v1/manage-line-richmenu', {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, hdr()),
+    body: JSON.stringify(Object.assign({ action: action, store_id: RM.storeId }, extra || {}))
+  }).then(function(res){
+    return res.json().catch(function(){ return {}; }).then(function(j){ if(!res.ok || !j.ok){ var e = new Error(rmErrorText(j)); e.rm = j; throw e; } return j; });
+  });
+}
+function rmPublished(){ return RM.menus.filter(function(m){ return m.status === 'published'; }); }
+function rmMenuName(id){ for(var i=0;i<RM.menus.length;i++){ if(RM.menus[i].id === id) return RM.menus[i].name; } return ''; }
+
+/* 一覧・アクション・店のスイッチを読み直して描き直す（失敗しても流入リンクの一覧は壊さない）。 */
+function rmRefreshAll(){
+  var box = document.getElementById('rmList');
+  var prep = (typeof ensureStoreMap === 'function') ? ensureStoreMap() : Promise.resolve();
+  return prep.then(function(){
+    var stores = Object.keys(STORE_MAP || {}).map(function(k){ return STORE_MAP[k]; });
+    if(!stores.length){ if(box) box.innerHTML = '<div class="placeholder">店が見つかりません。</div>'; return; }
+    // 1テナントに複数の店があるときは選べるようにする（選んだ店を覚えておく。無ければ先頭）。
+    var cur = stores.filter(function(s){ return s.id === RM.storeId; })[0] || stores[0];
+    RM.storeId = cur.id; RM.storeName = cur.name || '';
+    var sel = document.getElementById('rmStore');
+    if(sel){
+      sel.innerHTML = stores.map(function(s){ return '<option value="' + esc(s.id) + '"' + (s.id === RM.storeId ? ' selected' : '') + '>' + esc(s.name || '') + '</option>'; }).join('');
+      sel.disabled = stores.length < 2;
+    }
+    return Promise.all([
+      rmCall('list'),
+      sbGet('ref_source_actions?select=ref_source_id,rich_menu_id,is_active&action_type=eq.richmenu'),
+      sbGet('stores?select=id,ref_actions_flow&id=eq.' + encodeURIComponent(RM.storeId))
+    ]).then(function(r){
+      RM.menus = (r[0].menus || []).filter(function(m){ return m.status !== 'retired'; });
+      RM.actions = {};
+      (r[1] || []).forEach(function(a){ if(a.is_active) RM.actions[a.ref_source_id] = a.rich_menu_id; });
+      RM.flow = (r[2] && r[2][0] && r[2][0].ref_actions_flow) || 'off';
+      RM.drafts = {};
+      renderRmList();
+      if(RM.refRows) renderAcqList(RM.refRows);
+    });
+  }).catch(function(err){
+    if(acqNeedsLogin()) return;
+    if(box) box.innerHTML = '<div class="placeholder">リッチメニューを読み込めませんでした<br>' + esc(err && err.message ? err.message : '') + '</div>';
+  });
+}
+
+function renderRmList(){
+  var box = document.getElementById('rmList');
+  var note = document.getElementById('rmFlowNote');
+  if(note){
+    var f = { off: '⏸ この店のスイッチ：止めている（アクションを付けても何も起きません）', test: '🧪 この店のスイッチ：試験中（test- で始まるリンクだけ動きます）', on: '▶️ この店のスイッチ：動いている' }[RM.flow] || '';
+    note.textContent = (RM.storeName ? RM.storeName + '：' : '') + f;
+  }
+  if(!box) return;
+  if(!RM.menus.length){ box.innerHTML = '<div class="placeholder">まだメニューがありません。下で下書きを作ってください。</div>'; return; }
+  var pubs = rmPublished();
+  box.innerHTML = RM.menus.map(function(m){
+    var id = esc(m.id);
+    var head = '<div><span class="ac-label">' + esc(m.name) + '</span><span class="acq-pill">' + esc(rmStatusLabel(m.status)) + '</span>'
+      + '<span class="ac-tag">' + esc(m.width) + '×' + esc(m.height) + '・バー「' + esc(m.chat_bar_text) + '」</span></div>'
+      + '<div class="acq-hint" style="margin:4px">' + esc(rmUsageText(m.usage)) + '</div>';
+    var img = m.image_path ? '<img alt="" style="max-width:260px;display:block;margin:6px 4px;border:1px solid #e6eceb;border-radius:6px" src="'
+      + esc(SB_URL + '/storage/v1/object/public/rich-menu-images/' + m.image_path) + '">' : '';
+    var body = '';
+    if(m.status === 'draft'){
+      var areas = RM.drafts[m.id] || (Array.isArray(m.areas) ? m.areas : []);
+      RM.drafts[m.id] = areas;
+      body = '<div class="acq-actions">'
+        + '<label class="acq-btn ghost">🖼 画像を選ぶ<input type="file" accept="image/png,image/jpeg" data-rm="img" data-id="' + id + '" style="display:none"></label>'
+        + '<select data-rm-layout="' + id + '"><option value="2x3">6分割（3×2）</option><option value="2x2">4分割（2×2）</option><option value="3col">3分割（横）</option><option value="2col">2分割（横）</option><option value="full">1つ（全体）</option></select>'
+        + '<button type="button" class="acq-btn ghost" data-rm="layout" data-id="' + id + '">▦ ボタン配置を作る</button></div>'
+        + (areas.length ? '<table class="rm-areas" style="width:100%;font-size:12px;margin:4px 0">' + areas.map(function(a, i){
+            return '<tr><td style="white-space:nowrap">' + (i + 1) + '番目</td><td><select data-rm-area-type="' + id + '" data-i="' + i + '">'
+              + '<option value="uri"' + (a.type === 'message' ? '' : ' selected') + '>URL を開く</option>'
+              + '<option value="message"' + (a.type === 'message' ? ' selected' : '') + '>文字を送る</option></select></td>'
+              + '<td style="width:60%"><input type="text" style="width:100%" data-rm-area-val="' + id + '" data-i="' + i + '" value="' + esc(a.value || '') + '" placeholder="https://… または 送る文字"></td></tr>';
+          }).join('') + '</table>' : '')
+        + '<div class="acq-actions">'
+        + '<button type="button" class="acq-btn ghost" data-rm="save" data-id="' + id + '">💾 下書きを保存</button>'
+        + '<button type="button" class="acq-btn" data-rm="publish" data-id="' + id + '">📤 LINE に登録</button>'
+        + '<button type="button" class="acq-btn ghost" data-rm="retire" data-id="' + id + '">🗑 下書きを削除</button></div>';
+    } else if(m.status === 'published'){
+      var others = pubs.filter(function(p){ return p.id !== m.id; });
+      body = '<div class="acq-actions">'
+        + '<button type="button" class="acq-btn ghost" data-rm="dup" data-id="' + id + '">📄 複製して直す</button>'
+        + '<button type="button" class="acq-btn ghost" data-rm="reset" data-id="' + id + '">↩️ 表示中の人を既定に戻す</button>'
+        + (others.length ? '<select data-rm-to="' + id + '">' + others.map(function(o){ return '<option value="' + esc(o.id) + '">' + esc(o.name) + '</option>'; }).join('') + '</select>'
+          + '<button type="button" class="acq-btn ghost" data-rm="move" data-id="' + id + '">🔀 表示中の人を付け替え</button>' : '')
+        + '<button type="button" class="acq-btn ghost" data-rm="retire" data-id="' + id + '">🗑 削除</button></div>';
+    } else if(m.status === 'retiring'){
+      body = '<div class="acq-actions"><button type="button" class="acq-btn ghost" data-rm="restore" data-id="' + id + '">↩️ 削除をやめる</button>'
+        + '<button type="button" class="acq-btn ghost" data-rm="retire" data-id="' + id + '">🗑 削除を続ける</button></div>';
+    }
+    return '<div class="acq-card">' + head + img + body + '</div>';
+  }).join('');
+}
+
+(function bindRmDelegation(){
+  function rmRun(p, okText){
+    rmSetMsg('処理中…', true);
+    return p.then(function(j){ rmSetMsg(okText(j || {}), true); return rmRefreshAll(); })
+      .catch(function(err){ if(acqNeedsLogin()) return; rmSetMsg(err && err.message ? err.message : '失敗しました。'); });
+  }
+  async function onClick(e){
+    var b = e.target.closest('[data-rm]');
+    var sec = document.getElementById('rmSection');
+    if(e.target.id === 'rmNewBtn'){
+      var name = (document.getElementById('rmNewName').value || '').trim();
+      var bar = (document.getElementById('rmNewBar').value || '').trim();
+      if(!name){ rmSetMsg('メニューの名前を入れてください。'); return; }
+      rmRun(rmCall('save_draft', { name: name, chat_bar_text: bar, areas: [] }), function(){ document.getElementById('rmNewName').value = ''; return '✅ 下書きを作りました。画像を選んで、ボタン配置を作ってください。'; });
+      return;
+    }
+    if(e.target.id === 'rmReconcileBtn'){
+      rmRun(rmCall('reconcile'), function(j){ return '🔍 LINE に登録されているメニュー ' + Number(j.total_on_line || 0) + '個のうち、このシステムで使っていないもの ' + Number(j.not_in_system || 0) + '個（LINE公式アカウントの管理画面で作ったものは数に入りません）。'; });
+      return;
+    }
+    if(!b || !sec || !sec.contains(b) || b.tagName === 'INPUT') return;
+    var act = b.getAttribute('data-rm'), id = b.getAttribute('data-id');
+    var m = null; for(var i=0;i<RM.menus.length;i++){ if(RM.menus[i].id === id) m = RM.menus[i]; }
+    if(!m) return;
+    if(act === 'layout'){
+      var sel = sec.querySelector('select[data-rm-layout="' + id + '"]');
+      var old = RM.drafts[id] || [];
+      RM.drafts[id] = rmLayoutAreas(sel ? sel.value : '2x3', m.width, m.height).map(function(a, k){ return Object.assign(a, { type: (old[k] && old[k].type) || 'uri', value: (old[k] && old[k].value) || '' }); });
+      renderRmList(); return;
+    }
+    if(act === 'save') { rmRun(rmCall('save_draft', { menu_id: id, name: m.name, chat_bar_text: m.chat_bar_text, areas: RM.drafts[id] || [] }), function(){ return '✅ 下書きを保存しました。'; }); return; }
+    if(act === 'publish'){
+      if(!(await askConfirm({title:'', body:'「' + m.name + '」を LINE に登録します。登録しただけでは誰の画面も変わりません。登録後は直せません（直すときは複製）。よろしいですか？', ok:'登録する', cancel:'やめる'}))) return;
+      rmRun(rmCall('save_draft', { menu_id: id, name: m.name, chat_bar_text: m.chat_bar_text, areas: RM.drafts[id] || [] }).then(function(){ return rmCall('publish', { menu_id: id }); }),
+        function(){ return '✅ LINE に登録しました。上の流入リンクの「アクション」で選べます。'; });
+      return;
+    }
+    if(act === 'dup'){ rmRun(rmCall('duplicate', { menu_id: id }), function(){ return '✅ 複製しました（下書き）。直してから登録してください。'; }); return; }
+    if(act === 'restore'){ rmRun(rmCall('restore', { menu_id: id }), function(){ return '✅ 削除をやめました。'; }); return; }
+    if(act === 'reset' || act === 'move'){
+      var to = act === 'move' ? (sec.querySelector('select[data-rm-to="' + id + '"]') || {}).value : '';
+      var msg = act === 'move' ? '「' + m.name + '」を表示中の人を「' + rmMenuName(to) + '」に付け替えます。' : '「' + m.name + '」を表示中の人を、既定のメニューに戻します。';
+      if(!(await askConfirm({title:'', body: msg + '先にこのメニューを使っているアクションを止めてください。よろしいですか？', ok:'実行する', cancel:'やめる', danger:true}))) return;
+      rmRun(rmCall(act === 'move' ? 'move_users' : 'reset_users', { menu_id: id, to_menu_id: to }),
+        function(j){ return '✅ 送った人数 ' + Number(j.sent || 0) + '人・確認できた人数 ' + Number(j.confirmed || 0) + '人'
+          + (j.unconfirmed ? '・確認できなかった人数 ' + Number(j.unconfirmed) + '人（結果不明として残します）' : '')
+          + (j.remaining ? '。まだ残りの人がいます（1回100人ずつ）。もう一度押してください。' : ''); });
+      return;
+    }
+    if(act === 'retire'){
+      if(!(await askConfirm({title:'', body:'「' + m.name + '」を削除します。使っている流入リンクや表示中の人がいるときは削除できません。よろしいですか？', ok:'削除する', cancel:'やめる', danger:true}))) return;
+      rmRun(rmCall('retire', { menu_id: id }), function(){ return '✅ 削除しました。'; });
+    }
+  }
+  function onInput(e){
+    var t = e.target, id, i;
+    if((id = t.getAttribute('data-rm-area-val')) !== null){ i = Number(t.getAttribute('data-i')); if(RM.drafts[id] && RM.drafts[id][i]) RM.drafts[id][i].value = t.value; }
+    else if((id = t.getAttribute('data-rm-area-type')) !== null){ i = Number(t.getAttribute('data-i')); if(RM.drafts[id] && RM.drafts[id][i]) RM.drafts[id][i].type = t.value; }
+  }
+  function onChange(e){
+    var t = e.target;
+    if(t.id === 'rmStore'){ RM.storeId = t.value; rmRefreshAll(); return; }
+    onInput(e);
+    if(t.getAttribute('data-rm') !== 'img' || !t.files || !t.files[0]) return;
+    var file = t.files[0], id = t.getAttribute('data-id');
+    if(!/^image\/(png|jpeg)$/.test(file.type || '')){ rmSetMsg('画像は PNG または JPEG を選んでください。'); return; }
+    if(file.size > 1024 * 1024){ rmSetMsg('画像は1MB以内にしてください。'); return; }
+    var reader = new FileReader();
+    reader.onload = function(){ rmRun(rmCall('upload_image', { menu_id: id, data_url: reader.result }), function(){ return '✅ 画像を保存しました。続けて「ボタン配置を作る」を押してください。'; }); };
+    reader.onerror = function(){ rmSetMsg('画像の読み込みに失敗しました。'); };
+    reader.readAsDataURL(file);
+  }
+  document.addEventListener('click', function(e){ var sec = document.getElementById('rmSection'); if(sec && sec.contains(e.target)) onClick(e); });
+  document.addEventListener('input', function(e){ var sec = document.getElementById('rmSection'); if(sec && sec.contains(e.target)) onInput(e); });
+  document.addEventListener('change', function(e){ var sec = document.getElementById('rmSection'); if(sec && sec.contains(e.target)) onChange(e); });
+})();
+
+/* 流入リンクのカードの「アクション」を保存する（選んだメニューを表示／なし＝止める）。 */
+function rmSaveRefAction(refId, menuId, btn){
+  if(btn) btn.disabled = true;
+  var p = menuId ? rmCall('set_action', { ref_source_id: refId, menu_id: menuId }) : rmCall('clear_action', { ref_source_id: refId });
+  return p.then(function(j){
+    if(j && j.warning === 'reservation_button_missing') window.alert('保存しました。ただし、このメニューには今のメニューと同じ「予約」ボタンがありません。AI の案内とずれることがあります。');
+    return rmRefreshAll();
+  }).catch(function(err){ if(acqNeedsLogin()) return; window.alert(err && err.message ? err.message : '保存できませんでした。'); })
+    .then(function(){ if(btn) btn.disabled = false; });
 }
 
 /* ===== ② 流入元を追加 ===== */
@@ -11339,6 +11630,11 @@ function addRefSource(){
     if(act === 'copy'){ copyAcqUrl(b.getAttribute('data-url'), b); return; }
     var id = b.getAttribute('data-id');
     if(!id) return;
+    if(act === 'rmset'){
+      var sel = listEl ? listEl.querySelector('select[data-aq-rmsel="' + CSS.escape(id) + '"]') : null;
+      rmSaveRefAction(id, sel ? sel.value : '', b);
+      return;
+    }
     if(act === 'del'){
       if(!(await askConfirm({title:'', body:'この流入元を削除しますか？（過去予約の記録は残ります）', ok:'削除する', cancel:'やめる', danger:true}))) return;
       runAcqOp(sbDelete('ref_sources', 'id=eq.' + encodeURIComponent(id)));
