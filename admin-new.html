@@ -718,6 +718,12 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .chat-shell{display:grid;grid-template-columns:minmax(250px,340px) minmax(0,1fr);gap:10px;align-items:start}
 .chat-pane{background:#fff;border:1px solid #e1e9e7;border-radius:13px;min-width:0;overflow:hidden}
 .chat-pane-head{padding:10px 12px;border-bottom:1px solid #edf1f0;font-size:12px;color:#64748b;min-height:38px}
+/* 受信箱の「要対応／すべて」切り替え（2026-10-19）。ホームの「要対応を見る」から来たら要対応が選ばれる。 */
+.chat-attn-tabs{display:flex;gap:6px;padding:10px 12px 0}
+.chat-attn-tab{flex:1;border:1px solid #cfe0dd;background:#fff;color:#0b5c55;border-radius:9px;padding:8px 10px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.chat-attn-tab.chat-attn-on{background:#0b5c55;border-color:#0b5c55;color:#fff}
+.chat-attn-tab .chat-attn-n{display:inline-block;margin-left:4px;min-width:18px;padding:0 6px;border-radius:999px;background:#c2410c;color:#fff;font-size:11px;line-height:18px}
+.chat-attn-tab .chat-attn-n:empty{display:none}
 .chat-list{display:flex;flex-direction:column;max-height:68vh;overflow:auto}
 .chat-list-item{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #edf1f0;background:#fff;padding:11px 12px;cursor:pointer;color:#1f2937}
 .chat-list-item:hover,.chat-list-item.chat-selected{background:#f0faf8}
@@ -1056,6 +1062,10 @@ body.chat-conversation .chat-compose-msg{font-size:11px;max-height:44px;overflow
     </div>
     <div class="chat-shell" id="chatShell">
       <section class="chat-pane chat-pane-list" aria-label="会話一覧">
+        <div class="chat-attn-tabs" role="group" aria-label="表示する会話">
+          <button type="button" class="chat-attn-tab" id="chatAttnTab" aria-pressed="false">要対応<span class="chat-attn-n" id="chatAttnCount"></span></button>
+          <button type="button" class="chat-attn-tab chat-attn-on" id="chatAllTab" aria-pressed="true">すべて</button>
+        </div>
         <div class="chat-pane-head" id="chatListMsg" aria-live="polite">読み込み前</div>
         <div class="chat-list" id="chatList"></div>
         <div class="chat-more-wrap"><button type="button" class="chat-btn" id="chatMore" style="display:none">さらに読み込む</button></div>
@@ -1692,6 +1702,78 @@ function showHome(el){
 /* CS3A CHAT INBOX SCRIPT START */
 // CS4は対応中の会話だけに1対1返信を追加する。宛先・送信者・チャネルはサーバー側で確定する。
 var CHAT_STATE = null;
+/* ===== 受信箱の「要対応」タブ（2026-10-19）=====
+   ホームの「要対応を見る」から来たら、要対応タブが選ばれた状態で開く。
+   誰が要対応か＝ホームの件数と同じ取り方（fetchAttentionCustomerIds）。受信箱の一覧からその人だけを残す。
+   判定の正本は poc/admin_chat_attention_pure.mjs。ここはその写しで、tests/chat_attention.test.mjs が一致を確かめる。 */
+var CHAT_ATTN_ENTRY = false;   // ホームから来た印。showChatInbox が1回だけ読んで消す。
+var CHAT_ATTN_MAX_PAGES = 20;
+function chatAttentionView(items, ids) {
+  var want = Object.create(null), total = 0;
+  (Array.isArray(ids) ? ids : []).forEach(function (id) {
+    if (id && !want[id]) { want[id] = true; total++; }
+  });
+  var seen = Object.create(null), visible = [];
+  (Array.isArray(items) ? items : []).forEach(function (item) {
+    var id = item && item.customer_id;
+    if (id && want[id] && !seen[id]) { seen[id] = true; visible.push(item); }
+  });
+  return { visible: visible, total: total, missing: total - visible.length };
+}
+function chatAttentionNeedsMore(view, hasMore, pagesLoaded, maxPages) {
+  var limit = maxPages > 0 ? maxPages : CHAT_ATTN_MAX_PAGES;
+  return !!(view && view.missing > 0 && hasMore && pagesLoaded < limit);
+}
+function chatAttentionListText(view, searching) {
+  if (!view) return '読み込み中…';
+  if (view.total === 0) return 'いま要対応のお客様はいません';
+  var text = '要対応 ' + view.visible.length + '件を表示';
+  if (view.missing > 0) {
+    text += searching
+      ? '（残り' + view.missing + '件を探しています…）'
+      : '（ほか' + view.missing + '件は受信箱に出せません。顧客カルテの「要対応」で確認してください）';
+  }
+  return text;
+}
+// ホームの「要対応 N」と同じ取り方（サーバで粗く絞り、最終判定は humanNeedsAttention）。
+function fetchAttentionCustomerIds(){
+  return sbGet('customers?select=id,human_status&human_status=not.in.("",done)').then(function(rows){
+    return (Array.isArray(rows) ? rows : []).filter(function(r){ return r && r.id && humanNeedsAttention(r.human_status); })
+      .map(function(r){ return r.id; });
+  });
+}
+function chatAttnRenderTabs(){
+  var on = !!(CHAT_STATE && CHAT_STATE.attnOnly);
+  var attn = document.getElementById('chatAttnTab'), all = document.getElementById('chatAllTab');
+  if(attn){ attn.classList.toggle('chat-attn-on', on); attn.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+  if(all){ all.classList.toggle('chat-attn-on', !on); all.setAttribute('aria-pressed', on ? 'false' : 'true'); }
+  var n = document.getElementById('chatAttnCount');
+  if(n) n.textContent = (CHAT_STATE && Array.isArray(CHAT_STATE.attnIds) && CHAT_STATE.attnIds.length) ? String(CHAT_STATE.attnIds.length) : '';
+}
+function chatLoadAttnIds(){
+  if(!CHAT_STATE || typeof sbGet !== 'function') return Promise.resolve();
+  var state = CHAT_STATE, seq = (state.attnSeq || 0) + 1; state.attnSeq = seq;
+  return fetchAttentionCustomerIds().then(function(ids){
+    if(state !== CHAT_STATE || state.attnSeq !== seq) return;
+    state.attnIds = ids; state.attnError = false;
+    chatAttnRenderTabs(); chatRenderList(); chatAttnContinue();
+  }).catch(function(){
+    if(state !== CHAT_STATE || state.attnSeq !== seq) return;
+    state.attnError = true; chatAttnRenderTabs(); chatRenderList();
+  });
+}
+// 要対応の人がまだ一覧に出ていなければ、続きを自動で読む（上限 CHAT_ATTN_MAX_PAGES）。
+function chatAttnContinue(){
+  var state = CHAT_STATE;
+  if(!state || !state.attnOnly || !Array.isArray(state.attnIds) || state.loadingList) return;
+  var view = chatAttentionView(state.items, state.attnIds);
+  if(chatAttentionNeedsMore(view, state.listHasMore, state.attnPages || 0, CHAT_ATTN_MAX_PAGES)) chatLoadList(false, true);
+}
+function chatSetAttnMode(on){
+  if(!CHAT_STATE) return;
+  CHAT_STATE.attnOnly = !!on;
+  chatAttnRenderTabs(); chatRenderList(); chatAttnContinue();
+}
 var CHAT_IMAGE_URLS=new Map(),CHAT_IMAGE_REQUESTS=new Map(),CHAT_IMAGE_EPOCH=0;
 var CHAT_LIVE_DETAIL_TIMER=null,CHAT_LIVE_LIST_TIMER=null,CHAT_LIVE_EPOCH=0;
 
@@ -1767,7 +1849,7 @@ function chatRefreshListLive(){
       state.listCursor=last && last.sort_at && (last.customer_id || last.cursor_id)?{before_at:last.sort_at,before_id:last.customer_id || last.cursor_id}:null;
       state.listHasMore=rows.length===50 && !!state.listCursor;}
     state.listQuery=query;state.listStore=storeId;state.liveListFailures=0;
-    chatRenderList();
+    chatRenderList();chatLoadAttnIds();
   }).catch(function(){
     if(!current())return;
     state.liveListFailures=(state.liveListFailures||0)+1;
@@ -1781,7 +1863,8 @@ function chatNewState(){
     selectedCustomerId: null, detail: null, messages: [], detailCursor: null,
     detailHasMore: false, loadingList: false, loadingDetail: false,
     workflowBusy: null, workflowMessage: '', workflowNeedsReload: false,
-    sendBusy: false, sendMessage: '', draftBody: '', draftId: null, imageDraft:null, imagePreparing:false
+    sendBusy: false, sendMessage: '', draftBody: '', draftId: null, imageDraft:null, imagePreparing:false,
+    attnOnly: false, attnIds: null, attnError: false, attnPages: 0, attnSeq: 0
   };
 }
 
@@ -2107,8 +2190,21 @@ function chatSyncListFromDetail(){
 function chatRenderList(){
   var host=document.getElementById('chatList'); if(!host || !CHAT_STATE) return;
   chatClear(host);
-  if(!CHAT_STATE.items.length){ host.appendChild(chatElement('div','chat-empty','表示できる会話はありません。')); }
-  CHAT_STATE.items.forEach(function(item){
+  var attnOnly=!!CHAT_STATE.attnOnly, attnView=null, shown=CHAT_STATE.items;
+  if(attnOnly){
+    attnView=Array.isArray(CHAT_STATE.attnIds) ? chatAttentionView(CHAT_STATE.items, CHAT_STATE.attnIds) : null;
+    shown=attnView ? attnView.visible : [];
+  }
+  if(!shown.length){
+    var emptyText='表示できる会話はありません。';
+    if(attnOnly) emptyText=CHAT_STATE.attnError ? '要対応のお客様を読み込めませんでした。「更新」を押してください。'
+      : !attnView ? '要対応のお客様を読み込み中…'
+      : attnView.total===0 ? 'いま要対応のお客様はいません ✅'
+      : (CHAT_STATE.loadingList || !CHAT_STATE.attnPages || chatAttentionNeedsMore(attnView, CHAT_STATE.listHasMore, CHAT_STATE.attnPages||0, CHAT_ATTN_MAX_PAGES)) ? '要対応のお客様を探しています…'
+      : '要対応のお客様の会話が受信箱に見つかりません。顧客カルテの「要対応」で確認してください。';
+    host.appendChild(chatElement('div','chat-empty',emptyText));
+  }
+  shown.forEach(function(item){
     var button=chatElement('button','chat-list-item'); button.type='button';
     if(item.customer_id===CHAT_STATE.selectedCustomerId) button.classList.add('chat-selected');
     var name=item.display_name || (item.ticket_no ? 'お客様 #'+item.ticket_no : '名前未設定のお客様');
@@ -2137,9 +2233,13 @@ function chatRenderList(){
     button.addEventListener('click', function(){ chatLoadDetail(item.customer_id, true); });
     host.appendChild(button);
   });
-  chatSetText('chatListMsg', CHAT_STATE.items.length+'件を表示');
+  if(attnOnly){
+    var searching=!!attnView && (CHAT_STATE.loadingList || !CHAT_STATE.attnPages || chatAttentionNeedsMore(attnView, CHAT_STATE.listHasMore, CHAT_STATE.attnPages||0, CHAT_ATTN_MAX_PAGES));
+    chatSetText('chatListMsg', CHAT_STATE.attnError ? '要対応のお客様を読み込めませんでした' : chatAttentionListText(attnView, searching));
+  } else chatSetText('chatListMsg', CHAT_STATE.items.length+'件を表示');
   var more=document.getElementById('chatMore');
-  if(more){ more.style.display=CHAT_STATE.listHasMore ? 'inline-block' : 'none'; more.disabled=CHAT_STATE.loadingList; }
+  // 要対応タブでは続きを自動で読むので「さらに読み込む」は出さない。
+  if(more){ more.style.display=(!attnOnly && CHAT_STATE.listHasMore) ? 'inline-block' : 'none'; more.disabled=CHAT_STATE.loadingList; }
 }
 
 function chatLoadList(reset,preserveDetail){
@@ -2159,7 +2259,7 @@ function chatLoadList(reset,preserveDetail){
     params.before_id=CHAT_STATE.listCursor.before_id;
   }
   if(reset){
-    CHAT_STATE.items=[]; CHAT_STATE.listCursor=null; CHAT_STATE.listHasMore=false;
+    CHAT_STATE.items=[]; CHAT_STATE.listCursor=null; CHAT_STATE.listHasMore=false; CHAT_STATE.attnPages=0;
     if(!preserveDetail){
     CHAT_STATE.selectedCustomerId=null; CHAT_STATE.detail=null; CHAT_STATE.messages=[];
     CHAT_STATE.workflowBusy=null; CHAT_STATE.workflowMessage=''; CHAT_STATE.workflowNeedsReload=false;
@@ -2171,7 +2271,7 @@ function chatLoadList(reset,preserveDetail){
   }
   CHAT_STATE.loadingList=true; chatSetText('chatListMsg','読み込み中…');
   var more=document.getElementById('chatMore'); if(more) more.disabled=true;
-  var labelSeq=state.labelSeq;
+  var labelSeq=state.labelSeq,listFailed=false;
   return chatCall(params.label_id?'filter_labeled_conversations':'list_conversations', params).then(function(data){
     if(!current()||state.labelSeq!==labelSeq)return;
     var rows=Array.isArray(data) ? data : [];
@@ -2182,14 +2282,17 @@ function chatLoadList(reset,preserveDetail){
     CHAT_STATE.listCursor=(last && last.sort_at && (last.customer_id || last.cursor_id))
       ? { before_at:last.sort_at, before_id:last.customer_id || last.cursor_id } : null;
     CHAT_STATE.listHasMore=rows.length===50 && !!CHAT_STATE.listCursor;
+    CHAT_STATE.attnPages=(CHAT_STATE.attnPages||0)+1;
     chatRenderList();
   }).catch(function(error){
     if(!current())return;
+    listFailed=true; CHAT_STATE.attnPages=CHAT_ATTN_MAX_PAGES;   // 失敗したら自動の続き読みは止める（同じ失敗を繰り返さない）
     chatSetText('chatListMsg',chatReason(error && error.code));
     if(!CHAT_STATE.items.length){ var host=document.getElementById('chatList'); if(host){ chatClear(host); host.appendChild(chatElement('div','chat-empty','チャットを表示できませんでした。')); } }
   }).finally(function(){
     if(!current())return;
     CHAT_STATE.loadingList=false; var button=document.getElementById('chatMore'); if(button) button.disabled=false;
+    if(CHAT_STATE.attnOnly && !listFailed){ chatRenderList(); chatAttnContinue(); }
   });
 }
 
@@ -2880,13 +2983,14 @@ async function chatBackToList(){
   else {var next=navListState(navCapture());await navReplay(next);navWrite(next,true);}
 }
 
-function chatRefresh(){ chatLoadList(true); }
+function chatRefresh(){ chatLoadList(true); chatLoadAttnIds(); }
 function showChatInbox(el){
   if(typeof hideAllViews==='function') hideAllViews();
   if(el && typeof setActiveNav==='function') setActiveNav(el);
   document.getElementById('chatView').style.display='block';
   chatResetState();
   var state=CHAT_STATE,scope=checkoutScope();
+  state.attnOnly=CHAT_ATTN_ENTRY; CHAT_ATTN_ENTRY=false; chatAttnRenderTabs(); chatLoadAttnIds();
   chatPopulateStoreFilter().catch(function(){return null;}).then(function(){
     if(state!==CHAT_STATE||scope!==checkoutScope()||CURRENT_GROUP!=='chat')return;
     var settings=document.getElementById('chatLabelSettings');if(settings)settings.style.display=IS_MANAGER?'inline-block':'none';
@@ -2897,6 +3001,8 @@ function showChatInbox(el){
 
 (function bindChatInbox(){
   var reload=document.getElementById('chatReload'); if(reload) reload.addEventListener('click',chatRefresh);
+  var attnTab=document.getElementById('chatAttnTab'); if(attnTab) attnTab.addEventListener('click',function(){ chatSetAttnMode(true); });
+  var allTab=document.getElementById('chatAllTab'); if(allTab) allTab.addEventListener('click',function(){ chatSetAttnMode(false); });
   var store=document.getElementById('chatStoreFilter'); if(store) store.addEventListener('change',function(){handlingLoadFilter();chatRefresh();});
   var labelFilter=document.getElementById('chatLabelFilter');if(labelFilter)labelFilter.addEventListener('change',function(){chatLoadList(true,true);});
   var settings=document.getElementById('chatLabelSettings');if(settings)settings.addEventListener('click',function(){var store=document.getElementById('chatStoreFilter');handlingOpenManager(store&&store.value);});
@@ -3426,8 +3532,8 @@ function loadHomeAttention(){
   loadHomeJudgeWarn();
   loadHomeJobHealth();
   if(typeof sbGet!=='function') return;
-  sbGet('customers?select=id,human_status&human_status=not.in.("",done)').then(function(rows){
-    var n = Array.isArray(rows) ? rows.filter(function(r){ return humanNeedsAttention(r && r.human_status); }).length : 0;
+  fetchAttentionCustomerIds().then(function(ids){
+    var n = ids.length;
     var el=document.getElementById('home-attn'); if(el) el.textContent=n;
   }).catch(function(){ var el=document.getElementById('home-attn'); if(el) el.textContent='—'; });
 }
@@ -12760,8 +12866,8 @@ async function chatLoadLinks(customerId){
 }
 async function homeOpenAttention(){
  var current=navLinkRequest();
- try{await chatCall('list_conversations',{limit:1});if(current())gotoSubtab('chat');}
- catch(err){if(!current())return;if(err&&err.code==='chat_inbox_disabled')gotoSubtab('resv','showCustomers');else gotoSubtab('chat');}
+ try{await chatCall('list_conversations',{limit:1});if(current()){CHAT_ATTN_ENTRY=true;gotoSubtab('chat');}}
+ catch(err){if(!current())return;if(err&&err.code==='chat_inbox_disabled')gotoSubtab('resv','showCustomers');else{CHAT_ATTN_ENTRY=true;gotoSubtab('chat');}}
 }
 async function openReservationFromAnywhere(id){
  if(!id)return;
