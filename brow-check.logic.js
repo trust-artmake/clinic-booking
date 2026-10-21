@@ -126,6 +126,24 @@
     return typeof url === "string" && ALLOWED_LINE.test(url) ? url : null;
   }
 
+  // 2026-10-21：段階ごとの回数だけを匿名で数える。送るのは公開サイトからだけ（?nt=1 は送らない＝確認用）。
+  const EVENT_ORIGIN = "https://trust-artmake.github.io";
+  function trackingEnabled(origin, search) {
+    return origin === EVENT_ORIGIN && !/[?&]nt=1(?:&|$)/.test(typeof search === "string" ? search : "");
+  }
+  // 送る中身は出来事・何問目・タイプ・アーティスト・ランダム番号だけ（回答の中身や個人情報は入れない）
+  function buildEventPayload(event, detail, artist, visitId) {
+    const body = { e: event, a: artist, v: visitId };
+    if (event === "question") body.s = detail;
+    if (event === "complete" || event === "line_click") body.t = detail;
+    return JSON.stringify(body);
+  }
+  function randomVisitId(getRandomValues) {
+    const bytes = new Uint8Array(16);
+    getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
   const DEFAULT_ARTIST = "yuumi";
   function resolveArtist(config, search) {
     let a = "";
@@ -170,5 +188,5 @@
     };
   }
 
-  root.BrowCheck = Object.freeze({ QUESTIONS, SHAPE_TYPES, COLOR_GROUPS, decideShape, decideColor, shapeById, facesForShape, lineUrlFor, resolveArtist, createShareLayout });
+  root.BrowCheck = Object.freeze({ QUESTIONS, SHAPE_TYPES, COLOR_GROUPS, decideShape, decideColor, shapeById, facesForShape, lineUrlFor, resolveArtist, createShareLayout, trackingEnabled, buildEventPayload, randomVisitId });
 })(globalThis);
