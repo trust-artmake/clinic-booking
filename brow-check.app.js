@@ -99,6 +99,21 @@
   let choiceTimer = 0;
   let loadingTimer = 0;
 
+  // 2026-10-21：段階ごとの回数だけを匿名で数える（失敗してもサイトの動きは止めない）
+  const EVENT_URL = "https://stgarheuldubyrzdqzaq.supabase.co/functions/v1/brow-event";
+  let visitId = "";
+  try {
+    if (B.trackingEnabled(window.location.origin, window.location.search) && navigator.sendBeacon && window.crypto) {
+      visitId = B.randomVisitId((bytes) => window.crypto.getRandomValues(bytes));
+    }
+  } catch (_e) { visitId = ""; }
+  function track(event, detail) {
+    if (!visitId) return;
+    try {
+      navigator.sendBeacon(EVENT_URL, new Blob([B.buildEventPayload(event, detail, artist, visitId)], { type: "text/plain" }));
+    } catch (_e) { /* 数えられなくても診断は続ける */ }
+  }
+
   const byId = (id) => document.getElementById(id);
   const startButtons = document.querySelectorAll("[data-start-check]");
   window.addEventListener("load", () => {
@@ -358,6 +373,7 @@
     if (!question) return restart();
     renderProgress();
     byId("questionNumber").textContent = "Q" + (step + 1) + " / " + B.QUESTIONS.length;
+    track("question", step + 1);
     appendPhrases(byId("questionTitle"), question.text);
     byId("questionHint").textContent = question.hint;
     byId("backButton").hidden = step === 0;
@@ -478,6 +494,8 @@
     byId("resultBrowWebp").srcset = assetUrl("result-card-" + shape.id + ".webp");
     byId("resultBrowImage").src = assetUrl("result-card-" + shape.id + ".png");
     updateLineButton(shape.id);
+    byId("lineButton").dataset.shape = shape.id;
+    track("complete", shape.id);
     showScreen("result");
     if (shouldFocus) focusAfterPaint(byId("completionTitle"));
   }
@@ -501,11 +519,13 @@
 
   renderTypeCards();
   initHeroMapping();
+  track("open");
   startButtons.forEach((button) => button.addEventListener("click", start));
   byId("backButton").addEventListener("click", () => window.history.back());
   byId("retryButton").addEventListener("click", restart);
   byId("lineButton").addEventListener("click", (event) => {
-    if (event.currentTarget.getAttribute("aria-disabled") === "true") event.preventDefault();
+    if (event.currentTarget.getAttribute("aria-disabled") === "true") return event.preventDefault();
+    track("line_click", event.currentTarget.dataset.shape);
   });
 
   const stickyCta = byId("heroStickyCta");
