@@ -581,6 +581,48 @@ var MIN_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate
 var INIT_Y = MIN_DATE.getFullYear(), INIT_M = MIN_DATE.getMonth()+1;
 // 予約可能日の上限（今日から60日先まで）。
 var MAX_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+60); return d; })();
+// ★店ごとの受付開始日（久留米移行 D4・2026-11-09）。店の設定 booking_open_from があれば、それより前は選べない。
+//   無い店（小倉など）は MIN_DATE・INIT_Y/M・カレンダーの動きが今までと完全に同じ。DB側でも同じ日付で断る。
+//   下の4関数は poc/_pure.mjs と一字一句同じ（tests/booking_open_from_page.test.mjs が守る）。
+var BASE_MIN_DATE = MIN_DATE;
+function parseOpenFrom(v){
+  if(typeof v!=='string') return null;
+  var m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m) return null;
+  var y=+m[1], mo=+m[2], d=+m[3];
+  var dt=new Date(y,mo-1,d);
+  if(dt.getFullYear()!==y||dt.getMonth()!==mo-1||dt.getDate()!==d) return null;
+  return dt;
+}
+function effectiveMinDate(minDate, openFrom){
+  return (openFrom && openFrom>minDate) ? openFrom : minDate;
+}
+function safeHttpsUrl(v){
+  if(typeof v!=='string') return '';
+  if(v.length>500) return '';
+  return /^https:\/\/[^\s"<>]+$/.test(v) ? v : '';
+}
+function beforeOpenLinkLabel(openFrom){
+  if(!openFrom) return '';
+  if(openFrom.getDate()===1){
+    var pm=openFrom.getMonth(); if(pm===0) pm=12;
+    return pm+'月のご予約はこちら';
+  }
+  return (openFrom.getMonth()+1)+'月'+openFrom.getDate()+'日より前のご予約はこちら';
+}
+// ★お客様からの予約を受け付けるか（久留米移行 D3）。テスト店などは店の設定で OFF にする。DB側でも断る。
+//   関数と文言は poc/_pure.mjs と一字一句同じ（tests/public_booking_switch.test.mjs が守る）。
+function isPublicBookingClosed(store){
+  return !!(store && store.public_booking_enabled===false);
+}
+var PUBLIC_BOOKING_CLOSED_MESSAGE = '申し訳ございません。こちらのページでは、ただいまご予約をお受けしておりません。お手数ですが、公式LINEのトークからご連絡ください。';
+// 店の設定を読んだあとに1回呼ぶ。受付開始日が効く店だけ、選べる最初の日とカレンダーの最初の月を動かす。
+function applyBookingOpen(opt){
+  MIN_DATE = effectiveMinDate(BASE_MIN_DATE, opt.openFrom);
+  if(MIN_DATE===BASE_MIN_DATE) return;
+  INIT_Y = MIN_DATE.getFullYear(); INIT_M = MIN_DATE.getMonth()+1;
+  if(st.calYear<INIT_Y || (st.calYear===INIT_Y && st.calMonth<INIT_M)){ st.calYear=INIT_Y; st.calMonth=INIT_M; }
+}
 
 // ===== ユーティリティ =====
 function p2(n){ return n<10?'0'+n:''+n; }
@@ -748,6 +790,8 @@ function pickCourse(nid,nname,mid,mname,price,dur,priceMonitor){
 // closed_days は自由記述文字列。曜日名（例「月曜」）や YYYY-MM-DD が含まれていれば該当日を除外する。
 function storeOpenMin(){ return st.options&&st.options.openMin!=null ? st.options.openMin : DEF_OPEN_H*60; }
 function storeCloseMin(){ return st.options&&st.options.closeMin!=null ? st.options.closeMin : DEF_CLOSE_H*60; }
+// ★店の最終受付（分）。null＝制限なし（今までどおり）。久留米移行 D1。DB側でも同じ時刻で断る。
+function storeLastReceptionMin(){ return st.options&&st.options.lastRecMin!=null ? st.options.lastRecMin : null; }
 function storeInterval(){ var v=st.options&&st.options.interval; return (v&&v>0)?v:DEF_INTERVAL; }
 var DOWJA=['日','月','火','水','木','金','土'];
 function parseClosed(s){
@@ -818,6 +862,15 @@ function s3(){
   }
   h+='</div>';
   h+='<div class="c-note" style="font-size:12px;color:#6b7280;margin-top:8px">※ご予約は3日後以降の日程から承っております。お急ぎの場合はLINEのトークでご相談ください。</div>';
+  // ★受付開始日が効く店だけ（久留米移行 D4）：開始日を伝え、それより前の予約の案内先があればリンクを出す。
+  if(st.options&&st.options.openFrom&&MIN_DATE!==BASE_MIN_DATE){
+    var of=st.options.openFrom;
+    h+='<div class="c-note" style="font-size:13px;color:#374151;margin-top:8px">※こちらでは'+(of.getMonth()+1)+'月'+of.getDate()+'日以降のご予約を承っております。';
+    if(st.options.beforeOpenUrl){
+      h+='<br><a href="'+esc(st.options.beforeOpenUrl)+'" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline">'+esc(beforeOpenLinkLabel(st.options.openFrom))+'</a>';
+    }
+    h+='</div>';
+  }
   if(st.adErr){
     h+='<div class="msg-err">空き情報を取得できませんでした。電波の良い場所で、もう一度お試しください。<div style="margin-top:10px"><button class="btn-retry" onclick="retryAD()">再試行</button></div></div>';
   }else if(st.availDates===null){
@@ -897,10 +950,11 @@ function pickD(ds){
 // 店舗営業時間内を interval 刻みで作り、施術時間ぶん収まり、busy（予約済み）と重ならない枠だけ available=true。
 function computeSlots(dateStr, busy){
   var openMin=storeOpenMin(), closeMin=storeCloseMin(), interval=storeInterval();
+  var lastRec=storeLastReceptionMin();
   var dur=(st.menuDur&&st.menuDur>0)?st.menuDur:60;
   var now=Date.now();
   var out=[];
-  for(var mins=openMin; mins+dur<=closeMin; mins+=interval){
+  for(var mins=openMin; mins+dur<=closeMin && (lastRec==null || mins<=lastRec); mins+=interval){
     var hh=p2(Math.floor(mins/60)), mm=p2(mins%60), t=hh+':'+mm;
     var s=new Date(dateStr+'T'+t+':00+09:00').getTime(), e=s+dur*60000;
     var future=s>now; // 過去時刻は出さない（当日用）
@@ -1198,6 +1252,13 @@ function errR(code,msg){
     return 'ただいまこの組み合わせのご予約をお受けできません。お手数ですがトーク画面からお問い合わせください。';
   if(/seat_full/.test(msg))
     return '申し訳ございません。その時間帯は満席です。お手数ですが、別の日時でお試しください。';
+  // ★久留米移行 D4：店の受付開始日より前（DB側で断った）。画面が古いまま開かれていた時など。
+  if(/public_booking_closed/.test(msg))
+    return PUBLIC_BOOKING_CLOSED_MESSAGE;
+  if(/after_last_reception/.test(msg))
+    return '申し訳ございません。その時間は受付時間外のため、ご予約をお受けできません。お手数ですが、別の時間をお選びください。';
+  if(/before_booking_open/.test(msg))
+    return '申し訳ございません。その日はこちらではご予約をお受けしておりません。お手数ですが、別の日をお選びください。';
   return '申し訳ございません、ただいまご予約をお受けできませんでした。お手数ですがトーク画面からご連絡ください。';
 }
 // （旧 fireNotify は廃止）予約通知は DBトリガ → notify-reservation が内部トークンで実行する。
@@ -1242,7 +1303,7 @@ var TERMS='<p>ご予約の前に、以下の項目について必ずご確認い
   +'</ul>'
   +'<span class="t-hd">【キャンセルポリシー】</span>'
   +'<span class="t-sub">1. キャンセル・日時変更の方法</span>'
-  +'<p>こちらの公式LINEにてご連絡ください。ご予約日から3日前まで料金は発生しません。</p>'
+  +'<p>ご予約の72時間前（3日前の同じ時刻）までは、ご予約完了時にお送りした確認ページからご自身でキャンセルいただけます。それ以降のキャンセル・日時変更は、こちらの公式LINEにてご連絡ください。ご予約日から3日前まで料金は発生しません。</p>'
   +'<span class="t-sub">2. キャンセル料（クレジット・現地決済）</span><ul>'
   +'<li>3日前〜前日：お支払い金額の50%を返金</li>'
   +'<li>当日のキャンセル・日時変更：返金なし</li>'
@@ -1294,6 +1355,12 @@ function showWizardIfReady(){
   if(!bootOpt){
     wizardShown=true;
     document.getElementById('s-loading').innerHTML='<div class="msg-err" style="margin:40px 24px">情報の取得に失敗しました。<br>時間をおいて再度お試しください。</div>';
+    return;
+  }
+  // ★久留米移行 D3：お客様からの予約を受け付けない店（テスト店など）では予約画面を出さない。
+  if(bootOpt.publicClosed){
+    wizardShown=true;
+    document.getElementById('s-loading').innerHTML='<div class="msg-err" style="margin:40px 24px">'+esc(PUBLIC_BOOKING_CLOSED_MESSAGE)+'</div>';
     return;
   }
   st.options=bootOpt; applyInitialArtist(); wizardShown=true; updHeader(); showScr('s-wizard'); render();
@@ -1386,13 +1453,13 @@ function renderCancelList(rows){
     body.innerHTML='<div class="soon-box"><div class="done-icon">🗓️</div><div class="done-title">キャンセルできるご予約はありません</div><div class="done-msg">今後のご予約が見つかりませんでした。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
     return;
   }
-  var h='<div class="cl-intro">キャンセルするご予約をお選びください。<br><span class="cl-sub">Webでのキャンセルは、ご予約の3日前まで承ります。</span></div>';
+  var h='<div class="cl-intro">キャンセルするご予約をお選びください。<br><span class="cl-sub">Webでのキャンセルは、ご予約の72時間前（3日前の同じ時刻）まで承ります。</span></div>';
   rows.forEach(function(r){
     var dt=clDtText(r.start_at);
     // ★3日前(72時間前)を過ぎた予約はキャンセルボタンを出さない（GAS版と同じ運用）
     var action = r.cancellable
       ? '<button class="btn cl-x" data-rid="'+esc(r.id)+'" data-dt="'+esc(dt)+'">このご予約をキャンセル</button>'
-      : '<div class="cl-late">ご予約3日前を過ぎているため、Webからのキャンセルはできません。お手数ですが公式LINEのトークからご連絡ください。</div>';
+      : '<div class="cl-late">ご予約の72時間前を過ぎているため、Webからのキャンセルはできません。お手数ですが公式LINEのトークからご連絡ください。</div>';
     h+='<div class="cl-card"><div class="cl-dt">'+esc(dt)+'</div>'
       +'<div class="cl-meta">'+esc(r.menu_name||'—')+'<br>担当：'+esc(r.artist_name||'—')+'</div>'
       + action + '</div>';
@@ -1891,8 +1958,13 @@ function loadOptions(){
       nurses:nurses, menus:menusC, certified:certified,
       store_name:(store&&store.name)||'',
       openMin:openMin, closeMin:closeMin, interval:interval,
-      closed:parseClosed(store&&store.closed_days)
+      closed:parseClosed(store&&store.closed_days),
+      openFrom: parseOpenFrom(store&&store.booking_open_from),
+      beforeOpenUrl: safeHttpsUrl(store&&store.booking_before_open_url),
+      publicClosed: isPublicBookingClosed(store),
+      lastRecMin: hmToMin(store&&store.last_reception_time, null)
     };
+    applyBookingOpen(bootOpt);
     bootOptDone=true;
     if(wizardShown){ st.options=bootOpt; applyInitialArtist(); updHeader(); if(MODE==='book'&&st.step===1) render(); }
     else showWizardIfReady();
