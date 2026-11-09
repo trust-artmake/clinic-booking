@@ -1982,6 +1982,7 @@ function chatEventsFrom(state){
 function chatAutoTitle(item){
   var name=item && item.scenario_name ? '「'+item.scenario_name+'」' : '';
   if(item && item.auto_kind==='reminder') return '自動配信｜予約リマインド'+name;
+  if(item && item.auto_kind==='after_visit') return '自動配信｜施術翌日のメッセージ';
   return '自動配信｜ステップ'+(name || ' ')+(item && item.step_no ? item.step_no+'通目' : '');
 }
 function chatAutoStatus(status){
