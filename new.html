@@ -281,6 +281,31 @@
     .fix-note p { margin:0 0 6px; }
     .fix-note ul { margin:6px 0 0 18px; padding:0; }
     .fix-note li { margin-bottom:4px; }
+
+    /* ===== 最初に「ご希望の時期」を選ぶ画面（久留米移行・案A・2026-11-09）。受付開始日より前の予約は別の画面（エルメ）へ ===== */
+    #s-period { display:none; }
+    .pd-wrap { padding:22px 18px 28px; }
+    .pd-ttl { font-family:var(--serif); font-size:20px; font-weight:700; color:var(--ink); margin:4px 2px 8px; }
+    .pd-lead { font-size:13px; color:#6b6058; line-height:1.75; margin:0 2px 18px; }   /* --muted だと背景に対して 3.6:1 で読みにくい→ 5.9:1 */
+    .pd-card { display:flex; align-items:center; gap:14px; width:100%; text-align:left; background:var(--surface);
+      border:1.5px solid var(--brand-line); border-radius:16px; padding:18px 16px; margin-bottom:14px;
+      font-family:inherit; color:var(--ink); cursor:pointer; box-shadow:0 2px 10px rgba(140,85,71,.06); }
+    .pd-card:active { background:var(--brand-soft); }
+    .pd-card:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+    .pd-mon { flex:0 0 auto; width:58px; height:58px; border-radius:50%; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; color:#fff; background:var(--brand-deep); font-family:var(--serif); line-height:1.1; }
+    .pd-mon b { font-size:20px; }
+    .pd-mon b.pd-long { font-size:15px; }
+    .pd-mon small { font-size:11px; letter-spacing:.05em; }
+    .pd-before .pd-mon { background:#fff; color:var(--brand-deep); border:1.5px solid var(--brand); }
+    .pd-main { flex:1 1 auto; font-size:16px; font-weight:700; }
+    .pd-nowrap { white-space:nowrap; }
+    .pd-back { display:inline-flex; align-items:center; min-height:44px; margin:-10px 0 4px -2px; padding:0 2px;
+      background:none; border:0; font-family:inherit; font-size:13px; font-weight:700; color:var(--brand-deep); cursor:pointer; }
+    .pd-back:focus-visible { outline:2px solid var(--brand); outline-offset:2px; border-radius:6px; }
+    .pd-arrow { flex:0 0 auto; color:var(--brand); font-size:20px; }
+    .pd-note { font-size:12px; color:#6b6058; line-height:1.7; margin:10px 2px 0; }
+    @media (max-width:340px){ .pd-card { gap:10px; padding:16px 12px; } .pd-main { font-size:15px; } }
   </style>
 </head>
 <body>
@@ -291,6 +316,15 @@
 
 <!-- ★流入リンクの着地画面（mode=land）・LINE の中の記録（mode=join）（2026-10-05）。中身は下の startJoinEarly が DOM で組む。 -->
 <div id="s-join" style="display:none"></div>
+
+<!-- ★最初に「ご希望の時期」を選ぶ画面（久留米移行・案A）。中身は showPeriodChoice が DOM で組む。 -->
+<div id="s-period">
+  <div class="app-hd">
+    <h1>ご予約</h1>
+    <div class="sub" id="pdSub"></div>
+  </div>
+  <div class="pd-wrap" id="pdBody"></div>
+</div>
 
 <div id="s-wizard">
   <div class="app-hd">
@@ -610,6 +644,27 @@ function beforeOpenLinkLabel(openFrom){
   }
   return (openFrom.getMonth()+1)+'月'+openFrom.getDate()+'日より前のご予約はこちら';
 }
+// ★最初に「ご希望の時期」を選ぶ画面（久留米移行・案A）。下の2つは _pure.mjs と一字一句同じ（tests/period_choice_page.test.mjs）。
+function shouldAskPeriod(openFrom, beforeOpenUrl, firstBookable){
+  if(!openFrom || !beforeOpenUrl || !firstBookable) return false;
+  return firstBookable.getTime() < openFrom.getTime();
+}
+function periodChoiceLabels(openFrom, firstBookable){
+  if(!openFrom || !firstBookable) return null;
+  var y=openFrom.getFullYear(), m=openFrom.getMonth()+1, d=openFrom.getDate();
+  var last=new Date(y, openFrom.getMonth(), d-1);
+  if(d!==1){
+    return { before: last.getFullYear()+'年'+(last.getMonth()+1)+'月'+last.getDate()+'日までのご予約',
+             after: y+'年'+m+'月'+d+'日以降のご予約',
+             beforeBadge: '〜'+(last.getMonth()+1)+'/'+last.getDate(), afterBadge: m+'/'+d };
+  }
+  var months=[], c=new Date(firstBookable.getFullYear(), firstBookable.getMonth(), 1);
+  while(c.getTime()<=last.getTime() && months.length<13){ months.push(c.getMonth()+1); c=new Date(c.getFullYear(), c.getMonth()+1, 1); }
+  if(!months.length) months=[last.getMonth()+1];
+  var a=months[0], b=months[months.length-1];
+  var before = months.length===1 ? (a+'月中のご予約') : months.length===2 ? (a+'月・'+b+'月のご予約') : (a+'月〜'+b+'月のご予約');
+  return { before: before, after: y+'年'+m+'月以降のご予約', beforeBadge: months.length===1 ? String(a) : (a+'-'+b), afterBadge: String(m) };
+}
 // ★お客様からの予約を受け付けるか（久留米移行 D3）。テスト店などは店の設定で OFF にする。DB側でも断る。
 //   関数と文言は poc/_pure.mjs と一字一句同じ（tests/public_booking_switch.test.mjs が守る）。
 function isPublicBookingClosed(store){
@@ -630,7 +685,7 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
 function isT(v){ if(v===true||v===1)return true; if(typeof v==='string'){var t=v.trim().toLowerCase();return t==='true'||t==='1';}return false; }
 function okPhone(v){ return /^0\d{9,10}$/.test(v.replace(/[-\s]/g,'')); }
 function showScr(id){
-  ['s-loading','s-wizard','s-done','s-cancel','s-consent','s-questionnaire'].forEach(function(s){ document.getElementById(s).style.display='none'; });
+  ['s-loading','s-period','s-wizard','s-done','s-cancel','s-consent','s-questionnaire'].forEach(function(s){ document.getElementById(s).style.display='none'; });
   document.getElementById(id).style.display='block';
 }
 function ymd(d){ return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()); }
@@ -750,6 +805,18 @@ function s1(){
   h+='</div>';
   document.getElementById('sc').innerHTML=h;
   document.getElementById('sn').innerHTML='<div class="s1-hint">'+(single?'コースをお選びください':'アーティストとコースをお選びください')+'</div>';
+  addPeriodBackLink();
+}
+// ★久留米移行・案A：STEP1 の上に「‹ 時期を選び直す」。時期を選ぶ画面が出る店・期間だけ（小倉・1月以降は付けない）。
+function addPeriodBackLink(){
+  if(!shouldAskPeriod(st.options.openFrom, st.options.beforeOpenUrl, BASE_MIN_DATE)) return;
+  var sc = document.getElementById('sc');
+  var a = document.createElement('button');
+  a.type = 'button';
+  a.className = 'pd-back';
+  a.textContent = '‹ 時期を選び直す';
+  a.addEventListener('click', function(){ showPeriodChoice(); window.scrollTo(0, 0); });
+  sc.insertBefore(a, sc.firstChild);
 }
 function applyInitialArtist(){
   if(st.openArtist || !st.options) return;
@@ -1363,7 +1430,47 @@ function showWizardIfReady(){
     document.getElementById('s-loading').innerHTML='<div class="msg-err" style="margin:40px 24px">'+esc(PUBLIC_BOOKING_CLOSED_MESSAGE)+'</div>';
     return;
   }
-  st.options=bootOpt; applyInitialArtist(); wizardShown=true; updHeader(); showScr('s-wizard'); render();
+  st.options=bootOpt; applyInitialArtist(); wizardShown=true; updHeader();
+  // ★久留米移行・案A：受付開始日より前の日がまだ選べる間は、最初に「ご希望の時期」を選んでもらう（1月に入れば出ない）。
+  if(shouldAskPeriod(st.options.openFrom, st.options.beforeOpenUrl, BASE_MIN_DATE)){ showPeriodChoice(); return; }
+  showScr('s-wizard'); render();
+}
+// ★最初に「ご希望の時期」を選ぶ画面（久留米移行・案A・2026-11-09 松村さん決定）。
+//   値は textContent で入れ、押した時の動きは addEventListener（innerHTML・onclick に値を入れない）。
+//   それより前 → 案内先（safeHttpsUrl を通した beforeOpenUrl＝エルメの予約カレンダー）へ同じ画面のまま移る。
+//   それ以降 → いつもの予約画面（アーティスト → コース → 日時）。カレンダーの下の小さな案内リンクも保険として残す。
+function showPeriodChoice(){
+  var L = periodChoiceLabels(st.options.openFrom, BASE_MIN_DATE);
+  document.getElementById('pdSub').textContent = document.getElementById('hSub').textContent;
+  var b = document.getElementById('pdBody');
+  while(b.firstChild) b.removeChild(b.firstChild);
+  function el(tag, cls, text){ var e = document.createElement(tag); if(cls) e.className = cls; if(text != null) e.textContent = text; return e; }
+  function card(cls, badge, label, onPick){
+    var btn = el('button', 'pd-card' + (cls ? ' ' + cls : ''));
+    btn.type = 'button';
+    var mon = el('span', 'pd-mon');
+    mon.setAttribute('aria-hidden', 'true');   // 読み上げでは月が2回読まれないように（ボタンの文字だけ読む）
+    mon.appendChild(el('b', badge.length > 2 ? 'pd-long' : '', badge));
+    if(badge.indexOf('/') < 0) mon.appendChild(el('small', '', cls ? '月' : '月〜'));
+    btn.appendChild(mon);
+    // 狭い画面で「ご予／約」と途中で切れないよう、末尾の「ご予約」はひとかたまりにする
+    var main = el('span', 'pd-main'), tail = 'ご予約';
+    if(label.slice(-tail.length) === tail){
+      main.appendChild(document.createTextNode(label.slice(0, -tail.length)));
+      main.appendChild(el('span', 'pd-nowrap', tail));
+    } else { main.textContent = label; }
+    btn.appendChild(main);
+    var arrow = el('span', 'pd-arrow', '›'); arrow.setAttribute('aria-hidden', 'true');
+    btn.appendChild(arrow);
+    btn.addEventListener('click', onPick);
+    return btn;
+  }
+  b.appendChild(el('div', 'pd-ttl', 'ご希望の時期をお選びください'));
+  b.appendChild(el('p', 'pd-lead', 'ご予約の時期によって、ご予約の画面が分かれております。'));
+  b.appendChild(card('pd-before', L.beforeBadge, L.before, function(){ location.href = st.options.beforeOpenUrl; }));
+  b.appendChild(card('', L.afterBadge, L.after, function(){ showScr('s-wizard'); render(); window.scrollTo(0, 0); }));
+  b.appendChild(el('p', 'pd-note', 'ご不明な点は、LINEのトークでお気軽にご相談ください。'));
+  showScr('s-period');
 }
 function profileDone(){ bootProfDone=true; updHeader(); showWizardIfReady();
   if(MODE==='cancel') loadCancelList();   // ★LINE UID 確定後に「自分の予約一覧」を取得
