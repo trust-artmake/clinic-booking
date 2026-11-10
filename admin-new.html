@@ -9285,11 +9285,59 @@ function setLoadStores(){
     });
     h += '<div class="set-msg" id="set-storeMsg"></div>';
     h += '<div class="set-note">※ 保存すると予約ページの空き枠が変わります。変更後はお客様が選べる時間帯が想定どおりか確認してください。編集はオーナー／管理者のみです。</div>';
+    // 予約確定メッセージの追記（app_settings.booking_confirm_note・2026-11-10）。会社ごと（この会社の全店の確定メッセージに付く）。
+    h += '<div class="set-card" id="set-confnote-card">'
+      +   '<div class="set-name">✉️ 予約確定メッセージの追記（お客様のLINEに届きます）</div>'
+      +   '<div class="set-hint" style="margin:2px 0 8px">予約が入ったときにお客様へ届く確定メッセージの最後（「お会いできるのを楽しみにしております。」の前）に、この文を足します。支払い方法・駐車場・キャンセル料の決まりなど。空にすると何も足しません。'+CONFIRM_NOTE_MAX+'文字まで。</div>'
+      +   '<textarea id="set-confnote" rows="8" maxlength="'+CONFIRM_NOTE_MAX+'" placeholder="例）【お支払い方法】&#10;現金／クレジットカード／PayPay"></textarea>'
+      +   '<div class="set-hint" id="set-confnote-count" style="margin:4px 0 8px"></div>'
+      +   '<div class="set-acts"><button type="button" class="set-btn set-primary" data-act="confnote_save">💾 追記を保存</button></div>'
+      +   '<div class="set-msg" id="set-confnoteMsg"></div>'
+      + '</div>';
     body.innerHTML = h;
+    setLoadConfirmNote();
   }).catch(function(err){
     if (setHandleAuth(err)) return;
     body.innerHTML = '<div class="set-ph set-err">取得に失敗しました<br>'+esc(setReason(err))+'</div>';
   });
+}
+
+/* 予約確定メッセージの追記（app_settings.booking_confirm_note）。送るときの整え方は
+   supabase/functions/notify-reservation/_pure.ts の normalizeConfirmNote（ここの上限と同じ 1000 文字）。 */
+var CONFIRM_NOTE_MAX = 1000;
+function setConfirmNoteCount(){
+  var t = document.getElementById('set-confnote'), c = document.getElementById('set-confnote-count');
+  if (!t || !c) return;
+  var n = String(t.value || '').trim().length;
+  c.textContent = n + ' / ' + CONFIRM_NOTE_MAX + ' 文字' + (n ? '' : '（空＝何も足さない）');
+}
+function setLoadConfirmNote(){
+  var t = document.getElementById('set-confnote');
+  if (!t) return;
+  t.addEventListener('input', setConfirmNoteCount);
+  if (!TENANT_ID){ setConfirmNoteCount(); return; }
+  sbGet('app_settings?select=value,is_set&tenant_id=eq.'+encodeURIComponent(TENANT_ID)+'&key=eq.booking_confirm_note&limit=1')
+    .then(function(rows){
+      var r = (rows || [])[0];
+      t.value = r && r.is_set ? String(r.value || '') : '';
+      setConfirmNoteCount();
+    })
+    .catch(function(){ setConfirmNoteCount(); });
+}
+async function setSaveConfirmNote(){
+  if (!TENANT_ID){ setMsg('set-confnoteMsg','テナントが選ばれていません。', false); return; }
+  var v = String(((document.getElementById('set-confnote')||{}).value || '')).replace(/\r\n?/g, '\n').trim();
+  if (v.length > CONFIRM_NOTE_MAX){ setMsg('set-confnoteMsg', CONFIRM_NOTE_MAX+'文字以内にしてください。', false); return; }
+  var ask = v ? 'これから入る予約の確定メッセージに、この追記が付いてお客様に届きます。保存しますか？' : '追記を空にします（確定メッセージは共通の文面だけになります）。保存しますか？';
+  if (!(await askConfirm({title:'', body:ask, ok:'保存する', cancel:'やめる', danger:false}))) return;
+  fetch(SB_URL+"/rest/v1/app_settings?on_conflict=tenant_id,key", {
+    method:"POST",
+    headers: Object.assign({"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=minimal"}, hdr()),
+    body: JSON.stringify([{ tenant_id: TENANT_ID, key:'booking_confirm_note', value:v, is_set: !!v }])
+  })
+    .then(function(res){ if(!res.ok) return res.text().then(function(t){ throw new Error(t||("HTTP "+res.status)); }); })
+    .then(function(){ setMsg('set-confnoteMsg', v ? '✅ 保存しました。これから入る予約の確定メッセージに付きます。' : '✅ 追記を空にしました。', true); })
+    .catch(function(err){ if (setHandleAuth(err)) return; setMsg('set-confnoteMsg', setReason(err), false); });
 }
 
 function setIsHHMM(v){ return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v||'')); }
@@ -10608,6 +10656,7 @@ function setMsg(id, text, ok){
     if (act === 'sedit'){ var se = document.getElementById('set-sedit-'+b.getAttribute('data-store')); if (se) se.classList.add('set-open'); return; }
     if (act === 'scancel'){ var sc = document.getElementById('set-sedit-'+b.getAttribute('data-store')); if (sc) sc.classList.remove('set-open'); return; }
     if (act === 'ssave'){ setSaveStore(b.getAttribute('data-store')); return; }
+    if (act === 'confnote_save'){ setSaveConfirmNote(); return; }
     // シフト（カレンダー化／設計：docs/shift-calendar-redesign.md）
     if (act === 'shedit'){
       if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
