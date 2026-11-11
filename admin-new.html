@@ -954,6 +954,9 @@ body.chat-conversation .chat-compose-msg{font-size:11px;max-height:44px;overflow
 [data-calendar-next]{margin:12px 0;padding:12px;background:#fff4d6;border-left:4px solid #bd851b;border-radius:6px;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
 .calendar-time-off-band{background:var(--artist-color);color:#fff;font-weight:700}
 .calendar-time-off{display:block;box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--artist-color);border-left:4px solid var(--artist-color);border-radius:5px;background:repeating-linear-gradient(135deg,#eef1f3 0,#eef1f3 5px,#fff 5px,#fff 10px);color:#243834;padding:7px;margin:4px 0;font:inherit;font-size:12px;text-align:left;overflow:hidden;overflow-wrap:anywhere;cursor:pointer}
+/* 申請中・削除の申請中（管理者の承認待ち・2026-11-11）は点線で見分ける */
+.calendar-time-off-band.calendar-time-off-wait{background:repeating-linear-gradient(135deg,var(--artist-color) 0,var(--artist-color) 6px,#5f6f6b 6px,#5f6f6b 12px)}
+.calendar-time-off.calendar-time-off-wait{border-style:dashed;border-left-style:dashed}
 .calendar-day-heading .calendar-time-off{font-size:10px;padding:3px}.calendar-sheet .calendar-time-off{min-height:44px;font-size:14px}
 .calendar-sheet select{width:100%;min-width:0;box-sizing:border-box;font:inherit;padding:9px}.calendar-sheet input[type=checkbox]{display:inline-block;width:auto}
 [data-time-off-impact]{margin:12px 0;padding:10px;background:#fff6df;border-radius:8px;overflow-wrap:anywhere;font-size:14px;line-height:1.6}
@@ -3235,6 +3238,9 @@ function loadHome(){
 
   var checkoutCardEl=document.createElement('div'); checkoutCardEl.className='home-card'; checkoutCardEl.id='home-checkout-card'; checkoutCardEl.style.display='none'; body.appendChild(checkoutCardEl);
 
+  // ①'' 休み・不在の承認待ち（管理者だけ・0件なら出さない＝ loadHomeTimeOffPending が中身を作る・2026-11-11）
+  if(isMgr){ var tc=document.createElement('div'); tc.className='home-card'; tc.id='home-timeoff-card'; tc.hidden=true; body.appendChild(tc); }
+
   // ② お店の準備（未完了設定）＝manager のみ
   if(isMgr){
     var ac=document.createElement('div'); ac.className='home-card'; ac.id='home-setup-card';
@@ -3266,7 +3272,24 @@ function loadHome(){
   loadHomeAttention();
   loadHomeClinicNotice();
   loadHomeCheckout();
+  if(isMgr) loadHomeTimeOffPending();
   if(isMgr) loadHomeSetup();
+}
+// 休み・不在の承認待ち（スタッフの申請・削除の申請）。数えるのは DB の time_off_pending_count（管理者だけ）。失敗してもホームの他の欄は止めない。
+async function loadHomeTimeOffPending(){
+  var card=document.getElementById('home-timeoff-card'); if(!card)return;
+  var tenant=TENANT_ID; card.hidden=true; card.textContent='';
+  try{
+    await ensureStoreMap();
+    var id=storeIdForSlug(currentStoreSlug());
+    var stores=id?[id]:Object.keys(STORE_MAP||{}).map(function(k){return STORE_MAP[k].id;}).filter(Boolean);
+    var counts=await Promise.all(Array.from(new Set(stores)).map(function(s){return sbRpc('time_off_pending_count',{p_store:s});}));
+    if(tenant!==TENANT_ID||!card.isConnected)return;
+    var n=counts.reduce(function(sum,c){return sum+(Number(c)||0);},0); if(!n)return;
+    card.hidden=false;
+    card.innerHTML='<button type="button" class="home-btn" data-home-timeoff>🗓 承認待ちの休み・不在 '+esc(n)+'件</button><div class="home-ph">予約管理の予定で、点線の休み・不在を押すと承認・却下できます。</div>';
+    card.querySelector('[data-home-timeoff]').onclick=function(){ gotoSubtab('resv','showReservations'); };
+  }catch(err){ if(card.isConnected){ card.hidden=true; } }
 }
 
 /* クリニックへの予約報告 v2（差分方式・設計書 docs/clinic-notice-v2-design.md・migration 20260924100000_clinic_notice.sql）。
@@ -4736,11 +4759,30 @@ function calendarTimeOffRows(rows,from,to,artist) {
   .sort((a,b)=>Number(b.all_day)-Number(a.all_day)||Date.parse(a.start_at)-Date.parse(b.start_at));
 }
 function calendarTimeOffTitle(row) {
+ const state=calendarTimeOffState(row),tail=state?'（'+state+'）':'';
  const name=row.artist_name||'担当未設定',label=String(row.label||'').trim();
- if(label)return name+' '+label;
- if(row.all_day)return name+' ×';
+ if(label)return name+' '+label+tail;
+ if(row.all_day)return name+' ×'+tail;
  const end=calendarJstTime(row.end_at),differentDay=calendarJstDate(row.end_at)!==calendarJstDate(row.start_at);
- return name+' '+calendarJstTime(row.start_at)+'〜'+(end==='00:00'?'':(differentDay?calendarJstDate(row.end_at)+' ':'')+end+' ')+'×';
+ return name+' '+calendarJstTime(row.start_at)+'〜'+(end==='00:00'?'':(differentDay?calendarJstDate(row.end_at)+' ':'')+end+' ')+'×'+tail;
+}
+// 休み・不在の申請の状態（2026-11-11）。申請中・削除の申請中も予約は止まっている。
+function calendarTimeOffState(row) {
+ if(row&&row.status==='pending')return '申請中';
+ if(row&&row.delete_requested===true)return '削除申請中';
+ return '';
+}
+// 休み・不在を押したときにできること。管理者＝承認・却下か削除／スタッフ＝自分の担当の分だけ。
+//   decide＝承認・却下を選ぶ／delete＝すぐ消す／withdraw＝自分の申請を取り下げ／request_delete＝削除を申請
+//   requested＝削除の申請中（待つだけ）／not_own＝自分の担当ではない
+function calendarTimeOffAction(row,isManager,ownArtistIds) {
+ if(!row)return 'not_own';
+ const pending=row.status==='pending',deleteRequested=row.delete_requested===true;
+ if(isManager===true)return pending||deleteRequested?'decide':'delete';
+ if(!row.artist_id||!(ownArtistIds||[]).includes(row.artist_id))return 'not_own';
+ if(pending)return 'withdraw';
+ if(deleteRequested)return 'requested';
+ return 'request_delete';
 }
 
 // Same half-open overlap and future-only rule as booking computeSlots; no network/DB.
@@ -4786,7 +4828,7 @@ function calendarTimeOffImpact(input) {
  return {count,days,suggestion};
 }
 /*</artist-calendar-pure>*/
-return {calendarJstDate,calendarJstTime,calendarAddDays,calendarRange,calendarMove,calendarMonthDays,calendarArtistColor,calendarRows,calendarLayout,calendarPalette,calendarArtistLight,calendarTitle,calendarBandTitle,calendarMonthOverflow,calendarInitial,calendarTimeOffRows,calendarTimeOffTitle,calendarTimeOffImpact};
+return {calendarJstDate,calendarJstTime,calendarAddDays,calendarRange,calendarMove,calendarMonthDays,calendarArtistColor,calendarRows,calendarLayout,calendarPalette,calendarArtistLight,calendarTitle,calendarBandTitle,calendarMonthOverflow,calendarInitial,calendarTimeOffRows,calendarTimeOffTitle,calendarTimeOffImpact,calendarTimeOffState,calendarTimeOffAction};
 })();
 /* ===== 段2 アーティストカレンダー ===== */
 var CALENDAR_VIEW = 'month';
@@ -4950,21 +4992,42 @@ async function calendarFetchTimeOff(storeId,dates){
  catch(err){throw Error('休み・不在を取得できませんでした。再読込してください。');}
 }
 function calendarOffForDay(date){return CALENDAR_PURE.calendarTimeOffRows(CALENDAR_TIME_OFF,date,CALENDAR_PURE.calendarAddDays(date,1),document.getElementById('resvNurse').value);}
-function calendarOffBand(o){return '<span class="calendar-band calendar-time-off-band" style="--artist-color:'+esc(CALENDAR_PURE.calendarArtistColor(o.artist_id,o.calendar_color))+'" title="'+esc(CALENDAR_PURE.calendarTimeOffTitle(o))+'"><span class="calendar-band-text">'+esc(CALENDAR_PURE.calendarTimeOffTitle(o))+'</span></span>';}
-function calendarOffButton(o,style){return '<button type="button" class="calendar-time-off" data-time-off="'+esc(o.id)+'" style="--artist-color:'+esc(CALENDAR_PURE.calendarArtistColor(o.artist_id,o.calendar_color))+';'+esc(style||'')+'">'+esc((o.all_day?'終日 ':o.label?CALENDAR_PURE.calendarJstTime(o.start_at)+'〜'+CALENDAR_PURE.calendarJstTime(o.end_at)+' ':'')+CALENDAR_PURE.calendarTimeOffTitle(o))+'</button>';}
+function calendarOffWait(o){return CALENDAR_PURE.calendarTimeOffState(o)?' calendar-time-off-wait':'';}
+function calendarOffBand(o){return '<span class="calendar-band calendar-time-off-band'+calendarOffWait(o)+'" style="--artist-color:'+esc(CALENDAR_PURE.calendarArtistColor(o.artist_id,o.calendar_color))+'" title="'+esc(CALENDAR_PURE.calendarTimeOffTitle(o))+'"><span class="calendar-band-text">'+esc(CALENDAR_PURE.calendarTimeOffTitle(o))+'</span></span>';}
+function calendarOffButton(o,style){return '<button type="button" class="calendar-time-off'+calendarOffWait(o)+'" data-time-off="'+esc(o.id)+'" style="--artist-color:'+esc(CALENDAR_PURE.calendarArtistColor(o.artist_id,o.calendar_color))+';'+esc(style||'')+'">'+esc((o.all_day?'終日 ':o.label?CALENDAR_PURE.calendarJstTime(o.start_at)+'〜'+CALENDAR_PURE.calendarJstTime(o.end_at)+' ':'')+CALENDAR_PURE.calendarTimeOffTitle(o))+'</button>';}
+function calendarTimeOffNotice(text){var status=document.querySelector('[data-time-off-day-status]')||document.getElementById('calendarNotice');if(status)status.textContent=text;}
+// 休み・不在を押したとき。管理者＝承認・却下／削除、一般スタッフ＝自分の担当の申請の取り下げ・削除の申請（2026-11-11）。最終の守りは DB。
 async function deleteCalendarTimeOff(id,date){
  var row=CALENDAR_TIME_OFF.find(function(o){return o.id===id;});if(!row)return;
- if(!(await askConfirm({title:'', body:CALENDAR_PURE.calendarTimeOffTitle(row)+'\nこの休み・不在を削除しますか？予約ページの空き枠に戻ります。', ok:'削除する', cancel:'やめる', danger:true})))return;
+ var title=CALENDAR_PURE.calendarTimeOffTitle(row),own=CALENDAR_SELF&&CALENDAR_SELF.ids||[];
+ var action=CALENDAR_PURE.calendarTimeOffAction(row,window.IS_MANAGER===true,own),rpc;
+ if(action==='not_own'){calendarTimeOffNotice('自分の担当の休み・不在だけ操作できます。');return;}
+ if(action==='requested'){calendarTimeOffNotice('削除の申請中です。管理者の承認を待っています（それまでは休みのままです）。');return;}
+ if(action==='decide'){
+  var what=row.status==='pending'?'この休み・不在の申請':'この休み・不在の削除の申請';
+  if(await askConfirm({title:'', body:title+'\n'+what+'を承認しますか？', ok:'承認する', cancel:'承認しない', danger:false}))rpc=['decide_time_off',{p_id:id,p_approve:true}];
+  else if(await askConfirm({title:'', body:title+'\n'+what+'を却下しますか？'+(row.status==='pending'?'却下すると予約ページの空き枠に戻ります。':'却下すると休みのまま残ります。'), ok:'却下する', cancel:'やめる', danger:true}))rpc=['decide_time_off',{p_id:id,p_approve:false}];
+  else return;
+ }else{
+  var body=action==='delete'?'この休み・不在を削除しますか？予約ページの空き枠に戻ります。':action==='withdraw'?'この申請を取り下げますか？予約ページの空き枠に戻ります。':'この休み・不在の削除を申請しますか？管理者が承認するまでは休みのままです。';
+  var ok=action==='delete'?'削除する':action==='withdraw'?'取り下げる':'削除を申請する';
+  if(!(await askConfirm({title:'', body:title+'\n'+body, ok:ok, cancel:'やめる', danger:action!=='request_delete'})))return;
+  rpc=['delete_time_off',{p_id:id}];
+ }
  var scope=checkoutScope(),sheetSeq=CALENDAR_SHEET_SEQ,boardSeq=BOARD_LOAD_SEQ,buttons=Array.from(document.querySelectorAll('[data-time-off]')).filter(function(b){return b.getAttribute('data-time-off')===id;});
  function current(){return scope===checkoutScope()&&sheetSeq===CALENDAR_SHEET_SEQ&&boardSeq===BOARD_LOAD_SEQ;}
  if(buttons.some(function(b){return b.disabled;}))return;buttons.forEach(function(b){b.disabled=true;});
- try{await sbRpc('delete_time_off',{p_id:id});if(!current())return;
+ try{var result=await sbRpc(rpc[0],rpc[1]);if(!current())return;
   var range=CALENDAR_PURE.calendarRange(CALENDAR_VIEW,CALENDAR_ANCHOR),rows=await calendarFetchTimeOff(storeIdForSlug(currentStoreSlug()),range);if(!current())return;
-  if(rows.some(function(o){return o.id===id;}))throw Error('削除結果を確認できません。');
+  var after=rows.find(function(o){return o.id===id;}),outcome=action==='decide'?String(result||''):action;
+  var ok2={delete:!after,withdraw:!after,rejected:!after,deleted:!after,request_delete:!!after&&after.delete_requested===true,
+   approved:!!after&&after.status==='approved',kept:!!after&&after.delete_requested!==true}[outcome];
+  if(!ok2)throw Error('結果を確認できません。');
   CALENDAR_TIME_OFF=rows;renderArtistCalendar(CALENDAR_ROWS);if(date)openCalendarDay(date);
- }catch(err){if(current()){
-  var status=document.querySelector('[data-time-off-day-status]')||document.getElementById('calendarNotice');status.textContent='削除結果を確認できませんでした。再読込してください。';
- }}finally{buttons.forEach(function(b){if(b.isConnected)b.disabled=false;});}
+  calendarTimeOffNotice({delete:'削除しました。',withdraw:'申請を取り下げました。',request_delete:'削除を申請しました。管理者の承認待ちです。',approved:'承認しました。',
+   rejected:'却下しました（予約ページの空き枠に戻りました）。',deleted:'削除の申請を承認しました（予約ページの空き枠に戻りました）。',kept:'削除の申請を却下しました（休みのままです）。'}[outcome]);
+ }catch(err){if(current())calendarTimeOffNotice('結果を確認できませんでした。再読込してください。');}
+ finally{buttons.forEach(function(b){if(b.isConnected)b.disabled=false;});}
 }
 // Read-only preview. A failure must never prevent the existing save action.
 function calendarTimeOffImpactPreview(form,current){
@@ -5028,8 +5091,11 @@ function openCalendarTimeOff(date){
  function current(){return pane.isConnected&&seq===CALENDAR_SHEET_SEQ&&scope===checkoutScope();}
  if(!CALENDAR_ARTISTS.length){body.innerHTML='<h2>休み・不在</h2><p>担当を選べません。店舗の担当を確認して再読込してください。</p>';return;}
  var own=CALENDAR_SELF&&CALENDAR_SELF.ids||[],selected=CALENDAR_ARTISTS.find(function(a){return own.indexOf(a.id)>=0;});
+ // 管理者＝誰の分でもすぐ確定／一般スタッフ＝自分の担当の分だけ・申請（管理者の承認で確定・2026-11-11）
+ var mgr=window.IS_MANAGER===true,choices=mgr?CALENDAR_ARTISTS:CALENDAR_ARTISTS.filter(function(a){return own.indexOf(a.id)>=0;});
+ if(!choices.length){body.innerHTML='<h2>休み・不在</h2><p>このログインは担当アーティストとつながっていないため、休み・不在を申請できません。管理者に「⚙️ お店の設定」→「👥 スタッフ」で担当アーティストを設定してもらってください。</p>';return;}
  var initial=selected?selected.id:document.getElementById('resvNurse').value;
- body.innerHTML='<h2>休み・不在</h2><p>この時間は予約ページで選べなくなります。最長31日。</p><form><label>担当<select name="artist" required><option value="">選んでください</option>'+CALENDAR_ARTISTS.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===initial?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')+'</select></label><label><input type="checkbox" name="allDay" checked> 終日</label><label>開始日<input type="date" name="startDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">開始時刻<input type="time" name="startTime" value="09:00"></label><label>終了日（終日のときはこの日まで）<input type="date" name="endDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">終了時刻<input type="time" name="endTime" value="18:00"></label><label>メモ（任意）<input name="label" maxlength="50" placeholder="例：久留米出張"></label><div role="status" aria-live="polite" data-time-off-impact style="display:none"></div><button type="submit" class="rbtn">休み・不在を保存</button><p role="status" data-time-off-status></p></form>';
+ body.innerHTML='<h2>休み・不在</h2><p>'+(mgr?'この時間は予約ページで選べなくなります。最長31日。':'申請した時点で、この時間は予約ページで選べなくなります。管理者が承認すると確定します。最長31日。')+'</p><form><label>担当<select name="artist" required><option value="">選んでください</option>'+choices.map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id===initial?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')+'</select></label><label><input type="checkbox" name="allDay" checked> 終日</label><label>開始日<input type="date" name="startDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">開始時刻<input type="time" name="startTime" value="09:00"></label><label>終了日（終日のときはこの日まで）<input type="date" name="endDate" required value="'+esc(date)+'"></label><label data-time-off-clock style="display:none">終了時刻<input type="time" name="endTime" value="18:00"></label><label>メモ（任意）<input name="label" maxlength="50" placeholder="例：久留米出張"></label><div role="status" aria-live="polite" data-time-off-impact style="display:none"></div><button type="submit" class="rbtn">'+(mgr?'休み・不在を保存':'休み・不在を申請')+'</button><p role="status" data-time-off-status></p></form>';
  var form=body.querySelector('form'),button=form.querySelector('button[type=submit]'),status=form.querySelector('[data-time-off-status]'),saved=false;
  calendarTimeOffImpactPreview(form,current);
  form.elements.namedItem('allDay').addEventListener('change',function(){form.querySelectorAll('[data-time-off-clock]').forEach(function(el){el.style.display=form.elements.namedItem('allDay').checked?'none':'block';});});
@@ -5050,7 +5116,7 @@ function openCalendarTimeOff(date){
    var verified=await calendarFetchTimeOff(store&&store.store_id||storeIdForSlug(currentStoreSlug()),checkRange);if(!current())return;
    if(!verified.some(function(o){return o.id===result.id&&o.artist_id===payload.p_artist&&Date.parse(o.start_at)===Date.parse(start)&&Date.parse(o.end_at)===Date.parse(end)&&o.all_day===allDay&&(o.label||'')===(payload.p_label||'');}))throw Error('再取得に保存した休みがありません。');
    var rows=await calendarFetchTimeOff(storeIdForSlug(currentStoreSlug()),range);if(!current())return;CALENDAR_TIME_OFF=rows;renderArtistCalendar(CALENDAR_ROWS);
-   status.textContent='保存内容を確認しました。'+warning;
+   status.textContent=(result.status==='pending'?'申請しました。管理者の承認待ちです（その間も予約は止まっています）。':'保存内容を確認しました。')+warning;
   }catch(err){if(current())status.textContent=saved?'保存済みですが、表示を確認できませんでした。再登録せず、閉じて再読込してください。'+warning:'保存を完了できませんでした：'+String(err&&err.message||err);}
   finally{if(current()){button.disabled=saved;form.querySelectorAll('input,select').forEach(function(el){el.disabled=saved;});}}
  });
@@ -5616,14 +5682,17 @@ function openLinkLine(rid){
 
 /* ===== 段1a 会計（純粋ロジックを画面・テストで共有） ===== */
 var CHECKOUT_STAFF = [];
+var CHECKOUT_MY_ARTISTS = [];   // 「担当アーティスト」で自分とつないだ担当（スタッフが自分の予約の会計を入れるため・2026-11-11）
 var CHECKOUT_HOME_SEQ = 0;
 var CHECKOUT_DASH_SEQ = 0;
+// 会計を入れられるか。全体管理者・管理者＝入力も直しも（仁義さん決定 A・2026-10-12）。
+// 一般スタッフ＝自分の担当の予約で、まだ入力していないときだけ（松村さん決定・2026-11-11）。最終の守りは DB の save_checkout。
+function checkoutPermissionFor(r,saved){
+  return CHECKOUT_PURE.checkoutPermission(r,CHECKOUT_STAFF,CHECKOUT_MY_ARTISTS,window.IS_PLATFORM_ADMIN===true,saved);
+}
 function checkoutCanEdit(r){
-  // 全体管理者は全店の会計を見て入力できる（仁義さん決定 A・2026-10-12。DB側も is_platform_admin() を許可）
-  if(window.IS_PLATFORM_ADMIN===true) return true;
-  return CHECKOUT_STAFF.some(function(s){
-    return s.tenant_id===r.tenant_id && (s.role==='owner'||s.role==='admin') && (!s.store_id||s.store_id===r.store_id);
-  });
+  var p=CHECKOUT_PURE.checkoutPermission(r,CHECKOUT_STAFF,CHECKOUT_MY_ARTISTS,window.IS_PLATFORM_ADMIN===true,!!r._checkout);
+  return p==='manager'||p==='staff';
 }
 function checkoutScope(){ return TENANT_ID+'|'+currentStoreSlug(); }
 function checkoutStore(id){
@@ -5635,10 +5704,10 @@ function checkoutStores(){
 }
 function checkoutAccess(){
   var tenant=TENANT_ID;
-  return sbRpc('current_staff',{}).then(function(rows){
+  return Promise.all([sbRpc('current_staff',{}),ensureMyArtistIds()]).then(function(res){
     if(tenant!==TENANT_ID) throw new Error('店舗が切り替わりました。開き直してください。');
-    CHECKOUT_STAFF=rows||[];
-  }).catch(function(err){CHECKOUT_STAFF=[];throw err;});
+    CHECKOUT_STAFF=res[0]||[];CHECKOUT_MY_ARTISTS=res[1]||[];
+  }).catch(function(err){CHECKOUT_STAFF=[];CHECKOUT_MY_ARTISTS=[];throw err;});
 }
 function checkoutHydrate(rows){
   var enabled=rows.filter(function(r){var s=checkoutStore(r.store_id);return s&&s.checkout_start_date;});
@@ -5735,8 +5804,20 @@ function settlementCsv(data, kind) {
   }
   return '\uFEFF'+rows.map(row=>row.map(cell).join(',')).join('\r\n');
 }
+// 会計を入れられるか（2026-11-11）。staffRows は current_staff の行（tenant_id・store_id・role）。
+//   manager＝入力も直しも／staff＝自分の担当（担当アーティストでつないだ担当）の予約で、まだ入力していないとき
+//   staff_saved＝自分の担当だが入力済み（直しは管理者）／none＝入れられない
+function checkoutPermission(r,staffRows,myArtistIds,isPlatformAdmin,saved) {
+  if (!r) return 'none';
+  if (isPlatformAdmin===true) return 'manager';
+  const rows=staffRows||[],inStore=s=>s.tenant_id===r.tenant_id&&(!s.store_id||s.store_id===r.store_id);
+  if (rows.some(s=>inStore(s)&&(s.role==='owner'||s.role==='admin'))) return 'manager';
+  if (!r.artist_id||!(myArtistIds||[]).includes(r.artist_id)) return 'none';
+  if (!rows.some(s=>inStore(s)&&s.role==='staff')) return 'none';
+  return saved?'staff_saved':'staff';
+}
 /*</checkout-pure>*/
-return { CHECKOUT_REASONS,CHECKOUT_METHODS,checkoutJstDate,checkoutDefaults,validateCheckout,checkoutYen,checkoutDateLabel,checkoutSummaryRows,settlementCsv };
+return { CHECKOUT_REASONS,CHECKOUT_METHODS,checkoutJstDate,checkoutDefaults,validateCheckout,checkoutYen,checkoutDateLabel,checkoutSummaryRows,settlementCsv,checkoutPermission };
 })();
 // 権限がないエラー（その店の会計を見る立場ではない）。通信失敗などとは分けて扱う。
 function checkoutForbidden(err){
@@ -5744,7 +5825,8 @@ function checkoutForbidden(err){
 }
 function checkoutError(err){
   var s=String(err&&err.message||err||'');
-  if(/forbidden|permission|denied/.test(s)) return 'この店舗の会計を入力する権限がありません。';
+  if(/forbidden|permission|denied/.test(s)) return 'この予約の会計を入力する権限がありません（スタッフは自分が担当の予約だけ入力できます）。';
+  if(/checkout_staff_already_saved/.test(s)) return 'この会計は入力済みです。直すときは管理者に頼んでください。';
   if(/checkout_settled/.test(s)) return '確定済みです。直すときは月末確定の調整行で';
   if(/checkout_disabled/.test(s)) return 'この店舗では会計機能が有効になっていません。';
   if(/checkout_not_visited/.test(s)) return '来店済み・未取消の予約だけ会計を入力できます。';
@@ -5767,7 +5849,7 @@ async function openCheckout(rid, onlyIfEnabled){
     if(scope!==checkoutScope()||navRequest!==NAV_SEQ) return;
     var fetched=await Promise.all([
       Promise.resolve(CHECKOUT_PURE),checkoutAccess(),
-      sbGet('reservations?select=id,tenant_id,store_id,start_at,price,customer_name,status,outcome&id=eq.'+encodeURIComponent(rid))
+      sbGet('reservations?select=id,tenant_id,store_id,artist_id,start_at,price,customer_name,status,outcome&id=eq.'+encodeURIComponent(rid))
     ]);
     if(scope!==checkoutScope()||navRequest!==NAV_SEQ) return;
     var pure=fetched[0],r=(fetched[2]||[])[0],store=r&&checkoutStore(r.store_id);
@@ -5781,6 +5863,11 @@ async function openCheckout(rid, onlyIfEnabled){
     var existing=await sbGet('reservation_checkouts?select=*&reservation_id=eq.'+encodeURIComponent(rid));
     if(scope!==checkoutScope()||navRequest!==NAV_SEQ) return;
     var saved=(existing||[])[0],defaults=pure.checkoutDefaults(r,saved);
+    // 一般スタッフは入力だけ。入力済みの直しは管理者（2026-11-11）。
+    if(saved&&checkoutPermissionFor(r,true)==='staff_saved'){
+      if(!onlyIfEnabled) window.alert('この会計は入力済みです。直すときは管理者に頼んでください。');
+      return;
+    }
     var old=document.getElementById('checkoutDialog'); if(old) old.remove();
     var dlg=document.createElement('dialog'); dlg.id='checkoutDialog'; dlg.className='checkout-dialog';
     dlg.setAttribute('aria-label','会計の入力');
