@@ -8414,6 +8414,16 @@ function formatReleaseTime(iso) {
 //          none＝送信から30分過ぎても自動処理の記録が無い
 //   forced：強制送信（履歴の書き換え）だった／manual：人が手動で動かした処理の名前
 //   同じ処理がやり直されたら、いちばん新しい結果で判断する（同じ時刻なら「終わった」を優先）。
+// 題名を読みやすくする（2026-11-11）。前に記録した英語の取り込みの1行目を日本語に言い換える。
+function releaseTitle(title) {
+  var t = typeof title === "string" ? title.trim() : "";
+  if (!t) return "（題名なし）";
+  var pr = /^Merge pull request #(\d+) from [^\s\/]+\/(\S+)$/.exec(t);
+  if (pr) return "PR #" + pr[1] + " の取り込み（" + pr[2].replace(/^wt\//, "") + "）";
+  var br = /^Merge (?:remote-tracking )?branch '([^']+)'(?: of \S+)?(?: into (\S+))?$/.exec(t);
+  if (br) return br[1] + " の変更を" + (br[2] ? " " + br[2].replace(/^wt\//, "") + " に" : "") + "取り込み";
+  return t;
+}
 function summarizeReleases(rows, nowMs) {
   var list = Array.isArray(rows) ? rows : [];
   var pushes = {}, order = [], ci = {};
@@ -8463,7 +8473,7 @@ function summarizeReleases(rows, nowMs) {
       at: at,
       when: formatReleaseTime(p.happened_at),
       who: releaseWho(p.actor),
-      title: p.title || "（題名なし）",
+      title: releaseTitle(p.title),
       more: typeof p.commit_count === "number" && p.commit_count > 1 ? p.commit_count - 1 : 0,
       areaLabels: areas.map(releaseAreaLabel),
       state: state,
