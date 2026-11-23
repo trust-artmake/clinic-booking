@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>LINEで相談する</title>
+<style>
+  :root { --bg:#fffaf7; --ink:#2b2522; --sub:#6d625c; --line:#06c755; --card:#ffffff; --bd:#eadfd8; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; line-height:1.6; }
+  main { max-width:440px; margin:0 auto; padding:28px 16px 40px; }
+  h1 { font-size:20px; margin:0 0 6px; text-align:center; }
+  p.lead { margin:0 0 20px; text-align:center; color:var(--sub); font-size:14px; }
+  .btn { display:block; width:100%; padding:16px; border-radius:999px; background:var(--line); color:#fff; font-weight:700; font-size:17px; text-align:center; text-decoration:none; border:0; }
+  .btn + .btn { margin-top:12px; }
+  .btn.sub { background:#fff; color:var(--ink); border:1px solid var(--bd); font-weight:600; font-size:15px; }
+  .card { margin-top:22px; background:var(--card); border:1px solid var(--bd); border-radius:14px; padding:16px; font-size:14px; }
+  .card h2 { font-size:15px; margin:0 0 8px; }
+  .card ol { margin:0; padding-left:1.3em; }
+  .card li + li { margin-top:6px; }
+  .dots { display:inline-block; padding:0 6px; border:1px solid var(--bd); border-radius:6px; font-weight:700; letter-spacing:1px; }
+  .hidden { display:none; }
+  .err { text-align:center; color:var(--sub); }
+</style>
+</head>
+<body>
+<main>
+  <div id="ok" class="hidden">
+    <h1>LINEで相談・予約</h1>
+    <p class="lead" id="lead">LINEを開いています…</p>
+    <a class="btn" id="go" href="#">LINEを開く</a>
+    <a class="btn sub hidden" id="direct" href="#">開かない時はこちら</a>
+    <div class="card hidden" id="howto">
+      <h2>LINEが開かない時は</h2>
+      <ol>
+        <li>画面の右上（または右下）の <span class="dots">…</span> を押す</li>
+        <li>「ブラウザで開く」（Safari / Chrome で開く）を押す</li>
+        <li>開いたページで「LINEを開く」を押す</li>
+      </ol>
+    </div>
+  </div>
+  <p class="err hidden" id="ng">ページが見つかりませんでした。</p>
+</main>
+<script src="line-jump.logic.js"></script>
+<script>
+(function () {
+  "use strict";
+  var L = window.LineJump;
+  var target = L && L.resolveTarget(location.search);
+  if (!target) { document.getElementById("ng").style.display = "block"; return; }
+  var p = L.plan(navigator.userAgent, target.url);
+  if (!p) { document.getElementById("ng").style.display = "block"; return; }
+  document.getElementById("ok").style.display = "block";
+  var go = document.getElementById("go");
+  go.href = p.href;
+  if (p.mode === "direct") {
+    location.replace(p.href);
+    return;
+  }
+  // アプリ内ブラウザ：外のブラウザへ移る。移れなかった時のために案内を出す
+  document.getElementById("lead").textContent = "外のブラウザ（Safari / Chrome）に切り替えてLINEを開きます。";
+  var direct = document.getElementById("direct");
+  direct.href = p.fallback;
+  direct.style.display = "block";
+  document.getElementById("howto").style.display = "block";
+  setTimeout(function () { location.href = p.href; }, 150);
+})();
+</script>
+</body>
+</html>
