@@ -46,9 +46,20 @@
         fallback: target,
       };
     }
+    // iPhone の TikTok：Safari への自動切替は無視され、LINE/エルメのリンクは「ブラウザで開いてください」で止められる
+    // （2026-11-24 実機で確認）。押しても止まるボタンは出さず、「… → ブラウザで開く」の案内とURLコピーだけにする。
+    if (d.os === "ios" && d.app === "tiktok") return { mode: "ios_guide" };
     if (d.os === "ios") return { mode: "ios_safari", href: "x-safari-" + target, fallback: target };
     return { mode: "direct", href: target };
   }
 
-  root.LineJump = { TARGETS: TARGETS, resolveTarget: resolveTarget, detect: detect, plan: plan };
+  // Safari に貼り付けてもらうURL。このページ自身（https のみ）＋決まった行き先だけで作り直す。
+  function copyUrl(pageUrl, key) {
+    var m = /^(https:\/\/[^?#\s]+)/.exec(String(pageUrl || ""));
+    var k = String(key || "").toLowerCase();
+    if (!m || !Object.prototype.hasOwnProperty.call(TARGETS, k)) return null;
+    return m[1] + "?to=" + k;
+  }
+
+  root.LineJump = { TARGETS: TARGETS, resolveTarget: resolveTarget, detect: detect, plan: plan, copyUrl: copyUrl };
 })(typeof globalThis !== "undefined" ? globalThis : this);
