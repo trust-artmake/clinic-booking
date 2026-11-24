@@ -6,7 +6,7 @@
   "use strict";
   var TARGETS = Object.freeze({
     yuumi: Object.freeze({ key: "yuumi", label: "yuumi", url: "https://s.lmes.jp/landing-qr/1661241635-J064yePx?uLand=QBKaYp" }), // 久留米「yuumiTikTok流入」
-    maho: Object.freeze({ key: "maho", label: "maho", url: "https://s.lmes.jp/landing-qr/1661241635-J064yePx?uLand=C48RrY" }),   // 久留米「まほちゃん流入tiktok」
+    maho: Object.freeze({ key: "maho", label: "maho", url: "https://s.lmes.jp/landing-qr/1661241635-J064yePx?uLand=qQSavZ" }),   // 久留米「まほTikTok流入」（2026-11-24 全ての友だち・何度でも）
     utan: Object.freeze({ key: "utan", label: "遠山うたの", url: "https://s.lmes.jp/landing-qr/2003826188-OLkM8mrk?uLand=iLzZzT" }), // 薬院「遠山TikTok URL」
   });
 
