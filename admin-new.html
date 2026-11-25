@@ -10281,7 +10281,14 @@ function setLoadShiftIndex(){
     return sbGet(path);
   }).then(function(rows){
     rows = rows || [];
-    var h = '<div class="set-add-h">🗓 シフトを編集するアーティストを選ぶ</div>';
+    // 週ごと・日付ごとのシフトの保存は管理者だけ（DB でも同じ・2026-11-11）。スタッフには休み・不在の申請の入口を案内する。
+    var staffView = window.IS_MANAGER === false;
+    var h = staffView
+      ? '<div class="set-card" data-shift-staff-guide><div class="set-name">入れない日・時間は「休み・不在」から申請してください</div>'
+        + '<div class="set-note">曜日ごとのシフトは管理者が入れます。入れない日・時間は、予約管理の予定で日付を押し「＋ 休み・不在」から申請します。申請した時点で予約は入らなくなり、管理者が承認すると確定します。</div>'
+        + '<button type="button" class="set-btn" data-act="shtimeoff">📋 予約管理（予定）を開く</button></div>'
+      : '<div class="set-add-h">🗓 シフトを編集するアーティストを選ぶ</div>';
+    if (staffView){ body.innerHTML = h; return; }   // 押せない名前の一覧は出さない
     if (!rows.length){ h += '<div class="set-ph">アーティストがいません。</div>'; }
     rows.forEach(function(a){
       var aid = esc(a.id);
@@ -10290,7 +10297,7 @@ function setLoadShiftIndex(){
         + '<div class="set-acts"><button type="button" class="set-btn set-ghost" data-act="shedit" data-aid="'+aid+'" data-name="'+esc(a.name)+'">🗓 シフトを編集</button></div>'
         + '</div>';
     });
-    h += '<div class="set-note">※ 曜日ごとの出勤時間と、特定日の例外（休み・臨時出勤）を登録します。同じ店のスタッフであれば誰でも編集できます。</div>';
+    h += '<div class="set-note">※ 曜日ごとの出勤時間と、特定日の例外（休み・臨時出勤）を登録します。編集できるのは管理者（オーナー・管理者）だけです。スタッフの入れない日は、予約管理の「＋ 休み・不在」から申請します（管理者が承認）。</div>';
     body.innerHTML = h;
   }).catch(function(err){
     if (setHandleAuth(err)) return;
@@ -10756,6 +10763,7 @@ function setMsg(id, text, ok){
     if (act === 'ssave'){ setSaveStore(b.getAttribute('data-store')); return; }
     if (act === 'confnote_save'){ setSaveConfirmNote(); return; }
     // シフト（カレンダー化／設計：docs/shift-calendar-redesign.md）
+    if (act === 'shtimeoff'){ if (typeof gotoSubtab === 'function') gotoSubtab('resv','showReservations'); return; }
     if (act === 'shedit'){
       if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
       setLoadShiftEditor(b.getAttribute('data-aid'), b.getAttribute('data-name')); return;
