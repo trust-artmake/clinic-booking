@@ -325,6 +325,12 @@
   }
 
 
+  // LINE のプロフィール写真の住所として受けてよいか（管理画面 chatProfileAvatar と同じ決まり）。だめなら ""。
+  function safePictureUrl(u) {
+    if (typeof u !== "string" || u.length > 2048 || /\s/.test(u)) return "";
+    return /^https:\/\/(?:s?profile\.line-scdn\.net|obs\.line-apps\.com)\/.+$/.test(u) ? u : "";
+  }
+
   // ===== 色を選ぶ（2026-11-27 松村さん）=====
   // はっきりした色（原色）を選ぶと、帯・ボタン・すりガラス・文字の色を落ち着いた色味の一式に整える。
   // 白い文字・地の上の文字は、読みやすさ 4.5:1 以上になるまで自動で濃くする。
@@ -377,6 +383,6 @@
     menuKind: menuKind, menuTag: menuTag, addMonths: addMonths, monthLabel: monthLabel, monthShort: monthShort, monthCells: monthCells, monthRange: monthRange,
     shiftForDay: shiftForDay, buildShiftDays: buildShiftDays, submissionLabel: submissionLabel, yen: yen,
     PAY_METHODS: PAY_METHODS, DIFF_REASONS: DIFF_REASONS, buildCheckout: buildCheckout,
-    THEMES: THEMES, hslHex: hslHex, contrast: contrast, normalizeTheme: normalizeTheme, buildTheme: buildTheme
+    safePictureUrl: safePictureUrl, THEMES: THEMES, hslHex: hslHex, contrast: contrast, normalizeTheme: normalizeTheme, buildTheme: buildTheme
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);
