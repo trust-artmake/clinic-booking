@@ -447,6 +447,15 @@ document.addEventListener('securitypolicyviolation',function(e){console.warn('CS
 .set-msg{font-size:12.5px;margin:8px 0;min-height:16px}
 .set-msg.set-ok{color:#15803d}
 .set-msg.set-ng{color:#c2410c}
+/* シフト提出の承認（2026-11-27） */
+#set-shsubMsg{white-space:pre-line}
+.shsub-note{font-size:13px;color:#444;margin:2px 0 6px;overflow-wrap:anywhere}
+.shsub-days{margin:4px 0 2px;font-size:13px}
+.shsub-days summary{cursor:pointer;color:#0b5c55;font-weight:700;padding:8px 0;min-height:24px}
+.shsub-days table{border-collapse:collapse;width:100%;max-width:360px}
+.shsub-days th,.shsub-days td{text-align:left;padding:4px 8px;border-bottom:1px solid #eef2f1;font-weight:400}
+.shsub-days th{white-space:nowrap;color:#557;width:7em}
+.shsub-days tr.shsub-off td{color:#9a3412}
 /* シフト表 */
 .set-shift-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 .set-shift-tbl th,.set-shift-tbl td{border-bottom:1px solid #f0f0f0;padding:6px 4px;text-align:center}
@@ -1701,6 +1710,15 @@ function showHome(el){
   var v=document.getElementById('homeView'); if(v) v.style.display='';
   loadHome();
   if(!NAV_QUIET)window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ホームを描いた時点で管理者かどうかが未確定だった場合、確定後に1回だけ描き直す。
+// 管理者の欄がまだ無いときだけ動く（2回目以降・スタッフ・ホーム以外を見ているときは何もしない）。
+function homeRedrawForManager(){
+  if(window.IS_MANAGER!==true)return;
+  var v=document.getElementById('homeView'); if(!v||v.style.display==='none')return;
+  if(document.getElementById('home-timeoff-card'))return;
+  loadHome();
 }
 
 /* CS3A CHAT INBOX SCRIPT START */
@@ -3240,6 +3258,8 @@ function loadHome(){
 
   // ①'' 休み・不在の承認待ち（管理者だけ・0件なら出さない＝ loadHomeTimeOffPending が中身を作る・2026-11-11）
   if(isMgr){ var tc=document.createElement('div'); tc.className='home-card'; tc.id='home-timeoff-card'; tc.hidden=true; body.appendChild(tc); }
+  // ①''' スタッフから届いたシフトの承認待ち（管理者だけ・0件なら出さない＝ loadHomeShiftSubPending・2026-11-27）
+  if(isMgr){ var sc=document.createElement('div'); sc.className='home-card'; sc.id='home-shiftsub-card'; sc.hidden=true; body.appendChild(sc); }
 
   // ② お店の準備（未完了設定）＝manager のみ
   if(isMgr){
@@ -3273,6 +3293,7 @@ function loadHome(){
   loadHomeClinicNotice();
   loadHomeCheckout();
   if(isMgr) loadHomeTimeOffPending();
+  if(isMgr) loadHomeShiftSubPending();
   if(isMgr) loadHomeSetup();
 }
 // 休み・不在の承認待ち（スタッフの申請・削除の申請）。数えるのは DB の time_off_pending_count（管理者だけ）。失敗してもホームの他の欄は止めない。
@@ -3289,6 +3310,19 @@ async function loadHomeTimeOffPending(){
     card.hidden=false;
     card.innerHTML='<button type="button" class="home-btn" data-home-timeoff>🗓 承認待ちの休み・不在 '+esc(n)+'件</button><div class="home-ph">予約管理の予定で、点線の休み・不在を押すと承認・却下できます。</div>';
     card.querySelector('[data-home-timeoff]').onclick=function(){ gotoSubtab('resv','showReservations'); };
+  }catch(err){ if(card.isConnected){ card.hidden=true; } }
+}
+
+// スタッフから届いたシフトの承認待ち（管理者だけ）。押すと「メニューとアーティスト → 🗓シフト」の一番上へ。失敗してもホームの他の欄は止めない。
+async function loadHomeShiftSubPending(){
+  var card=document.getElementById('home-shiftsub-card'); if(!card)return;
+  var tenant=TENANT_ID; card.hidden=true; card.textContent='';
+  try{
+    var rows=await shiftSubFetch();
+    if(tenant!==TENANT_ID||!card.isConnected||!rows.length)return;
+    card.hidden=false;
+    card.innerHTML='<button type="button" class="home-btn" data-home-shiftsub>📨 承認待ちのシフト '+esc(rows.length)+'件</button><div class="home-ph">スタッフ画面から届いたシフトです。シフトの画面で中身を見て、承認・却下します。</div>';
+    card.querySelector('[data-home-shiftsub]').onclick=function(){ SET_SUB='shift'; gotoSubtab('settings','showMenuArtist'); };
   }catch(err){ if(card.isConnected){ card.hidden=true; } }
 }
 
@@ -6474,6 +6508,9 @@ function initResvStoreBar(){
     // ★ホームは既に描き終わっているが、描いた時点では上のフラグがまだ決まっていない。
     //   ここで点呼だけ呼び直さないと、ログイン直後のホームでは自動処理が止まっていても何も出ない。
     if (isPlatformAdmin && typeof loadHomeJobHealth === 'function') loadHomeJobHealth();
+    // ★同じ理由で、管理者だけの欄（承認待ちの休み・シフト、お店の準備）もログイン直後は描かれていない。
+    //   ホームを開いたままなら描き直す（2026-11-27）。
+    if (typeof homeRedrawForManager === 'function') homeRedrawForManager();
     var bar = document.getElementById('resvStoreBar');
     if (!bar) return;
     bar.style.display = window.IS_MANAGER ? '' : 'none';   // staff：自店固定（RLSが自店だけを返す）
@@ -10287,7 +10324,8 @@ function setLoadShiftIndex(){
       ? '<div class="set-card" data-shift-staff-guide><div class="set-name">入れない日・時間は「休み・不在」から申請してください</div>'
         + '<div class="set-note">曜日ごとのシフトは管理者が入れます。入れない日・時間は、予約管理の予定で日付を押し「＋ 休み・不在」から申請します。申請した時点で予約は入らなくなり、管理者が承認すると確定します。</div>'
         + '<button type="button" class="set-btn" data-act="shtimeoff">📋 予約管理（予定）を開く</button></div>'
-      : '<div class="set-add-h">🗓 シフトを編集するアーティストを選ぶ</div>';
+      : '<div id="set-shsubs" data-shift-subs><div class="set-ph">スタッフから届いたシフトを読み込み中…</div></div>'
+        + '<div class="set-add-h">🗓 シフトを編集するアーティストを選ぶ</div>';
     if (staffView){ body.innerHTML = h; return; }   // 押せない名前の一覧は出さない
     if (!rows.length){ h += '<div class="set-ph">アーティストがいません。</div>'; }
     rows.forEach(function(a){
@@ -10299,10 +10337,167 @@ function setLoadShiftIndex(){
     });
     h += '<div class="set-note">※ 曜日ごとの出勤時間と、特定日の例外（休み・臨時出勤）を登録します。編集できるのは管理者（オーナー・管理者）だけです。スタッフの入れない日は、予約管理の「＋ 休み・不在」から申請します（管理者が承認）。</div>';
     body.innerHTML = h;
+    setLoadShiftSubmissions();
   }).catch(function(err){
     if (setHandleAuth(err)) return;
     body.innerHTML = '<div class="set-ph set-err">取得に失敗しました<br>'+esc(setReason(err))+'</div>';
   });
+}
+
+/* ============================================================================
+   5-b) シフト提出の承認（管理者だけ・2026-11-27・migration 20261127120000_shift_submissions.sql）
+   スタッフ画面（poc/staff.html）の「シフト提出」「変更を申請」を、ここで承認・却下する。
+   承認すると、その日のシフト（artist_shifts の日付の行）が書き換わり、予約ページの空き枠が変わる。
+   最終の守り（管理者だけ・承認待ちだけ・最初の承認は確認つき）は DB の decide_shift_submission。
+   下の SHIFT_SUB_PURE は判定と文面だけ（ネットに繋がない）。tests/admin_shift_submissions.test.mjs が
+   ここを切り出して確かめる。
+   ============================================================================ */
+/* SHIFT_SUB_PURE:BEGIN */
+var SHIFT_SUB_PURE=(function(){
+  var DOW='日月火水木金土';
+  function pad(n){ return ('0'+n).slice(-2); }
+  function hm(v){ var m=String(v==null?'':v).match(/^(\d{2}:\d{2})/); return m?m[1]:''; }
+  function parseDate(s){ var m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m)return null; return {y:+m[1],m:+m[2],d:+m[3]}; }
+  function monthLabel(month){ var p=parseDate(month); return p?(p.y+'年'+p.m+'月'):''; }
+  function dayLabel(date){ var p=parseDate(date); if(!p)return ''; var w=new Date(Date.UTC(p.y,p.m-1,p.d)).getUTCDay(); return p.m+'/'+p.d+'（'+DOW[w]+'）'; }
+  function kindLabel(kind){ return kind==='change'?'変更の申請':'ひと月分の提出'; }
+  function daysInMonth(month){ var p=parseDate(month); if(!p)return 0; return new Date(Date.UTC(p.y,p.m,0)).getUTCDate(); }
+  // 日ごとの中身。ひと月分の提出は、書かれていない日も「休み」として並べる（承認すると DB でも休みになる）。
+  function dayRows(row){
+    var byDate={}, out=[];
+    (Array.isArray(row&&row.days)?row.days:[]).forEach(function(d){ if(d&&parseDate(d.date)) byDate[String(d.date).slice(0,10)]=d; });
+    if(row&&row.kind==='submit'){
+      var p=parseDate(row.month), n=daysInMonth(row.month);
+      for(var i=1;i<=n&&p;i++){
+        var key=p.y+'-'+pad(p.m)+'-'+pad(i), d=byDate[key];
+        out.push({date:key,label:dayLabel(key),off:!d||d.is_off===true,text:!d?'休み（書かれていない日）':d.is_off?'休み':hm(d.start_time)+'〜'+hm(d.end_time)});
+      }
+      return out;
+    }
+    Object.keys(byDate).sort().forEach(function(k){ var d=byDate[k]; out.push({date:k,label:dayLabel(k),off:d.is_off===true,text:d.is_off?'休み':hm(d.start_time)+'〜'+hm(d.end_time)}); });
+    return out;
+  }
+  function summary(row){
+    var rows=dayRows(row), work=rows.filter(function(r){return !r.off;}).length;
+    if(row&&row.kind==='change') return rows.length+'日分の変更（出勤 '+work+'日・休み '+(rows.length-work)+'日）';
+    return '出勤 '+work+'日・休み '+(rows.length-work)+'日';
+  }
+  function pending(rows){
+    var seen={};
+    return (Array.isArray(rows)?rows:[]).filter(function(r){
+      if(!r||r.status!=='pending'||!r.id||seen[r.id]) return false; seen[r.id]=1; return true;
+    }).sort(function(a,b){ return String(a.submitted_at||'')<String(b.submitted_at||'')?-1:String(a.submitted_at||'')>String(b.submitted_at||'')?1:0; });
+  }
+  function jstWhen(iso){
+    var t=Date.parse(iso); if(!isFinite(t)) return '';
+    var d=new Date(t+9*3600*1000);
+    return (d.getUTCMonth()+1)+'/'+d.getUTCDate()+' '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes());
+  }
+  // 一覧で読む期間：今月の1日〜1年後（DB は 400 日まで受ける）
+  function listRange(nowMs){
+    var d=new Date((isFinite(nowMs)?nowMs:Date.now())+9*3600*1000);
+    var y=d.getUTCFullYear(), m=d.getUTCMonth()+1;
+    return {from:y+'-'+pad(m)+'-01', to:(y+1)+'-'+pad(m)+'-01'};
+  }
+  function approveBody(row){ return (row.artist_name||'')+' さんの '+monthLabel(row.month)+'（'+kindLabel(row.kind)+'）を承認しますか？\n'+summary(row)+'\n承認すると、予約ページの空き枠がこの内容に変わります。'; }
+  function firstBody(row){
+    return (row.artist_name||'')+' さんは、まだシフトが1件も登録されていません（今は予約の時間に制限がありません）。\n'
+      +'承認すると、'+monthLabel(row.month)+'はこの内容になり、それ以外の日もシフトが無い日はすべて休み扱いになって、予約ページで選べなくなります。\n'
+      +'ほかの月のシフトも用意できているか確かめてから承認してください。';
+  }
+  function rejectBody(row){ return (row.artist_name||'')+' さんの '+monthLabel(row.month)+'（'+kindLabel(row.kind)+'）を却下しますか？\nシフトと予約の枠は変わりません。スタッフの画面に「却下」と出ます。'; }
+  function overlapText(res){
+    var list=(res&&Array.isArray(res.overlaps))?res.overlaps:[], n=Number(res&&res.overlap_count)||list.length;
+    if(!n) return '';
+    var items=list.slice(0,5).map(function(o){ var w=jstWhen(o.start_at), e=jstWhen(o.end_at); return w+'〜'+(e.split(' ')[1]||''); });
+    return '⚠ 休み・時間外になった枠に予約が '+n+'件 残っています（'+items.join('、')+(n>5?' ほか':'')+'）。予約管理で確かめてください。';
+  }
+  var ERR=[
+    ['first_shift_must_be_month','この人はまだシフトが1件もありません。最初は「ひと月分の提出」から承認してください。'],
+    ['first_shift_needs_confirm','最初の承認には確認が要ります。'],
+    ['not_pending','この申請はすでに処理されたか、取り下げられています。一覧を読み直しました。'],
+    ['forbidden_not_manager','承認・却下できるのは管理者だけです。'],
+    ['not_found','この申請が見つかりません。一覧を読み直しました。']
+  ];
+  function errorText(err){
+    var msg=String((err&&(err.message||err.msg||err.error))||err||'');
+    for(var i=0;i<ERR.length;i++){ if(msg.indexOf(ERR[i][0])>=0) return ERR[i][1]; }
+    return '処理できませんでした。時間をおいてもう一度お試しください。';
+  }
+  return {monthLabel:monthLabel,dayLabel:dayLabel,kindLabel:kindLabel,dayRows:dayRows,summary:summary,pending:pending,jstWhen:jstWhen,
+    listRange:listRange,approveBody:approveBody,firstBody:firstBody,rejectBody:rejectBody,overlapText:overlapText,errorText:errorText};
+})();
+/* SHIFT_SUB_PURE:END */
+
+var SHIFT_SUB_ROWS=[], SHIFT_SUB_SEQ=0;
+async function shiftSubFetch(){
+  await ensureStoreMap();
+  var id=storeIdForSlug(currentStoreSlug());
+  var stores=id?[id]:Object.keys(STORE_MAP||{}).map(function(k){return STORE_MAP[k].id;}).filter(Boolean);
+  var r=SHIFT_SUB_PURE.listRange(Date.now());
+  var lists=await Promise.all(Array.from(new Set(stores)).map(function(s){return sbRpc('list_shift_submissions',{p_store:s,p_from:r.from,p_to:r.to});}));
+  return SHIFT_SUB_PURE.pending([].concat.apply([],lists.map(function(x){return Array.isArray(x)?x:[];})));
+}
+async function setLoadShiftSubmissions(note){
+  var box=document.getElementById('set-shsubs'); if(!box) return;
+  var seq=++SHIFT_SUB_SEQ;
+  try{
+    var rows=await shiftSubFetch();
+    if(seq!==SHIFT_SUB_SEQ||!box.isConnected) return;
+    SHIFT_SUB_ROWS=rows;
+    var P=SHIFT_SUB_PURE;
+    var h='<div class="set-add-h">📨 スタッフから届いたシフト（承認待ち '+esc(rows.length)+'件）</div>'
+      +'<div class="set-msg'+(note?(note.ok?' set-ok':' set-ng'):'')+'" id="set-shsubMsg">'+esc(note?note.text:'')+'</div>';
+    if(!rows.length) h+='<div class="set-ph">承認待ちのシフトはありません。</div>';
+    rows.forEach(function(r){
+      var id=esc(r.id);
+      var days=P.dayRows(r).map(function(d){ return '<tr'+(d.off?' class="shsub-off"':'')+'><th>'+esc(d.label)+'</th><td>'+esc(d.text)+'</td></tr>'; }).join('');
+      h+='<div class="set-card shsub-card" data-shsub="'+id+'">'
+        +'<div class="set-name">'+esc(r.artist_name||'')+' ・ '+esc(P.monthLabel(r.month))+'<span class="set-tag'+(r.kind==='change'?' set-tagng':'')+'">'+esc(P.kindLabel(r.kind))+'</span></div>'
+        +'<div class="set-meta"><span>'+esc(P.summary(r))+'</span><span>届いた日時 '+esc(P.jstWhen(r.submitted_at))+'</span></div>'
+        +(r.note?'<div class="shsub-note">メモ：'+esc(r.note)+'</div>':'')
+        +'<details class="shsub-days"><summary>日ごとの中身を見る</summary><table>'+days+'</table></details>'
+        +'<div class="set-acts"><button type="button" class="set-btn set-primary" data-act="shsubok" data-id="'+id+'">承認する</button>'
+        +'<button type="button" class="set-btn set-danger" data-act="shsubng" data-id="'+id+'">却下する</button></div>'
+        +'</div>';
+    });
+    box.innerHTML=h;
+  }catch(err){
+    if(seq!==SHIFT_SUB_SEQ||!box.isConnected) return;
+    if(setHandleAuth(err)) return;
+    box.innerHTML='<div class="set-add-h">📨 スタッフから届いたシフト</div><div class="set-ph set-err">読み込めませんでした<br>'+esc(setReason(err))+'</div>';
+  }
+}
+async function setDecideShiftSubmission(id, approve, btn){
+  var row=SHIFT_SUB_ROWS.find(function(r){return r.id===id;}); if(!row) return;
+  var P=SHIFT_SUB_PURE, buttons=Array.from(document.querySelectorAll('[data-shsub] [data-id]')).filter(function(b){return b.getAttribute('data-id')===id;});
+  if(buttons.some(function(b){return b.disabled;})) return;
+  if(!(await askConfirm(approve
+      ?{title:'', body:P.approveBody(row), ok:'承認する', cancel:'やめる', danger:false}
+      :{title:'', body:P.rejectBody(row), ok:'却下する', cancel:'やめる', danger:true}))) return;
+  buttons.forEach(function(b){b.disabled=true;});
+  var res, note;
+  try{
+    try{ res=await sbRpc('decide_shift_submission',{p_id:id,p_approve:approve,p_confirm_first:false}); }
+    catch(err){
+      if(!approve || String(err&&err.message||err).indexOf('first_shift_needs_confirm')<0) throw err;
+      if(!(await askConfirm({title:'最初のシフトの承認', body:P.firstBody(row), ok:'わかったうえで承認する', cancel:'やめる', danger:true}))){
+        buttons.forEach(function(b){b.disabled=false;}); return;
+      }
+      res=await sbRpc('decide_shift_submission',{p_id:id,p_approve:true,p_confirm_first:true});
+    }
+    var who=(row.artist_name||'')+' さんの '+P.monthLabel(row.month);
+    if(res&&res.status==='approved'){
+      var warn=P.overlapText(res);
+      note={ok:!warn, text:'✅ '+who+'を承認しました。予約ページの空き枠に反映されています。'+(warn?'\n'+warn:'')};
+    }else if(res&&res.status==='rejected'){
+      note={ok:true, text:'✅ '+who+'を却下しました。'};
+    }else throw Error('結果を確認できません。');
+  }catch(err){
+    if(setHandleAuth(err)) return;
+    note={ok:false, text:'⚠ '+P.errorText(err)};
+  }
+  await setLoadShiftSubmissions(note);
 }
 
 /* HH:MM:SS / HH:MM → HH:MM に正規化（後方互換で残す） */
@@ -10763,6 +10958,8 @@ function setMsg(id, text, ok){
     if (act === 'ssave'){ setSaveStore(b.getAttribute('data-store')); return; }
     if (act === 'confnote_save'){ setSaveConfirmNote(); return; }
     // シフト（カレンダー化／設計：docs/shift-calendar-redesign.md）
+    // シフト提出の承認・却下（管理者だけ。最終の守りは DB の decide_shift_submission）
+    if (act === 'shsubok' || act === 'shsubng'){ setDecideShiftSubmission(b.getAttribute('data-id'), act === 'shsubok', b); return; }
     if (act === 'shtimeoff'){ if (typeof gotoSubtab === 'function') gotoSubtab('resv','showReservations'); return; }
     if (act === 'shedit'){
       if ((shiftState.weeklyDraft!==null||shiftState.dateDraft!==null)&&!await setShiftConfirmDiscard()) return;
