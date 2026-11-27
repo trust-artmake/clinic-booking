@@ -257,7 +257,8 @@ main{max-width:520px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 1
 .conv:hover{background:rgba(255,255,255,.9)}
 .conv.new{background:var(--gold-soft)}
 .av{width:44px;height:44px;border-radius:50%;background:var(--vio-soft);color:var(--vio-deep);display:grid;place-items:center;font-weight:800;font-size:15px;position:relative}
-.av.red::after{content:"";position:absolute;top:1px;right:1px;width:10px;height:10px;border-radius:50%;background:var(--alert);border:2px solid var(--panel)}
+.av .avi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
+.av.red::after{z-index:1;content:"";position:absolute;top:1px;right:1px;width:10px;height:10px;border-radius:50%;background:var(--alert);border:2px solid var(--panel)}
 .conv .pv{font-size:12.5px;color:var(--sub);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv .when{font-size:11.5px;color:var(--sub);font-weight:700;text-align:right;line-height:1.5;white-space:nowrap}
 .conv .when .r{color:var(--alert)}.conv .when .g{color:var(--on)}
@@ -809,6 +810,8 @@ function renderResv(){
   $("resvBody").innerHTML = h;
 }
 function mineToggle(){ return '<button type="button" class="mine-t" data-act="resv-mine" data-val="' + (!S.resvMine) + '" aria-label="だれの予約を出すか（いま：' + (S.resvMine ? "自分の担当" : "全員") + '）">' + (S.resvMine ? "自分の担当" : "全員") + '<svg class="s" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>'; }
+// LINE のプロフィール写真（読めなければ消して、下の頭文字を見せる）
+function picImg(u){ var s = L.safePictureUrl(u); return s ? '<img class="avi" src="' + esc(s) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : ""; }
 function menuIcon(kind){ var k = kind === "lip" ? "lip" : kind === "retouch" ? "retouch" : "brow"; return '<svg class="m ' + k + '" aria-hidden="true"><use href="#m-' + k + '"/></svg>'; }
 // 月のカレンダー（日付の下にメニューの色の点）。small=true は日別の下に出す「月の予約状況」
 function calHtml(byDay, today, small){
@@ -946,7 +949,7 @@ function renderReplyList(){
     h += '<div class="sec"><span>新しい順</span><span class="num">' + rows.length + '人</span></div><div class="list">' + rows.map(function(c){
       var need = c.status === "needs_reply", lit = need && !seen[convKey(c)], nm = L.honor(c.display_name);
       var tail = need ? '<br><span class="r">返事が必要</span>' : (c.status === "done" ? '<br><span class="g">対応完了</span>' : (c.status === "in_progress" ? "<br>対応中" : ""));
-      return '<button type="button" class="conv' + (lit ? " new" : "") + '" data-act="open-conv" data-id="' + esc(c.customer_id) + '" data-key="' + esc(convKey(c)) + '"><span class="av' + (need ? " red" : "") + '">' + esc(nm.slice(0, 1)) + '</span><span style="min-width:0"><span class="nm">' + esc(nm) + '</span><span class="pv" style="display:block">' + esc(c.last_message_preview || "") + '</span></span><span class="when num">' + esc(whenLabel(c.last_message_at || c.sort_at)) + tail + "</span></button>";
+      return '<button type="button" class="conv' + (lit ? " new" : "") + '" data-act="open-conv" data-id="' + esc(c.customer_id) + '" data-key="' + esc(convKey(c)) + '"><span class="av' + (need ? " red" : "") + '">' + esc(Array.from(nm)[0] || "?") + picImg(c.picture_url) + '</span><span style="min-width:0"><span class="nm">' + esc(nm) + '</span><span class="pv" style="display:block">' + esc(c.last_message_preview || "") + '</span></span><span class="when num">' + esc(whenLabel(c.last_message_at || c.sort_at)) + tail + "</span></button>";
     }).join("") + "</div>";
   }
   $("replyBody").innerHTML = h;
@@ -1284,6 +1287,8 @@ document.addEventListener("submit", function(ev){
       .catch(function(e){ $("saleErr").textContent = errOf(e); b3.disabled = false; });
   }
 });
+// プロフィール写真が読めなかったら消す（頭文字が見える）
+document.addEventListener("error", function(ev){ var t = ev.target; if (t && t.classList && t.classList.contains("avi")) t.remove(); }, true);
 $("sheet").addEventListener("close", function(){ SHEET = { type: null, id: null }; disarm(); });
 $("sheet").addEventListener("click", function(ev){ if (ev.target === this) this.close(); });
 
